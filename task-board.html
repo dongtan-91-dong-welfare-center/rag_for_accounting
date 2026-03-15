@@ -1,0 +1,1988 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Workspace</title>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg-deep: #08080f;
+    --bg-base: #0d0d18;
+    --bg-surface: #141425;
+    --bg-elevated: #1a1a30;
+    --bg-card: #1e1e38;
+    --border-subtle: #252545;
+    --border-default: #2e2e55;
+    --border-hover: #6366f1;
+    --text-primary: #eaeaf0;
+    --text-secondary: #9898b0;
+    --text-muted: #5e5e78;
+    --accent-indigo: #6366f1;
+    --accent-violet: #8b5cf6;
+    --accent-cyan: #22d3ee;
+    --accent-amber: #f59e0b;
+    --accent-emerald: #10b981;
+    --accent-rose: #f43f5e;
+    --accent-blue: #3b82f6;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 18px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ═══════════════════════════════════════════
+     LOADING & STATUS
+     ═══════════════════════════════════════════ */
+  .loading-overlay {
+    position: fixed; inset: 0;
+    background: var(--bg-deep);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 300; flex-direction: column; gap: 16px;
+  }
+  .loading-overlay.hidden { display: none; }
+
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border-subtle);
+    border-top-color: var(--accent-indigo);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .setup-banner {
+    background: linear-gradient(135deg, #7f1d1d, #991b1b);
+    color: #fca5a5;
+    padding: 10px 28px;
+    font-size: 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+  }
+  .setup-banner.connected {
+    background: linear-gradient(135deg, #052e22, #064e3b);
+    color: #6ee7b7;
+  }
+  .setup-banner button {
+    padding: 5px 12px; border-radius: var(--radius-sm);
+    border: none; cursor: pointer; font-size: 11px; font-weight: 600;
+    background: rgba(255,255,255,0.14); color: inherit;
+  }
+  .setup-banner button:hover { background: rgba(255,255,255,0.22); }
+
+  /* ═══════════════════════════════════════════
+     TOP NAV
+     ═══════════════════════════════════════════ */
+  .top-nav {
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0 28px;
+    display: flex; align-items: stretch; justify-content: space-between;
+    height: 54px;
+    position: sticky; top: 0; z-index: 50;
+  }
+
+  .nav-left {
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .nav-brand {
+    font-size: 15px; font-weight: 700; color: #fff;
+    display: flex; align-items: center; gap: 8px;
+    margin-right: 20px; letter-spacing: -0.3px;
+  }
+
+  .nav-brand-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: #fff;
+  }
+
+  .nav-tab {
+    padding: 0 16px; height: 100%;
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; font-weight: 500;
+    color: var(--text-muted);
+    border: none; background: none; cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .nav-tab:hover { color: var(--text-secondary); }
+  .nav-tab.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent-indigo);
+  }
+  .nav-tab .tab-icon {
+    font-size: 15px; line-height: 1;
+  }
+  .nav-tab .tab-badge {
+    font-size: 10px; font-weight: 600;
+    background: var(--accent-indigo);
+    color: #fff; padding: 1px 6px;
+    border-radius: 8px; min-width: 18px;
+    text-align: center;
+  }
+
+  .nav-right {
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  .online-users {
+    display: flex; align-items: center;
+  }
+  .online-dot {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #fff;
+    border: 2px solid var(--bg-base);
+    margin-left: -5px;
+  }
+  .online-label {
+    font-size: 10px; color: var(--text-muted); margin-left: 6px;
+  }
+
+  /* ═══════════════════════════════════════════
+     SECTION PANELS
+     ═══════════════════════════════════════════ */
+  .section-panel { display: none; }
+  .section-panel.active { display: block; }
+
+  /* ═══════════════════════════════════════════
+     SHARED: BUTTONS, FORMS, MODALS
+     ═══════════════════════════════════════════ */
+  .btn {
+    padding: 7px 15px; border-radius: var(--radius-sm);
+    border: none; cursor: pointer; font-size: 12px; font-weight: 500;
+    font-family: inherit; transition: all 0.15s; display: inline-flex;
+    align-items: center; gap: 5px;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet));
+    color: #fff;
+  }
+  .btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+  .btn-secondary {
+    background: var(--bg-card); color: var(--text-secondary);
+    border: 1px solid var(--border-default);
+  }
+  .btn-secondary:hover { background: var(--border-default); color: var(--text-primary); }
+  .btn-danger { background: #dc2626; color: #fff; }
+  .btn-danger:hover { opacity: 0.88; }
+  .btn-ghost {
+    background: none; color: var(--text-muted); border: none; padding: 6px 10px;
+  }
+  .btn-ghost:hover { color: var(--text-primary); }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .modal-overlay.active { display: flex; }
+
+  .modal {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    padding: 26px; width: 480px;
+    max-width: 92vw; max-height: 90vh;
+    overflow-y: auto;
+    animation: modalIn 0.2s ease-out;
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: translateY(12px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .modal h2 {
+    font-size: 17px; margin-bottom: 18px; color: #fff; font-weight: 600;
+  }
+
+  .form-group { margin-bottom: 14px; }
+  .form-group label {
+    display: block; font-size: 12px; color: var(--text-secondary);
+    margin-bottom: 5px; font-weight: 500;
+  }
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    width: 100%; padding: 9px 12px;
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-md); color: var(--text-primary);
+    font-size: 13px; font-family: inherit; outline: none;
+    transition: border-color 0.15s;
+  }
+  .form-group input:focus,
+  .form-group textarea:focus,
+  .form-group select:focus {
+    border-color: var(--accent-indigo);
+  }
+  .form-group textarea { resize: vertical; min-height: 72px; }
+
+  .form-actions {
+    display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px;
+  }
+
+  .search-box {
+    padding: 6px 12px;
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm); color: var(--text-primary);
+    font-size: 12px; outline: none; font-family: inherit;
+  }
+  .search-box:focus { border-color: var(--accent-indigo); }
+
+  .filter-select {
+    padding: 5px 10px;
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm); color: var(--text-secondary);
+    font-size: 11px; outline: none; font-family: inherit;
+  }
+
+  /* ═══════════════════════════════════════════
+     TASK BOARD
+     ═══════════════════════════════════════════ */
+  .task-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 28px; background: var(--bg-base);
+    border-bottom: 1px solid var(--border-subtle);
+    flex-wrap: wrap; gap: 8px;
+  }
+  .task-toolbar-left { display: flex; align-items: center; gap: 8px; }
+  .task-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  .task-stats {
+    display: flex; gap: 16px; font-size: 12px; color: var(--text-muted);
+  }
+  .task-stats strong { color: var(--text-primary); }
+
+  .board {
+    display: flex; gap: 16px; padding: 20px 28px;
+    overflow-x: auto; min-height: calc(100vh - 170px);
+    align-items: flex-start;
+  }
+
+  .column {
+    min-width: 280px; max-width: 280px;
+    background: var(--bg-surface);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .column-header {
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .column-title {
+    font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .column-count {
+    background: var(--border-subtle); color: var(--text-muted);
+    font-size: 10px; padding: 1px 7px; border-radius: 8px;
+    font-weight: 600;
+  }
+  .column-dot {
+    width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+  }
+  .dot-todo { background: #6b7280; }
+  .dot-progress { background: var(--accent-blue); }
+  .dot-review { background: var(--accent-amber); }
+  .dot-done { background: var(--accent-emerald); }
+
+  .column-body {
+    padding: 10px; min-height: 80px;
+  }
+  .column-body.drag-over {
+    background: rgba(99,102,241,0.04);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-md); padding: 12px;
+    margin-bottom: 8px; cursor: grab; transition: all 0.15s;
+    position: relative;
+  }
+  .card:hover {
+    border-color: var(--accent-indigo);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  }
+  .card.dragging { opacity: 0.4; transform: rotate(1.5deg); }
+
+  .card-id {
+    font-size: 10px; color: var(--accent-indigo); font-weight: 600;
+    margin-bottom: 4px; font-family: 'JetBrains Mono', monospace;
+  }
+  .card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; line-height: 1.4; }
+  .card-desc { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.5; }
+  .card-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 6px; flex-wrap: wrap;
+  }
+  .card-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  .tag {
+    font-size: 9px; padding: 2px 7px; border-radius: 4px; font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+  .tag-bug { background: #7f1d1d; color: #fca5a5; }
+  .tag-feature { background: #1e3a5f; color: #93c5fd; }
+  .tag-improve { background: #365314; color: #bef264; }
+  .tag-docs { background: #4a1d96; color: #c4b5fd; }
+  .tag-urgent { background: #92400e; color: #fcd34d; }
+
+  .card-priority { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+  .priority-high { background: #7f1d1d; color: #fca5a5; }
+  .priority-medium { background: #78350f; color: #fcd34d; }
+  .priority-low { background: #1e3a5f; color: #93c5fd; }
+
+  .card-actions {
+    position: absolute; top: 8px; right: 8px;
+    display: none; gap: 3px;
+  }
+  .card:hover .card-actions { display: flex; }
+  .card-actions button {
+    width: 22px; height: 22px; border-radius: 5px; border: none;
+    cursor: pointer; font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--border-subtle); color: var(--text-muted);
+    transition: all 0.12s;
+  }
+  .card-actions button:hover { background: var(--border-default); color: #fff; }
+  .card-actions button.delete-btn:hover { background: #dc2626; }
+
+  .card-date { font-size: 10px; color: var(--text-muted); }
+
+  .add-card-btn {
+    width: 100%; padding: 8px; background: transparent;
+    border: 1px dashed var(--border-default); border-radius: var(--radius-sm);
+    color: var(--text-muted); cursor: pointer; font-size: 12px;
+    transition: all 0.15s; font-family: inherit;
+  }
+  .add-card-btn:hover {
+    border-color: var(--accent-indigo); color: var(--accent-indigo);
+    background: rgba(99,102,241,0.04);
+  }
+
+  /* ═══════════════════════════════════════════
+     BRAINSTORMING
+     ═══════════════════════════════════════════ */
+  .brain-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 28px; background: var(--bg-base);
+    border-bottom: 1px solid var(--border-subtle);
+    flex-wrap: wrap; gap: 8px;
+  }
+  .brain-toolbar-left { display: flex; align-items: center; gap: 8px; }
+  .brain-toolbar-right { display: flex; align-items: center; gap: 8px; }
+
+  .brain-stats {
+    font-size: 12px; color: var(--text-muted);
+  }
+  .brain-stats strong { color: var(--text-primary); }
+
+  .brain-board {
+    padding: 24px 28px;
+    min-height: calc(100vh - 170px);
+  }
+
+  .brain-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+  }
+
+  .idea-card {
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    position: relative;
+    transition: all 0.2s;
+    cursor: default;
+    border: 1px solid transparent;
+    min-height: 120px;
+    display: flex; flex-direction: column;
+  }
+  .idea-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.3);
+  }
+
+  /* Sticky note colors */
+  .idea-yellow { background: #433b1a; border-color: #5c4f1f; }
+  .idea-blue { background: #1a2a43; border-color: #1f3a5c; }
+  .idea-green { background: #1a3b2a; border-color: #1f5c3a; }
+  .idea-pink { background: #3b1a30; border-color: #5c1f48; }
+  .idea-purple { background: #2a1a43; border-color: #3a1f5c; }
+  .idea-orange { background: #3b2a1a; border-color: #5c3a1f; }
+
+  .idea-author {
+    font-size: 10px; color: rgba(255,255,255,0.45);
+    margin-bottom: 8px; font-weight: 500;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .idea-author-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    display: inline-block;
+  }
+
+  .idea-text {
+    font-size: 14px; line-height: 1.55; color: rgba(255,255,255,0.88);
+    flex: 1; word-break: break-word;
+  }
+
+  .idea-category {
+    font-size: 9px; padding: 2px 8px; border-radius: 4px;
+    font-weight: 600; display: inline-block;
+    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6);
+    margin-top: 10px;
+  }
+
+  .idea-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .idea-vote-btn {
+    background: rgba(255,255,255,0.08); border: none;
+    padding: 4px 10px; border-radius: 12px;
+    color: rgba(255,255,255,0.5); cursor: pointer;
+    font-size: 12px; font-family: inherit;
+    display: flex; align-items: center; gap: 4px;
+    transition: all 0.15s;
+  }
+  .idea-vote-btn:hover {
+    background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.8);
+  }
+  .idea-vote-btn.voted {
+    background: rgba(99,102,241,0.25); color: var(--accent-indigo);
+  }
+
+  .idea-actions-row {
+    display: flex; gap: 4px;
+  }
+  .idea-action-btn {
+    width: 24px; height: 24px; border-radius: 6px;
+    border: none; cursor: pointer; font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.35);
+    transition: all 0.12s;
+  }
+  .idea-action-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.7); }
+  .idea-action-btn.del-btn:hover { background: rgba(220,38,38,0.3); color: #fca5a5; }
+
+  .idea-add-card {
+    border: 2px dashed var(--border-default);
+    border-radius: var(--radius-lg);
+    min-height: 120px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text-muted);
+    font-size: 13px; transition: all 0.15s;
+    background: transparent;
+    font-family: inherit; width: 100%;
+  }
+  .idea-add-card:hover {
+    border-color: var(--accent-indigo); color: var(--accent-indigo);
+    background: rgba(99,102,241,0.03);
+  }
+
+  /* ═══════════════════════════════════════════
+     MEETING NOTES
+     ═══════════════════════════════════════════ */
+  .meeting-layout {
+    display: flex; min-height: calc(100vh - 170px);
+  }
+
+  .meeting-sidebar {
+    width: 300px; min-width: 300px;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  .meeting-sidebar-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+
+  .meeting-sidebar-actions {
+    display: flex; gap: 6px;
+  }
+
+  .meeting-list {
+    flex: 1; overflow-y: auto; padding: 8px;
+  }
+
+  .meeting-list-item {
+    padding: 12px; border-radius: var(--radius-md);
+    cursor: pointer; transition: all 0.12s;
+    margin-bottom: 4px; border: 1px solid transparent;
+  }
+  .meeting-list-item:hover {
+    background: var(--bg-surface);
+  }
+  .meeting-list-item.active {
+    background: var(--bg-elevated);
+    border-color: var(--accent-indigo);
+  }
+  .meeting-list-item-title {
+    font-size: 13px; font-weight: 500; margin-bottom: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .meeting-list-item-meta {
+    font-size: 11px; color: var(--text-muted);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .meeting-list-item-meta .attendee-count {
+    background: var(--border-subtle); padding: 1px 6px;
+    border-radius: 6px; font-size: 10px;
+  }
+
+  .meeting-content {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  .meeting-empty {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; color: var(--text-muted);
+    font-size: 14px;
+  }
+  .meeting-empty-icon { font-size: 48px; opacity: 0.3; }
+
+  .meeting-detail {
+    flex: 1; overflow-y: auto; padding: 24px 32px;
+    display: none;
+  }
+  .meeting-detail.active { display: block; }
+
+  .meeting-detail-header {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .meeting-detail-title {
+    font-size: 22px; font-weight: 700; color: #fff;
+    margin-bottom: 8px;
+  }
+  .meeting-detail-meta {
+    display: flex; gap: 16px; font-size: 12px; color: var(--text-muted);
+    flex-wrap: wrap; align-items: center;
+  }
+  .meeting-detail-meta span {
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  .meeting-section {
+    margin-bottom: 24px;
+  }
+  .meeting-section-title {
+    font-size: 13px; font-weight: 600; color: var(--text-secondary);
+    margin-bottom: 10px; display: flex; align-items: center; gap: 7px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .meeting-section-title .sec-icon {
+    width: 20px; height: 20px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+  }
+
+  .meeting-attendees {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .attendee-chip {
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    padding: 4px 12px; border-radius: 14px; font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .agenda-list { list-style: none; }
+  .agenda-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px; background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md); margin-bottom: 6px;
+    font-size: 13px; line-height: 1.5;
+    position: relative; group: true;
+  }
+  .agenda-item:hover { border-color: var(--border-hover); }
+  .agenda-bullet {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent-indigo); flex-shrink: 0;
+    margin-top: 6px;
+  }
+  .agenda-item-text { flex: 1; }
+  .agenda-item-del {
+    width: 20px; height: 20px; border-radius: 4px;
+    border: none; background: transparent; color: var(--text-muted);
+    cursor: pointer; font-size: 12px; display: flex;
+    align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.12s;
+  }
+  .agenda-item:hover .agenda-item-del { opacity: 1; }
+  .agenda-item-del:hover { color: var(--accent-rose); }
+
+  .decision-list { list-style: none; }
+  .decision-item {
+    padding: 10px 12px; background: rgba(16,185,129,0.06);
+    border: 1px solid rgba(16,185,129,0.15);
+    border-radius: var(--radius-md); margin-bottom: 6px;
+    font-size: 13px; line-height: 1.5;
+    display: flex; align-items: flex-start; gap: 8px;
+    position: relative;
+  }
+  .decision-item:hover { border-color: rgba(16,185,129,0.3); }
+  .decision-check {
+    color: var(--accent-emerald); font-size: 14px;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .decision-item-text { flex: 1; }
+  .decision-item-del {
+    width: 20px; height: 20px; border-radius: 4px;
+    border: none; background: transparent; color: var(--text-muted);
+    cursor: pointer; font-size: 12px; display: flex;
+    align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.12s;
+  }
+  .decision-item:hover .decision-item-del { opacity: 1; }
+  .decision-item-del:hover { color: var(--accent-rose); }
+
+  .action-list { list-style: none; }
+  .action-item {
+    padding: 10px 12px; background: rgba(99,102,241,0.06);
+    border: 1px solid rgba(99,102,241,0.15);
+    border-radius: var(--radius-md); margin-bottom: 6px;
+    font-size: 13px; line-height: 1.5;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .action-item:hover { border-color: rgba(99,102,241,0.3); }
+  .action-item-text { flex: 1; }
+  .action-item-assignee {
+    font-size: 10px; background: var(--bg-card);
+    padding: 2px 8px; border-radius: 8px;
+    color: var(--text-muted); white-space: nowrap;
+  }
+  .action-to-task-btn {
+    font-size: 10px; padding: 3px 8px;
+    border-radius: 6px; border: none; cursor: pointer;
+    background: var(--accent-indigo); color: #fff;
+    font-family: inherit; font-weight: 500;
+    opacity: 0; transition: opacity 0.12s;
+  }
+  .action-item:hover .action-to-task-btn { opacity: 1; }
+  .action-item-del {
+    width: 20px; height: 20px; border-radius: 4px;
+    border: none; background: transparent; color: var(--text-muted);
+    cursor: pointer; font-size: 12px; display: flex;
+    align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.12s;
+  }
+  .action-item:hover .action-item-del { opacity: 1; }
+  .action-item-del:hover { color: var(--accent-rose); }
+
+  .inline-add {
+    display: flex; gap: 6px; margin-top: 6px;
+  }
+  .inline-add input {
+    flex: 1; padding: 8px 10px;
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm); color: var(--text-primary);
+    font-size: 12px; outline: none; font-family: inherit;
+  }
+  .inline-add input:focus { border-color: var(--accent-indigo); }
+  .inline-add button {
+    padding: 8px 14px; background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm); color: var(--text-secondary);
+    cursor: pointer; font-size: 12px; font-family: inherit;
+    transition: all 0.12s;
+  }
+  .inline-add button:hover { background: var(--border-default); color: var(--text-primary); }
+
+  .meeting-notes-area {
+    width: 100%; min-height: 100px; padding: 12px;
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-md); color: var(--text-primary);
+    font-size: 13px; line-height: 1.6; font-family: inherit;
+    resize: vertical; outline: none;
+  }
+  .meeting-notes-area:focus { border-color: var(--accent-indigo); }
+
+  .meeting-detail-actions {
+    display: flex; gap: 8px; margin-top: 20px;
+    padding-top: 16px; border-top: 1px solid var(--border-subtle);
+  }
+
+  /* Setup Modal */
+  .setup-steps {
+    font-size: 12px; line-height: 1.8; color: var(--text-secondary);
+  }
+  .setup-steps ol { padding-left: 18px; margin: 10px 0; }
+  .setup-steps li { margin-bottom: 6px; }
+  .setup-steps code {
+    background: var(--bg-card); padding: 1px 5px;
+    border-radius: 3px; font-size: 11px; color: #c4b5fd;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .config-input {
+    width: 100%; padding: 10px;
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-md); color: var(--text-primary);
+    font-size: 11px; font-family: 'JetBrains Mono', monospace;
+    min-height: 160px; resize: vertical; outline: none;
+  }
+  .config-input:focus { border-color: var(--accent-indigo); }
+
+  /* Footer */
+  .footer-info {
+    font-size: 10px; color: var(--text-muted);
+    padding: 8px 28px; text-align: center;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-deep);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-default); }
+
+  /* Animations */
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .fade-in { animation: fadeInUp 0.25s ease-out; }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div style="color:var(--text-muted);font-size:12px;">Connecting...</div>
+</div>
+
+<!-- Status Banner -->
+<div class="setup-banner" id="statusBanner">
+  <span id="statusText">Firebase not connected</span>
+  <button onclick="openSetupModal()">Setup</button>
+</div>
+
+<!-- Top Navigation -->
+<nav class="top-nav">
+  <div class="nav-left">
+    <div class="nav-brand">
+      <div class="nav-brand-icon">W</div>
+      Team Workspace
+    </div>
+    <button class="nav-tab active" data-tab="tasks" onclick="switchTab('tasks')">
+      <span class="tab-icon">&#9744;</span>
+      Tasks
+      <span class="tab-badge" id="taskBadge">0</span>
+    </button>
+    <button class="nav-tab" data-tab="brain" onclick="switchTab('brain')">
+      <span class="tab-icon">&#9889;</span>
+      Brainstorm
+      <span class="tab-badge" id="brainBadge">0</span>
+    </button>
+    <button class="nav-tab" data-tab="meeting" onclick="switchTab('meeting')">
+      <span class="tab-icon">&#9998;</span>
+      Meeting
+      <span class="tab-badge" id="meetingBadge">0</span>
+    </button>
+  </div>
+  <div class="nav-right">
+    <div class="online-users" id="onlineUsers"></div>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════
+     TASKS SECTION
+     ═══════════════════════════════════════════ -->
+<div class="section-panel active" id="panelTasks">
+  <div class="task-toolbar">
+    <div class="task-toolbar-left">
+      <div class="task-stats" id="taskStats"></div>
+    </div>
+    <div class="task-toolbar-right">
+      <input type="text" class="search-box" id="searchInput" placeholder="Search..." oninput="renderBoard()" style="width:160px;">
+      <select class="filter-select" id="filterTag" onchange="renderBoard()">
+        <option value="">All Tags</option>
+        <option value="bug">Bug</option>
+        <option value="feature">Feature</option>
+        <option value="improve">Improve</option>
+        <option value="docs">Docs</option>
+        <option value="urgent">Urgent</option>
+      </select>
+      <select class="filter-select" id="filterPriority" onchange="renderBoard()">
+        <option value="">All Priority</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="exportTasks()">Export</button>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('importFile').click()">Import</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importTasks(event)">
+      <button class="btn btn-primary btn-sm" onclick="openTaskModal()">+ New Task</button>
+    </div>
+  </div>
+  <div class="board" id="board"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     BRAINSTORMING SECTION
+     ═══════════════════════════════════════════ -->
+<div class="section-panel" id="panelBrain">
+  <div class="brain-toolbar">
+    <div class="brain-toolbar-left">
+      <span class="brain-stats" id="brainStats"></span>
+    </div>
+    <div class="brain-toolbar-right">
+      <input type="text" class="search-box" id="brainSearch" placeholder="Search ideas..." oninput="renderBrainBoard()" style="width:160px;">
+      <select class="filter-select" id="brainCatFilter" onchange="renderBrainBoard()">
+        <option value="">All Categories</option>
+        <option value="idea">Idea</option>
+        <option value="problem">Problem</option>
+        <option value="solution">Solution</option>
+        <option value="question">Question</option>
+        <option value="resource">Resource</option>
+      </select>
+      <select class="filter-select" id="brainSortFilter" onchange="renderBrainBoard()">
+        <option value="newest">Newest</option>
+        <option value="votes">Most Votes</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="openIdeaModal()">+ New Idea</button>
+    </div>
+  </div>
+  <div class="brain-board">
+    <div class="brain-grid" id="brainGrid"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     MEETING SECTION
+     ═══════════════════════════════════════════ -->
+<div class="section-panel" id="panelMeeting">
+  <div class="meeting-layout">
+    <div class="meeting-sidebar">
+      <div class="meeting-sidebar-header">
+        <div class="meeting-sidebar-actions">
+          <input type="text" class="search-box" id="meetingSearch" placeholder="Search meetings..." oninput="renderMeetingList()" style="flex:1;">
+          <button class="btn btn-primary btn-sm" onclick="openMeetingModal()">+ New</button>
+        </div>
+      </div>
+      <div class="meeting-list" id="meetingList"></div>
+    </div>
+    <div class="meeting-content">
+      <div class="meeting-empty" id="meetingEmpty">
+        <div class="meeting-empty-icon">&#9998;</div>
+        <div>Select a meeting or create a new one</div>
+      </div>
+      <div class="meeting-detail" id="meetingDetail"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="footer-info">
+  Real-time sync &mdash; all changes are instantly shared with your team
+</div>
+
+<!-- ═══════════════════════════════════════════
+     MODALS
+     ═══════════════════════════════════════════ -->
+
+<!-- Task Modal -->
+<div class="modal-overlay" id="taskModalOverlay" onclick="if(event.target===this)closeTaskModal()">
+  <div class="modal">
+    <h2 id="taskModalTitle">New Task</h2>
+    <input type="hidden" id="editTaskId">
+    <div class="form-group">
+      <label>Title *</label>
+      <input type="text" id="taskTitle" placeholder="Task title">
+    </div>
+    <div class="form-group">
+      <label>Description</label>
+      <textarea id="taskDesc" placeholder="Optional description"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <div class="form-group" style="flex:1;">
+        <label>Tag</label>
+        <select id="taskTag">
+          <option value="">None</option>
+          <option value="bug">Bug</option>
+          <option value="feature">Feature</option>
+          <option value="improve">Improve</option>
+          <option value="docs">Docs</option>
+          <option value="urgent">Urgent</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>Priority</label>
+        <select id="taskPriority">
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <div class="form-group" style="flex:1;">
+        <label>Assignee</label>
+        <input type="text" id="taskAssignee" placeholder="Name (optional)">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>Status</label>
+        <select id="taskStatus">
+          <option value="todo">To Do</option>
+          <option value="progress">In Progress</option>
+          <option value="review">Review</option>
+          <option value="done">Done</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeTaskModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTask()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Idea Modal -->
+<div class="modal-overlay" id="ideaModalOverlay" onclick="if(event.target===this)closeIdeaModal()">
+  <div class="modal">
+    <h2 id="ideaModalTitle">New Idea</h2>
+    <input type="hidden" id="editIdeaKey">
+    <div class="form-group">
+      <label>Idea *</label>
+      <textarea id="ideaText" placeholder="Share your idea..." style="min-height:100px;"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <div class="form-group" style="flex:1;">
+        <label>Category</label>
+        <select id="ideaCategory">
+          <option value="idea">Idea</option>
+          <option value="problem">Problem</option>
+          <option value="solution">Solution</option>
+          <option value="question">Question</option>
+          <option value="resource">Resource</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>Color</label>
+        <select id="ideaColor">
+          <option value="yellow">Yellow</option>
+          <option value="blue">Blue</option>
+          <option value="green">Green</option>
+          <option value="pink">Pink</option>
+          <option value="purple">Purple</option>
+          <option value="orange">Orange</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeIdeaModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveIdea()">Post</button>
+    </div>
+  </div>
+</div>
+
+<!-- Meeting Modal -->
+<div class="modal-overlay" id="meetingModalOverlay" onclick="if(event.target===this)closeMeetingModal()">
+  <div class="modal">
+    <h2>New Meeting</h2>
+    <div class="form-group">
+      <label>Title *</label>
+      <input type="text" id="meetingTitle" placeholder="Meeting title">
+    </div>
+    <div style="display:flex;gap:10px;">
+      <div class="form-group" style="flex:1;">
+        <label>Date</label>
+        <input type="date" id="meetingDate">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>Time</label>
+        <input type="time" id="meetingTime">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Attendees (comma separated)</label>
+      <input type="text" id="meetingAttendees" placeholder="e.g. Alice, Bob, Charlie">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeMeetingModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="createMeeting()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Setup Modal -->
+<div class="modal-overlay" id="setupModalOverlay" onclick="if(event.target===this)closeSetupModal()">
+  <div class="modal" style="width:540px;">
+    <h2>Firebase Setup</h2>
+    <div class="setup-steps">
+      <ol>
+        <li><a href="https://console.firebase.google.com/" target="_blank" style="color:#818cf8;">Firebase Console</a> &rarr; Create new project (free)</li>
+        <li><strong>Realtime Database</strong> &rarr; Create &rarr; <strong>Test mode</strong></li>
+        <li><strong>Authentication</strong> &rarr; Sign-in method &rarr; <strong>Anonymous</strong> enable</li>
+        <li>Project settings &rarr; Web app (<code>&lt;/&gt;</code>) &rarr; Copy <strong>firebaseConfig</strong></li>
+      </ol>
+      <p style="margin-bottom:8px;">Paste your <code>firebaseConfig</code> object below:</p>
+    </div>
+    <textarea class="config-input" id="configInput" placeholder='{
+  apiKey: "AIza...",
+  authDomain: "your-project.firebaseapp.com",
+  databaseURL: "https://your-project-default-rtdb.firebaseio.com",
+  projectId: "your-project",
+  storageBucket: "your-project.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123:web:abc123"
+}'></textarea>
+    <div class="form-group" style="margin-top:14px;">
+      <label>Nickname (shown on board)</label>
+      <input type="text" id="userNickname" placeholder="e.g. John" value="">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeSetupModal()">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="clearConfig()" style="margin-right:auto;">Reset</button>
+      <button class="btn btn-primary" onclick="applyConfig()">Connect</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// CONSTANTS & STATE
+// ═══════════════════════════════════════════════════════════════
+const COLUMNS = [
+  { id: 'todo',     name: 'To Do',       dot: 'dot-todo' },
+  { id: 'progress', name: 'In Progress', dot: 'dot-progress' },
+  { id: 'review',   name: 'Review',      dot: 'dot-review' },
+  { id: 'done',     name: 'Done',        dot: 'dot-done' },
+];
+
+const CONFIG_KEY = 'task-board-firebase-config';
+const NICK_KEY = 'task-board-nickname';
+const COLORS = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#ef4444','#8b5cf6','#14b8a6'];
+
+const IDEA_COLORS = {
+  yellow: 'idea-yellow', blue: 'idea-blue', green: 'idea-green',
+  pink: 'idea-pink', purple: 'idea-purple', orange: 'idea-orange',
+};
+
+const CATEGORY_LABELS = {
+  idea: 'Idea', problem: 'Problem', solution: 'Solution',
+  question: 'Question', resource: 'Resource',
+};
+
+let db = null;
+let tasksRef = null;
+let ideasRef = null;
+let meetingsRef = null;
+let presenceRef = null;
+let currentTasks = [];
+let currentIdeas = [];
+let currentMeetings = [];
+let isConnected = false;
+let currentUid = null;
+let activeTab = 'tasks';
+let activeMeetingKey = null;
+
+// ═══════════════════════════════════════════════════════════════
+// TAB SWITCHING
+// ═══════════════════════════════════════════════════════════════
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
+  const map = { tasks: 'panelTasks', brain: 'panelBrain', meeting: 'panelMeeting' };
+  document.getElementById(map[tab]).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FIREBASE INIT
+// ═══════════════════════════════════════════════════════════════
+function initFirebase(config) {
+  try {
+    if (firebase.apps.length) firebase.app().delete().then(() => startFirebase(config));
+    else startFirebase(config);
+  } catch (e) {
+    showStatus(false, 'Firebase init failed: ' + e.message);
+    hideLoading();
+  }
+}
+
+function startFirebase(config) {
+  firebase.initializeApp(config);
+  db = firebase.database();
+  tasksRef = db.ref('tasks');
+  ideasRef = db.ref('ideas');
+  meetingsRef = db.ref('meetings');
+  presenceRef = db.ref('presence');
+
+  firebase.auth().signInAnonymously().then((cred) => {
+    currentUid = cred.user.uid;
+    setupPresence();
+    listenTasks();
+    listenIdeas();
+    listenMeetings();
+    showStatus(true, 'Connected');
+    isConnected = true;
+    hideLoading();
+  }).catch(e => {
+    showStatus(false, 'Auth failed — enable Anonymous sign-in');
+    hideLoading();
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PRESENCE
+// ═══════════════════════════════════════════════════════════════
+function setupPresence() {
+  const nick = localStorage.getItem(NICK_KEY) || 'Anonymous';
+  const myRef = presenceRef.child(currentUid);
+  const color = COLORS[Math.abs(hashCode(currentUid)) % COLORS.length];
+  myRef.set({ nick, color, ts: firebase.database.ServerValue.TIMESTAMP });
+  myRef.onDisconnect().remove();
+  presenceRef.on('value', snap => {
+    renderOnlineUsers(snap.val() || {});
+  });
+}
+
+function hashCode(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+function getNick() {
+  return localStorage.getItem(NICK_KEY) || 'Anonymous';
+}
+
+function renderOnlineUsers(users) {
+  const c = document.getElementById('onlineUsers');
+  const entries = Object.values(users);
+  let html = entries.slice(0, 5).map(u =>
+    `<div class="online-dot" style="background:${escHtml(u.color)}" title="${escHtml(u.nick)}">${escHtml(u.nick[0])}</div>`
+  ).join('');
+  if (entries.length > 5) html += `<div class="online-dot" style="background:#444">+${entries.length - 5}</div>`;
+  html += `<span class="online-label">${entries.length} online</span>`;
+  c.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REALTIME LISTENERS
+// ═══════════════════════════════════════════════════════════════
+function listenTasks() {
+  tasksRef.on('value', snap => {
+    const data = snap.val() || {};
+    currentTasks = Object.keys(data).map(k => ({ _key: k, ...data[k] }));
+    document.getElementById('taskBadge').textContent = currentTasks.length;
+    renderBoard();
+  });
+}
+
+function listenIdeas() {
+  ideasRef.on('value', snap => {
+    const data = snap.val() || {};
+    currentIdeas = Object.keys(data).map(k => ({ _key: k, ...data[k] }));
+    document.getElementById('brainBadge').textContent = currentIdeas.length;
+    renderBrainBoard();
+  });
+}
+
+function listenMeetings() {
+  meetingsRef.on('value', snap => {
+    const data = snap.val() || {};
+    currentMeetings = Object.keys(data).map(k => ({ _key: k, ...data[k] }));
+    document.getElementById('meetingBadge').textContent = currentMeetings.length;
+    renderMeetingList();
+    if (activeMeetingKey) renderMeetingDetail(activeMeetingKey);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UTILITY
+// ═══════════════════════════════════════════════════════════════
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function genTaskId() {
+  const max = currentTasks.reduce((m, t) => {
+    const n = parseInt((t.id || '').replace('TASK-', ''), 10) || 0;
+    return n > m ? n : m;
+  }, 0);
+  return 'TASK-' + (max + 1);
+}
+
+function now() { return new Date().toISOString(); }
+
+// ═══════════════════════════════════════════════════════════════
+// TASK BOARD
+// ═══════════════════════════════════════════════════════════════
+function getFilteredTasks() {
+  let tasks = currentTasks;
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const tagF = document.getElementById('filterTag').value;
+  const prioF = document.getElementById('filterPriority').value;
+  if (search) {
+    tasks = tasks.filter(t =>
+      (t.title||'').toLowerCase().includes(search) ||
+      (t.desc||'').toLowerCase().includes(search) ||
+      (t.id||'').toLowerCase().includes(search) ||
+      (t.assignee||'').toLowerCase().includes(search)
+    );
+  }
+  if (tagF) tasks = tasks.filter(t => t.tag === tagF);
+  if (prioF) tasks = tasks.filter(t => t.priority === prioF);
+  return tasks;
+}
+
+function renderBoard() {
+  const tasks = getFilteredTasks();
+  const all = currentTasks;
+  const board = document.getElementById('board');
+  const stats = document.getElementById('taskStats');
+
+  stats.innerHTML = `
+    <span>Total: <strong>${all.length}</strong></span>
+    <span>To Do: <strong>${all.filter(t=>t.status==='todo').length}</strong></span>
+    <span>Progress: <strong>${all.filter(t=>t.status==='progress').length}</strong></span>
+    <span>Review: <strong>${all.filter(t=>t.status==='review').length}</strong></span>
+    <span>Done: <strong>${all.filter(t=>t.status==='done').length}</strong></span>
+  `;
+
+  board.innerHTML = COLUMNS.map(col => {
+    const colTasks = tasks.filter(t => t.status === col.id)
+      .sort((a, b) => {
+        const po = { high: 0, medium: 1, low: 2 };
+        return (po[a.priority]||1) - (po[b.priority]||1);
+      });
+    return `
+      <div class="column">
+        <div class="column-header">
+          <div class="column-title">
+            <span class="column-dot ${col.dot}"></span>
+            ${col.name}
+            <span class="column-count">${colTasks.length}</span>
+          </div>
+        </div>
+        <div class="column-body" data-status="${col.id}"
+             ondragover="event.preventDefault();this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="dropCard(event,'${col.id}');this.classList.remove('drag-over')">
+          ${colTasks.map(renderCard).join('')}
+          <button class="add-card-btn" onclick="openTaskModal('${col.id}')">+ Add</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCard(t) {
+  const tagLabel = { bug:'Bug', feature:'Feature', improve:'Improve', docs:'Docs', urgent:'Urgent' };
+  const prioLabel = { high:'High', medium:'Med', low:'Low' };
+  const date = t.created ? new Date(t.created).toLocaleDateString('ko-KR', { month:'short', day:'numeric' }) : '';
+  const key = t._key || t.id;
+  return `
+    <div class="card" draggable="true" data-key="${escHtml(key)}"
+         ondragstart="event.dataTransfer.setData('text/plain','${escHtml(key)}');this.classList.add('dragging')"
+         ondragend="this.classList.remove('dragging')">
+      <div class="card-actions">
+        <button onclick="editTask('${escHtml(key)}')" title="Edit">&#9998;</button>
+        <button class="delete-btn" onclick="deleteTask('${escHtml(key)}')" title="Delete">&times;</button>
+      </div>
+      <div class="card-id">${escHtml(t.id||'')}</div>
+      <div class="card-title">${escHtml(t.title||'')}</div>
+      ${t.desc ? `<div class="card-desc">${escHtml(t.desc)}</div>` : ''}
+      <div class="card-meta">
+        <div class="card-tags">
+          ${t.tag ? `<span class="tag tag-${t.tag}">${tagLabel[t.tag]||t.tag}</span>` : ''}
+          <span class="card-priority priority-${t.priority||'medium'}">${prioLabel[t.priority]||'Med'}</span>
+        </div>
+        <div class="card-date">${t.assignee ? escHtml(t.assignee)+' &middot; ' : ''}${date}</div>
+      </div>
+    </div>
+  `;
+}
+
+function dropCard(event, newStatus) {
+  event.preventDefault();
+  const key = event.dataTransfer.getData('text/plain');
+  if (isConnected && tasksRef) tasksRef.child(key).update({ status: newStatus, updated: now() });
+}
+
+// Task CRUD
+function openTaskModal(defaultStatus) {
+  document.getElementById('editTaskId').value = '';
+  document.getElementById('taskTitle').value = '';
+  document.getElementById('taskDesc').value = '';
+  document.getElementById('taskTag').value = '';
+  document.getElementById('taskPriority').value = 'medium';
+  document.getElementById('taskAssignee').value = '';
+  document.getElementById('taskStatus').value = defaultStatus || 'todo';
+  document.getElementById('taskModalTitle').textContent = 'New Task';
+  document.getElementById('taskModalOverlay').classList.add('active');
+  setTimeout(() => document.getElementById('taskTitle').focus(), 100);
+}
+
+function editTask(key) {
+  const t = currentTasks.find(x => x._key === key);
+  if (!t) return;
+  document.getElementById('editTaskId').value = key;
+  document.getElementById('taskTitle').value = t.title || '';
+  document.getElementById('taskDesc').value = t.desc || '';
+  document.getElementById('taskTag').value = t.tag || '';
+  document.getElementById('taskPriority').value = t.priority || 'medium';
+  document.getElementById('taskAssignee').value = t.assignee || '';
+  document.getElementById('taskStatus').value = t.status || 'todo';
+  document.getElementById('taskModalTitle').textContent = 'Edit Task';
+  document.getElementById('taskModalOverlay').classList.add('active');
+}
+
+function closeTaskModal() {
+  document.getElementById('taskModalOverlay').classList.remove('active');
+}
+
+function saveTask() {
+  const title = document.getElementById('taskTitle').value.trim();
+  if (!title) { alert('Please enter a title'); return; }
+  const editKey = document.getElementById('editTaskId').value;
+  const data = {
+    title,
+    desc: document.getElementById('taskDesc').value.trim(),
+    tag: document.getElementById('taskTag').value,
+    priority: document.getElementById('taskPriority').value,
+    assignee: document.getElementById('taskAssignee').value.trim(),
+    status: document.getElementById('taskStatus').value,
+    updated: now(),
+  };
+  if (editKey) {
+    if (isConnected && tasksRef) tasksRef.child(editKey).update(data);
+  } else {
+    data.id = genTaskId();
+    data.created = now();
+    if (isConnected && tasksRef) tasksRef.push(data);
+  }
+  closeTaskModal();
+}
+
+function deleteTask(key) {
+  if (!confirm('Delete this task?')) return;
+  if (isConnected && tasksRef) tasksRef.child(key).remove();
+}
+
+// Export/Import
+function exportTasks() {
+  const tasks = currentTasks.map(({ _key, ...rest }) => rest);
+  const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'tasks-' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click(); URL.revokeObjectURL(url);
+}
+
+function importTasks(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const imported = JSON.parse(e.target.result);
+      if (!Array.isArray(imported)) throw new Error('Invalid');
+      if (!confirm(`Import ${imported.length} tasks?`)) return;
+      imported.forEach(t => { if (isConnected && tasksRef) tasksRef.push(t); });
+    } catch { alert('Invalid JSON file.'); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// BRAINSTORMING
+// ═══════════════════════════════════════════════════════════════
+function renderBrainBoard() {
+  let ideas = [...currentIdeas];
+  const search = document.getElementById('brainSearch').value.toLowerCase();
+  const catFilter = document.getElementById('brainCatFilter').value;
+  const sortBy = document.getElementById('brainSortFilter').value;
+
+  if (search) ideas = ideas.filter(i => (i.text||'').toLowerCase().includes(search));
+  if (catFilter) ideas = ideas.filter(i => i.category === catFilter);
+
+  if (sortBy === 'votes') {
+    ideas.sort((a, b) => (Object.keys(b.votes||{}).length) - (Object.keys(a.votes||{}).length));
+  } else {
+    ideas.sort((a, b) => (b.created||'').localeCompare(a.created||''));
+  }
+
+  const stats = document.getElementById('brainStats');
+  stats.innerHTML = `<strong>${currentIdeas.length}</strong> ideas &middot; <strong>${currentIdeas.reduce((s,i) => s + Object.keys(i.votes||{}).length, 0)}</strong> total votes`;
+
+  const grid = document.getElementById('brainGrid');
+  grid.innerHTML = ideas.map(renderIdeaCard).join('') +
+    `<button class="idea-add-card" onclick="openIdeaModal()">+ New Idea</button>`;
+}
+
+function renderIdeaCard(idea) {
+  const key = idea._key;
+  const colorClass = IDEA_COLORS[idea.color] || 'idea-yellow';
+  const votes = Object.keys(idea.votes || {});
+  const hasVoted = currentUid && votes.includes(currentUid);
+  const catLabel = CATEGORY_LABELS[idea.category] || 'Idea';
+
+  return `
+    <div class="idea-card ${colorClass} fade-in">
+      <div class="idea-author">
+        <span class="idea-author-dot" style="background:${escHtml(idea.authorColor||'#888')}"></span>
+        ${escHtml(idea.author || 'Anonymous')}
+        &middot; ${timeAgo(idea.created)}
+      </div>
+      <div class="idea-text">${escHtml(idea.text || '')}</div>
+      <span class="idea-category">${catLabel}</span>
+      <div class="idea-footer">
+        <button class="idea-vote-btn ${hasVoted ? 'voted' : ''}" onclick="toggleVote('${escHtml(key)}')">
+          &#9650; ${votes.length}
+        </button>
+        <div class="idea-actions-row">
+          <button class="idea-action-btn" onclick="ideaToTask('${escHtml(key)}')" title="Convert to Task">&#8594;T</button>
+          <button class="idea-action-btn" onclick="editIdea('${escHtml(key)}')" title="Edit">&#9998;</button>
+          <button class="idea-action-btn del-btn" onclick="deleteIdea('${escHtml(key)}')" title="Delete">&times;</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function timeAgo(isoStr) {
+  if (!isoStr) return '';
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return mins + 'm';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h';
+  return Math.floor(hrs / 24) + 'd';
+}
+
+function openIdeaModal() {
+  document.getElementById('editIdeaKey').value = '';
+  document.getElementById('ideaText').value = '';
+  document.getElementById('ideaCategory').value = 'idea';
+  document.getElementById('ideaColor').value = 'yellow';
+  document.getElementById('ideaModalTitle').textContent = 'New Idea';
+  document.getElementById('ideaModalOverlay').classList.add('active');
+  setTimeout(() => document.getElementById('ideaText').focus(), 100);
+}
+
+function editIdea(key) {
+  const idea = currentIdeas.find(i => i._key === key);
+  if (!idea) return;
+  document.getElementById('editIdeaKey').value = key;
+  document.getElementById('ideaText').value = idea.text || '';
+  document.getElementById('ideaCategory').value = idea.category || 'idea';
+  document.getElementById('ideaColor').value = idea.color || 'yellow';
+  document.getElementById('ideaModalTitle').textContent = 'Edit Idea';
+  document.getElementById('ideaModalOverlay').classList.add('active');
+}
+
+function closeIdeaModal() {
+  document.getElementById('ideaModalOverlay').classList.remove('active');
+}
+
+function saveIdea() {
+  const text = document.getElementById('ideaText').value.trim();
+  if (!text) { alert('Please enter an idea'); return; }
+  const editKey = document.getElementById('editIdeaKey').value;
+  const category = document.getElementById('ideaCategory').value;
+  const color = document.getElementById('ideaColor').value;
+
+  if (editKey) {
+    if (isConnected && ideasRef) ideasRef.child(editKey).update({ text, category, color, updated: now() });
+  } else {
+    const data = {
+      text, category, color,
+      author: getNick(),
+      authorColor: COLORS[Math.abs(hashCode(currentUid || '')) % COLORS.length],
+      votes: {},
+      created: now(),
+    };
+    if (isConnected && ideasRef) ideasRef.push(data);
+  }
+  closeIdeaModal();
+}
+
+function deleteIdea(key) {
+  if (!confirm('Delete this idea?')) return;
+  if (isConnected && ideasRef) ideasRef.child(key).remove();
+}
+
+function toggleVote(key) {
+  if (!isConnected || !ideasRef || !currentUid) return;
+  const idea = currentIdeas.find(i => i._key === key);
+  if (!idea) return;
+  const votes = idea.votes || {};
+  if (votes[currentUid]) {
+    ideasRef.child(key).child('votes').child(currentUid).remove();
+  } else {
+    ideasRef.child(key).child('votes').child(currentUid).set(true);
+  }
+}
+
+function ideaToTask(key) {
+  const idea = currentIdeas.find(i => i._key === key);
+  if (!idea) return;
+  if (!confirm('Convert this idea to a task?')) return;
+  const task = {
+    id: genTaskId(),
+    title: idea.text.substring(0, 80),
+    desc: idea.text,
+    tag: 'feature',
+    priority: 'medium',
+    status: 'todo',
+    assignee: '',
+    created: now(),
+    updated: now(),
+  };
+  if (isConnected && tasksRef) tasksRef.push(task);
+  switchTab('tasks');
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// MEETINGS
+// ═══════════════════════════════════════════════════════════════
+function renderMeetingList() {
+  let meetings = [...currentMeetings];
+  const search = document.getElementById('meetingSearch').value.toLowerCase();
+  if (search) {
+    meetings = meetings.filter(m =>
+      (m.title||'').toLowerCase().includes(search) ||
+      (m.attendees||[]).join(',').toLowerCase().includes(search)
+    );
+  }
+  meetings.sort((a, b) => (b.date||'').localeCompare(a.date||''));
+
+  const list = document.getElementById('meetingList');
+  if (meetings.length === 0) {
+    list.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">No meetings yet</div>`;
+    return;
+  }
+  list.innerHTML = meetings.map(m => `
+    <div class="meeting-list-item ${m._key === activeMeetingKey ? 'active' : ''}"
+         onclick="selectMeeting('${escHtml(m._key)}')">
+      <div class="meeting-list-item-title">${escHtml(m.title)}</div>
+      <div class="meeting-list-item-meta">
+        <span>${m.date || ''} ${m.time || ''}</span>
+        <span class="attendee-count">${(m.attendees||[]).length} attendees</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectMeeting(key) {
+  activeMeetingKey = key;
+  renderMeetingList();
+  renderMeetingDetail(key);
+}
+
+function renderMeetingDetail(key) {
+  const m = currentMeetings.find(x => x._key === key);
+  if (!m) {
+    document.getElementById('meetingEmpty').style.display = 'flex';
+    document.getElementById('meetingDetail').classList.remove('active');
+    return;
+  }
+  document.getElementById('meetingEmpty').style.display = 'none';
+  const detail = document.getElementById('meetingDetail');
+  detail.classList.add('active');
+
+  const agendaItems = m.agendaItems || [];
+  const decisions = m.decisions || [];
+  const actionItems = m.actionItems || [];
+  const notes = m.notes || '';
+
+  detail.innerHTML = `
+    <div class="meeting-detail-header">
+      <div class="meeting-detail-title">${escHtml(m.title)}</div>
+      <div class="meeting-detail-meta">
+        <span>&#128197; ${escHtml(m.date || '')} ${escHtml(m.time || '')}</span>
+        <span>&#128100; ${(m.attendees||[]).length} attendees</span>
+        <span style="color:var(--text-muted);font-size:11px;">Created by ${escHtml(m.createdBy || 'Unknown')}</span>
+      </div>
+    </div>
+
+    <!-- Attendees -->
+    <div class="meeting-section">
+      <div class="meeting-section-title">
+        <span class="sec-icon" style="background:rgba(99,102,241,0.15);color:var(--accent-indigo);">&#128100;</span>
+        Attendees
+      </div>
+      <div class="meeting-attendees">
+        ${(m.attendees||[]).map(a => `<span class="attendee-chip">${escHtml(a)}</span>`).join('')}
+      </div>
+    </div>
+
+    <!-- Agenda -->
+    <div class="meeting-section">
+      <div class="meeting-section-title">
+        <span class="sec-icon" style="background:rgba(59,130,246,0.15);color:var(--accent-blue);">&#9776;</span>
+        Agenda
+      </div>
+      <div class="agenda-list">
+        ${agendaItems.map((a, i) => `
+          <div class="agenda-item">
+            <span class="agenda-bullet"></span>
+            <span class="agenda-item-text">${escHtml(a)}</span>
+            <button class="agenda-item-del" onclick="removeMeetingItem('${escHtml(key)}','agendaItems',${i})">&times;</button>
+          </div>
+        `).join('')}
+      </div>
+      <div class="inline-add">
+        <input type="text" id="newAgenda_${escHtml(key)}" placeholder="Add agenda item..."
+               onkeydown="if(event.key==='Enter')addMeetingItem('${escHtml(key)}','agendaItems','newAgenda_${escHtml(key)}')">
+        <button onclick="addMeetingItem('${escHtml(key)}','agendaItems','newAgenda_${escHtml(key)}')">Add</button>
+      </div>
+    </div>
+
+    <!-- Decisions -->
+    <div class="meeting-section">
+      <div class="meeting-section-title">
+        <span class="sec-icon" style="background:rgba(16,185,129,0.15);color:var(--accent-emerald);">&#10003;</span>
+        Decisions
+      </div>
+      <div class="decision-list">
+        ${decisions.map((d, i) => `
+          <div class="decision-item">
+            <span class="decision-check">&#10003;</span>
+            <span class="decision-item-text">${escHtml(d)}</span>
+            <button class="decision-item-del" onclick="removeMeetingItem('${escHtml(key)}','decisions',${i})">&times;</button>
+          </div>
+        `).join('')}
+      </div>
+      <div class="inline-add">
+        <input type="text" id="newDecision_${escHtml(key)}" placeholder="Add decision..."
+               onkeydown="if(event.key==='Enter')addMeetingItem('${escHtml(key)}','decisions','newDecision_${escHtml(key)}')">
+        <button onclick="addMeetingItem('${escHtml(key)}','decisions','newDecision_${escHtml(key)}')">Add</button>
+      </div>
+    </div>
+
+    <!-- Action Items -->
+    <div class="meeting-section">
+      <div class="meeting-section-title">
+        <span class="sec-icon" style="background:rgba(245,158,11,0.15);color:var(--accent-amber);">&#9889;</span>
+        Action Items
+      </div>
+      <div class="action-list">
+        ${actionItems.map((a, i) => `
+          <div class="action-item">
+            <span style="color:var(--accent-amber);font-size:12px;">&#9679;</span>
+            <span class="action-item-text">${escHtml(typeof a === 'string' ? a : a.text || '')}</span>
+            ${(typeof a === 'object' && a.assignee) ? `<span class="action-item-assignee">${escHtml(a.assignee)}</span>` : ''}
+            <button class="action-to-task-btn" onclick="actionToTask('${escHtml(key)}',${i})">&#8594; Task</button>
+            <button class="action-item-del" onclick="removeMeetingItem('${escHtml(key)}','actionItems',${i})">&times;</button>
+          </div>
+        `).join('')}
+      </div>
+      <div class="inline-add" style="gap:4px;">
+        <input type="text" id="newAction_${escHtml(key)}" placeholder="Action item..." style="flex:2;"
+               onkeydown="if(event.key==='Enter')addActionItem('${escHtml(key)}')">
+        <input type="text" id="newActionAssignee_${escHtml(key)}" placeholder="Assignee" style="flex:1;"
+               onkeydown="if(event.key==='Enter')addActionItem('${escHtml(key)}')">
+        <button onclick="addActionItem('${escHtml(key)}')">Add</button>
+      </div>
+    </div>
+
+    <!-- Notes -->
+    <div class="meeting-section">
+      <div class="meeting-section-title">
+        <span class="sec-icon" style="background:rgba(139,92,246,0.15);color:var(--accent-violet);">&#9998;</span>
+        Notes
+      </div>
+      <textarea class="meeting-notes-area" id="meetingNotes_${escHtml(key)}"
+                placeholder="Meeting notes..."
+                onblur="saveMeetingNotes('${escHtml(key)}')">${escHtml(notes)}</textarea>
+    </div>
+
+    <div class="meeting-detail-actions">
+      <button class="btn btn-danger btn-sm" onclick="deleteMeeting('${escHtml(key)}')">Delete Meeting</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportMeeting('${escHtml(key)}')">Export Markdown</button>
+    </div>
+  `;
+}
+
+function openMeetingModal() {
+  document.getElementById('meetingTitle').value = '';
+  document.getElementById('meetingDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('meetingTime').value = new Date().toTimeString().slice(0, 5);
+  document.getElementById('meetingAttendees').value = getNick();
+  document.getElementById('meetingModalOverlay').classList.add('active');
+  setTimeout(() => document.getElementById('meetingTitle').focus(), 100);
+}
+
+function closeMeetingModal() {
+  document.getElementById('meetingModalOverlay').classList.remove('active');
+}
+
+function createMeeting() {
+  const title = document.getElementById('meetingTitle').value.trim();
+  if (!title) { alert('Please enter a title'); return; }
+  const data = {
+    title,
+    date: document.getElementById('meetingDate').value,
+    time: document.getElementById('meetingTime').value,
+    attendees: document.getElementById('meetingAttendees').value.split(',').map(s => s.trim()).filter(Boolean),
+    agendaItems: [],
+    decisions: [],
+    actionItems: [],
+    notes: '',
+    createdBy: getNick(),
+    created: now(),
+  };
+  if (isConnected && meetingsRef) {
+    const ref = meetingsRef.push(data);
+    activeMeetingKey = ref.key;
+  }
+  closeMeetingModal();
+}
+
+function addMeetingItem(meetingKey, field, inputId) {
+  const input = document.getElementById(inputId);
+  const val = input.value.trim();
+  if (!val) return;
+  const m = currentMeetings.find(x => x._key === meetingKey);
+  if (!m) return;
+  const arr = [...(m[field] || []), val];
+  if (isConnected && meetingsRef) meetingsRef.child(meetingKey).child(field).set(arr);
+  input.value = '';
+}
+
+function addActionItem(meetingKey) {
+  const textInput = document.getElementById(`newAction_${meetingKey}`);
+  const assigneeInput = document.getElementById(`newActionAssignee_${meetingKey}`);
+  const text = textInput.value.trim();
+  if (!text) return;
+  const assignee = assigneeInput.value.trim();
+  const m = currentMeetings.find(x => x._key === meetingKey);
+  if (!m) return;
+  const arr = [...(m.actionItems || []), { text, assignee }];
+  if (isConnected && meetingsRef) meetingsRef.child(meetingKey).child('actionItems').set(arr);
+  textInput.value = '';
+  assigneeInput.value = '';
+}
+
+function removeMeetingItem(meetingKey, field, index) {
+  const m = currentMeetings.find(x => x._key === meetingKey);
+  if (!m) return;
+  const arr = [...(m[field] || [])];
+  arr.splice(index, 1);
+  if (isConnected && meetingsRef) meetingsRef.child(meetingKey).child(field).set(arr);
+}
+
+function saveMeetingNotes(meetingKey) {
+  const textarea = document.getElementById(`meetingNotes_${meetingKey}`);
+  if (!textarea) return;
+  if (isConnected && meetingsRef) meetingsRef.child(meetingKey).update({ notes: textarea.value });
+}
+
+function actionToTask(meetingKey, idx) {
+  const m = currentMeetings.find(x => x._key === meetingKey);
+  if (!m) return;
+  const item = m.actionItems[idx];
+  const text = typeof item === 'string' ? item : item.text || '';
+  const assignee = typeof item === 'object' ? item.assignee || '' : '';
+  if (!confirm(`Convert "${text}" to a task?`)) return;
+  const task = {
+    id: genTaskId(),
+    title: text.substring(0, 80),
+    desc: `From meeting: ${m.title}`,
+    tag: '',
+    priority: 'medium',
+    status: 'todo',
+    assignee,
+    created: now(),
+    updated: now(),
+  };
+  if (isConnected && tasksRef) tasksRef.push(task);
+  switchTab('tasks');
+}
+
+function deleteMeeting(key) {
+  if (!confirm('Delete this meeting and all its content?')) return;
+  if (isConnected && meetingsRef) meetingsRef.child(key).remove();
+  activeMeetingKey = null;
+  document.getElementById('meetingEmpty').style.display = 'flex';
+  document.getElementById('meetingDetail').classList.remove('active');
+}
+
+function exportMeeting(key) {
+  const m = currentMeetings.find(x => x._key === key);
+  if (!m) return;
+  let md = `# ${m.title}\n\n`;
+  md += `**Date:** ${m.date || ''} ${m.time || ''}  \n`;
+  md += `**Attendees:** ${(m.attendees||[]).join(', ')}\n\n`;
+  if ((m.agendaItems||[]).length) {
+    md += `## Agenda\n`;
+    m.agendaItems.forEach(a => md += `- ${a}\n`);
+    md += '\n';
+  }
+  if ((m.decisions||[]).length) {
+    md += `## Decisions\n`;
+    m.decisions.forEach(d => md += `- ${d}\n`);
+    md += '\n';
+  }
+  if ((m.actionItems||[]).length) {
+    md += `## Action Items\n`;
+    m.actionItems.forEach(a => {
+      const text = typeof a === 'string' ? a : a.text || '';
+      const assignee = typeof a === 'object' && a.assignee ? ` (@${a.assignee})` : '';
+      md += `- [ ] ${text}${assignee}\n`;
+    });
+    md += '\n';
+  }
+  if (m.notes) {
+    md += `## Notes\n${m.notes}\n`;
+  }
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `meeting-${m.date||'notes'}.md`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// SETUP / CONFIG
+// ═══════════════════════════════════════════════════════════════
+function showStatus(connected, text) {
+  const banner = document.getElementById('statusBanner');
+  const statusText = document.getElementById('statusText');
+  statusText.textContent = text;
+  if (connected) {
+    banner.className = 'setup-banner connected';
+    banner.querySelector('button').textContent = 'Settings';
+  } else {
+    banner.className = 'setup-banner';
+    banner.querySelector('button').textContent = 'Setup';
+  }
+}
+
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.add('hidden');
+}
+
+function openSetupModal() {
+  const saved = localStorage.getItem(CONFIG_KEY);
+  if (saved) document.getElementById('configInput').value = saved;
+  document.getElementById('userNickname').value = localStorage.getItem(NICK_KEY) || '';
+  document.getElementById('setupModalOverlay').classList.add('active');
+}
+function closeSetupModal() {
+  document.getElementById('setupModalOverlay').classList.remove('active');
+}
+
+function clearConfig() {
+  if (!confirm('Reset Firebase settings?')) return;
+  localStorage.removeItem(CONFIG_KEY);
+  localStorage.removeItem(NICK_KEY);
+  location.reload();
+}
+
+function applyConfig() {
+  const raw = document.getElementById('configInput').value.trim();
+  const nick = document.getElementById('userNickname').value.trim() || 'Anonymous';
+  if (!raw) { alert('Please paste Firebase config'); return; }
+  try {
+    let config;
+    try { config = JSON.parse(raw); }
+    catch { config = new Function('return (' + raw + ')')(); }
+    if (!config.apiKey || !config.databaseURL) {
+      alert('apiKey and databaseURL are required.');
+      return;
+    }
+    localStorage.setItem(CONFIG_KEY, raw);
+    localStorage.setItem(NICK_KEY, nick);
+    closeSetupModal();
+    location.reload();
+  } catch (e) {
+    alert('Config parse failed:\n' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// KEYBOARD SHORTCUTS
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeTaskModal(); closeIdeaModal(); closeMeetingModal(); closeSetupModal();
+  }
+  const isInput = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
+  if (!isInput && !e.ctrlKey && !e.metaKey) {
+    if (e.key === 'n') {
+      e.preventDefault();
+      if (activeTab === 'tasks') openTaskModal();
+      else if (activeTab === 'brain') openIdeaModal();
+      else if (activeTab === 'meeting') openMeetingModal();
+    }
+    if (e.key === '1') switchTab('tasks');
+    if (e.key === '2') switchTab('brain');
+    if (e.key === '3') switchTab('meeting');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════
+(function boot() {
+  const savedConfig = localStorage.getItem(CONFIG_KEY);
+  if (savedConfig) {
+    try {
+      let config;
+      try { config = JSON.parse(savedConfig); }
+      catch { config = new Function('return (' + savedConfig + ')')(); }
+      initFirebase(config);
+    } catch (e) {
+      showStatus(false, 'Saved config is invalid');
+      hideLoading();
+    }
+  } else {
+    showStatus(false, 'Firebase not connected — setup required');
+    hideLoading();
+    renderBoard();
+    renderBrainBoard();
+    renderMeetingList();
+  }
+})();
+</script>
+</body>
+</html>
