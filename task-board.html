@@ -14,6 +14,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
+<!-- Markdown -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
 <style>
   :root {
     --bg-deep: #08080f;
@@ -404,109 +407,158 @@
   }
   .brain-stats strong { color: var(--text-primary); }
 
-  .brain-board {
-    padding: 24px 28px;
-    min-height: calc(100vh - 170px);
+  /* GitHub Issues style layout */
+  .brain-layout {
+    display: flex; min-height: calc(100vh - 170px);
   }
 
-  .brain-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 14px;
-  }
-
-  .idea-card {
-    border-radius: var(--radius-lg);
-    padding: 16px;
-    position: relative;
-    transition: all 0.2s;
-    cursor: default;
-    border: 1px solid transparent;
-    min-height: 120px;
+  .brain-sidebar {
+    width: 340px; min-width: 340px;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border-subtle);
     display: flex; flex-direction: column;
-  }
-  .idea-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.3);
+    overflow: hidden;
   }
 
-  /* Sticky note colors */
-  .idea-yellow { background: #433b1a; border-color: #5c4f1f; }
-  .idea-blue { background: #1a2a43; border-color: #1f3a5c; }
-  .idea-green { background: #1a3b2a; border-color: #1f5c3a; }
-  .idea-pink { background: #3b1a30; border-color: #5c1f48; }
-  .idea-purple { background: #2a1a43; border-color: #3a1f5c; }
-  .idea-orange { background: #3b2a1a; border-color: #5c3a1f; }
-
-  .idea-author {
-    font-size: 10px; color: rgba(255,255,255,0.45);
-    margin-bottom: 8px; font-weight: 500;
-    display: flex; align-items: center; gap: 5px;
+  .brain-list {
+    flex: 1; overflow-y: auto;
   }
-  .idea-author-dot {
-    width: 6px; height: 6px; border-radius: 50%;
+
+  .brain-list-item {
+    padding: 14px 16px;
+    cursor: pointer; transition: all 0.12s;
+    border-bottom: 1px solid var(--border-subtle);
+    border-left: 3px solid transparent;
+  }
+  .brain-list-item:hover {
+    background: var(--bg-surface);
+  }
+  .brain-list-item.active {
+    background: var(--bg-elevated);
+    border-left-color: var(--accent-indigo);
+  }
+  .brain-list-item-title {
+    font-size: 13px; font-weight: 600; margin-bottom: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: var(--text-primary);
+  }
+  .brain-list-item-meta {
+    font-size: 11px; color: var(--text-muted);
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  .brain-list-item-badge {
+    font-size: 9px; padding: 1px 7px; border-radius: 4px;
+    font-weight: 600;
+    background: rgba(99,102,241,0.15); color: var(--accent-indigo);
+  }
+  .brain-list-item-badge.cat-problem { background: rgba(244,63,94,0.15); color: var(--accent-rose); }
+  .brain-list-item-badge.cat-solution { background: rgba(16,185,129,0.15); color: var(--accent-emerald); }
+  .brain-list-item-badge.cat-question { background: rgba(245,158,11,0.15); color: var(--accent-amber); }
+  .brain-list-item-badge.cat-resource { background: rgba(59,130,246,0.15); color: var(--accent-blue); }
+  .brain-list-item-votes {
+    display: flex; align-items: center; gap: 3px;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .brain-list-item-votes.has-votes { color: var(--accent-indigo); }
+
+  .brain-content {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  .brain-empty {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; color: var(--text-muted);
+    font-size: 14px;
+  }
+  .brain-empty-icon { font-size: 48px; opacity: 0.3; }
+
+  .brain-detail {
+    flex: 1; overflow-y: auto; padding: 28px 36px;
+    display: none;
+  }
+  .brain-detail.active { display: block; }
+
+  .brain-detail-header {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .brain-detail-title {
+    font-size: 22px; font-weight: 700; color: #fff;
+    margin-bottom: 10px; line-height: 1.3;
+  }
+  .brain-detail-meta {
+    display: flex; gap: 14px; font-size: 12px; color: var(--text-muted);
+    flex-wrap: wrap; align-items: center;
+  }
+  .brain-detail-meta span {
+    display: flex; align-items: center; gap: 4px;
+  }
+  .brain-detail-meta .author-dot {
+    width: 8px; height: 8px; border-radius: 50%;
     display: inline-block;
   }
 
-  .idea-text {
-    font-size: 14px; line-height: 1.55; color: rgba(255,255,255,0.88);
-    flex: 1; word-break: break-word;
+  .brain-detail-actions {
+    display: flex; gap: 8px; margin-top: 12px;
   }
 
-  .idea-category {
-    font-size: 9px; padding: 2px 8px; border-radius: 4px;
-    font-weight: 600; display: inline-block;
-    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6);
-    margin-top: 10px;
+  .brain-detail-body {
+    margin-top: 20px;
+    font-size: 14px; line-height: 1.7; color: var(--text-primary);
+  }
+  /* Markdown styles */
+  .brain-detail-body h1 { font-size: 20px; font-weight: 700; margin: 20px 0 10px; color: #fff; }
+  .brain-detail-body h2 { font-size: 17px; font-weight: 600; margin: 18px 0 8px; color: #fff; }
+  .brain-detail-body h3 { font-size: 15px; font-weight: 600; margin: 14px 0 6px; color: #fff; }
+  .brain-detail-body p { margin: 0 0 12px; }
+  .brain-detail-body ul, .brain-detail-body ol { margin: 0 0 12px; padding-left: 24px; }
+  .brain-detail-body li { margin-bottom: 4px; }
+  .brain-detail-body code {
+    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    background: var(--bg-card); padding: 2px 6px; border-radius: 4px;
+    color: var(--accent-cyan);
+  }
+  .brain-detail-body pre {
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md); padding: 16px; margin: 12px 0;
+    overflow-x: auto;
+  }
+  .brain-detail-body pre code {
+    background: none; padding: 0; color: var(--text-primary);
+  }
+  .brain-detail-body blockquote {
+    border-left: 3px solid var(--accent-indigo); padding: 8px 16px;
+    margin: 12px 0; color: var(--text-secondary);
+    background: rgba(99,102,241,0.05); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+  .brain-detail-body a { color: var(--accent-indigo); text-decoration: none; }
+  .brain-detail-body a:hover { text-decoration: underline; }
+  .brain-detail-body table {
+    width: 100%; border-collapse: collapse; margin: 12px 0;
+  }
+  .brain-detail-body th, .brain-detail-body td {
+    border: 1px solid var(--border-subtle); padding: 8px 12px;
+    text-align: left; font-size: 13px;
+  }
+  .brain-detail-body th { background: var(--bg-card); font-weight: 600; }
+  .brain-detail-body hr {
+    border: none; border-top: 1px solid var(--border-subtle); margin: 20px 0;
   }
 
-  .idea-footer {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-top: 12px; padding-top: 10px;
-    border-top: 1px solid rgba(255,255,255,0.06);
-  }
-
-  .idea-vote-btn {
+  .brain-vote-btn {
     background: rgba(255,255,255,0.08); border: none;
-    padding: 4px 10px; border-radius: 12px;
+    padding: 5px 14px; border-radius: 14px;
     color: rgba(255,255,255,0.5); cursor: pointer;
-    font-size: 12px; font-family: inherit;
-    display: flex; align-items: center; gap: 4px;
+    font-size: 13px; font-family: inherit;
+    display: flex; align-items: center; gap: 5px;
     transition: all 0.15s;
   }
-  .idea-vote-btn:hover {
+  .brain-vote-btn:hover {
     background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.8);
   }
-  .idea-vote-btn.voted {
+  .brain-vote-btn.voted {
     background: rgba(99,102,241,0.25); color: var(--accent-indigo);
-  }
-
-  .idea-actions-row {
-    display: flex; gap: 4px;
-  }
-  .idea-action-btn {
-    width: 24px; height: 24px; border-radius: 6px;
-    border: none; cursor: pointer; font-size: 11px;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.35);
-    transition: all 0.12s;
-  }
-  .idea-action-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.7); }
-  .idea-action-btn.del-btn:hover { background: rgba(220,38,38,0.3); color: #fca5a5; }
-
-  .idea-add-card {
-    border: 2px dashed var(--border-default);
-    border-radius: var(--radius-lg);
-    min-height: 120px;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; color: var(--text-muted);
-    font-size: 13px; transition: all 0.15s;
-    background: transparent;
-    font-family: inherit; width: 100%;
-  }
-  .idea-add-card:hover {
-    border-color: var(--accent-indigo); color: var(--accent-indigo);
-    background: rgba(99,102,241,0.03);
   }
 
   /* ═══════════════════════════════════════════
@@ -879,8 +931,17 @@
       <button class="btn btn-primary btn-sm" onclick="openIdeaModal()">+ New Idea</button>
     </div>
   </div>
-  <div class="brain-board">
-    <div class="brain-grid" id="brainGrid"></div>
+  <div class="brain-layout">
+    <div class="brain-sidebar">
+      <div class="brain-list" id="brainList"></div>
+    </div>
+    <div class="brain-content">
+      <div class="brain-empty" id="brainEmpty">
+        <div class="brain-empty-icon">&#128161;</div>
+        아이디어를 선택하거나 새로 작성하세요
+      </div>
+      <div class="brain-detail" id="brainDetail"></div>
+    </div>
   </div>
 </div>
 
@@ -975,35 +1036,26 @@
 
 <!-- Idea Modal -->
 <div class="modal-overlay" id="ideaModalOverlay" onclick="if(event.target===this)closeIdeaModal()">
-  <div class="modal">
+  <div class="modal" style="max-width:560px;">
     <h2 id="ideaModalTitle">New Idea</h2>
     <input type="hidden" id="editIdeaKey">
     <div class="form-group">
-      <label>Idea *</label>
-      <textarea id="ideaText" placeholder="Share your idea..." style="min-height:100px;"></textarea>
+      <label>Title *</label>
+      <input type="text" id="ideaTitle" placeholder="Issue title..." style="width:100%;">
     </div>
-    <div style="display:flex;gap:10px;">
-      <div class="form-group" style="flex:1;">
-        <label>Category</label>
-        <select id="ideaCategory">
-          <option value="idea">Idea</option>
-          <option value="problem">Problem</option>
-          <option value="solution">Solution</option>
-          <option value="question">Question</option>
-          <option value="resource">Resource</option>
-        </select>
-      </div>
-      <div class="form-group" style="flex:1;">
-        <label>Color</label>
-        <select id="ideaColor">
-          <option value="yellow">Yellow</option>
-          <option value="blue">Blue</option>
-          <option value="green">Green</option>
-          <option value="pink">Pink</option>
-          <option value="purple">Purple</option>
-          <option value="orange">Orange</option>
-        </select>
-      </div>
+    <div class="form-group">
+      <label>Body (Markdown)</label>
+      <textarea id="ideaText" placeholder="Markdown supported: **bold**, *italic*, `code`, ```code block```, - list, > quote, ## heading..." style="min-height:200px; font-family: 'JetBrains Mono', monospace; font-size: 13px;"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Category</label>
+      <select id="ideaCategory">
+        <option value="idea">Idea</option>
+        <option value="problem">Problem</option>
+        <option value="solution">Solution</option>
+        <option value="question">Question</option>
+        <option value="resource">Resource</option>
+      </select>
     </div>
     <div class="form-actions">
       <button class="btn btn-secondary" onclick="closeIdeaModal()">Cancel</button>
@@ -1431,13 +1483,25 @@ function importTasks(event) {
 // ═══════════════════════════════════════════════════════════════
 // BRAINSTORMING
 // ═══════════════════════════════════════════════════════════════
+let activeBrainKey = null;
+
+function getIdeaTitle(idea) {
+  if (idea.title) return idea.title;
+  const text = (idea.text || '').trim();
+  const firstLine = text.split('\n')[0].replace(/^#+\s*/, '');
+  return firstLine.length > 80 ? firstLine.substring(0, 80) + '...' : firstLine || 'Untitled';
+}
+
 function renderBrainBoard() {
   let ideas = [...currentIdeas];
   const search = document.getElementById('brainSearch').value.toLowerCase();
   const catFilter = document.getElementById('brainCatFilter').value;
   const sortBy = document.getElementById('brainSortFilter').value;
 
-  if (search) ideas = ideas.filter(i => (i.text||'').toLowerCase().includes(search));
+  if (search) ideas = ideas.filter(i =>
+    (i.text||'').toLowerCase().includes(search) ||
+    (i.title||'').toLowerCase().includes(search)
+  );
   if (catFilter) ideas = ideas.filter(i => i.category === catFilter);
 
   if (sortBy === 'votes') {
@@ -1449,39 +1513,83 @@ function renderBrainBoard() {
   const stats = document.getElementById('brainStats');
   stats.innerHTML = `<strong>${currentIdeas.length}</strong> ideas &middot; <strong>${currentIdeas.reduce((s,i) => s + Object.keys(i.votes||{}).length, 0)}</strong> total votes`;
 
-  const grid = document.getElementById('brainGrid');
-  grid.innerHTML = ideas.map(renderIdeaCard).join('') +
-    `<button class="idea-add-card" onclick="openIdeaModal()">+ New Idea</button>`;
+  const list = document.getElementById('brainList');
+  list.innerHTML = ideas.map(idea => {
+    const key = idea._key;
+    const title = getIdeaTitle(idea);
+    const votes = Object.keys(idea.votes || {});
+    const catLabel = CATEGORY_LABELS[idea.category] || 'Idea';
+    const catClass = 'cat-' + (idea.category || 'idea');
+    const isActive = activeBrainKey === key;
+    return `
+      <div class="brain-list-item ${isActive ? 'active' : ''}" onclick="selectIdea('${escHtml(key)}')">
+        <div class="brain-list-item-title">${escHtml(title)}</div>
+        <div class="brain-list-item-meta">
+          <span class="brain-list-item-badge ${catClass}">${catLabel}</span>
+          <span>${escHtml(idea.author || 'Anonymous')}</span>
+          <span>${timeAgo(idea.created)}</span>
+          <span class="brain-list-item-votes ${votes.length > 0 ? 'has-votes' : ''}">&#9650; ${votes.length}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Update detail if active idea still exists
+  if (activeBrainKey) {
+    const exists = ideas.find(i => i._key === activeBrainKey);
+    if (exists) renderBrainDetail(activeBrainKey);
+    else { activeBrainKey = null; hideBrainDetail(); }
+  }
 }
 
-function renderIdeaCard(idea) {
-  const key = idea._key;
-  const colorClass = IDEA_COLORS[idea.color] || 'idea-yellow';
+function selectIdea(key) {
+  activeBrainKey = key;
+  // Update list active state
+  document.querySelectorAll('.brain-list-item').forEach(el => el.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  renderBrainDetail(key);
+}
+
+function renderBrainDetail(key) {
+  const idea = currentIdeas.find(i => i._key === key);
+  if (!idea) return;
+
+  const title = getIdeaTitle(idea);
   const votes = Object.keys(idea.votes || {});
   const hasVoted = currentUid && votes.includes(currentUid);
   const catLabel = CATEGORY_LABELS[idea.category] || 'Idea';
+  const catClass = 'cat-' + (idea.category || 'idea');
+  const bodyHtml = typeof marked !== 'undefined' ? marked.parse(idea.text || '') : escHtml(idea.text || '').replace(/\n/g, '<br>');
 
-  return `
-    <div class="idea-card ${colorClass} fade-in">
-      <div class="idea-author">
-        <span class="idea-author-dot" style="background:${escHtml(idea.authorColor||'#888')}"></span>
-        ${escHtml(idea.author || 'Anonymous')}
-        &middot; ${timeAgo(idea.created)}
+  const detail = document.getElementById('brainDetail');
+  const empty = document.getElementById('brainEmpty');
+
+  detail.innerHTML = `
+    <div class="brain-detail-header">
+      <div class="brain-detail-title">${escHtml(title)}</div>
+      <div class="brain-detail-meta">
+        <span><span class="author-dot" style="background:${escHtml(idea.authorColor||'#888')}"></span> ${escHtml(idea.author || 'Anonymous')}</span>
+        <span>${idea.created ? new Date(idea.created).toLocaleString('ko-KR') : ''}</span>
+        <span class="brain-list-item-badge ${catClass}">${catLabel}</span>
       </div>
-      <div class="idea-text">${escHtml(idea.text || '')}</div>
-      <span class="idea-category">${catLabel}</span>
-      <div class="idea-footer">
-        <button class="idea-vote-btn ${hasVoted ? 'voted' : ''}" onclick="toggleVote('${escHtml(key)}')">
-          &#9650; ${votes.length}
-        </button>
-        <div class="idea-actions-row">
-          <button class="idea-action-btn" onclick="ideaToTask('${escHtml(key)}')" title="Convert to Task">&#8594;T</button>
-          <button class="idea-action-btn" onclick="editIdea('${escHtml(key)}')" title="Edit">&#9998;</button>
-          <button class="idea-action-btn del-btn" onclick="deleteIdea('${escHtml(key)}')" title="Delete">&times;</button>
-        </div>
+      <div class="brain-detail-actions">
+        <button class="brain-vote-btn ${hasVoted ? 'voted' : ''}" onclick="toggleVote('${escHtml(key)}')">&#9650; ${votes.length} votes</button>
+        <button class="btn btn-secondary btn-sm" onclick="editIdea('${escHtml(key)}')">&#9998; Edit</button>
+        <button class="btn btn-secondary btn-sm" onclick="ideaToTask('${escHtml(key)}')">&#8594; Convert to Task</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteIdea('${escHtml(key)}')">&#10005; Delete</button>
       </div>
     </div>
+    <div class="brain-detail-body">${bodyHtml}</div>
   `;
+
+  detail.classList.add('active');
+  empty.style.display = 'none';
+}
+
+function hideBrainDetail() {
+  document.getElementById('brainDetail').classList.remove('active');
+  document.getElementById('brainDetail').innerHTML = '';
+  document.getElementById('brainEmpty').style.display = '';
 }
 
 function timeAgo(isoStr) {
@@ -1497,21 +1605,21 @@ function timeAgo(isoStr) {
 
 function openIdeaModal() {
   document.getElementById('editIdeaKey').value = '';
+  document.getElementById('ideaTitle').value = '';
   document.getElementById('ideaText').value = '';
   document.getElementById('ideaCategory').value = 'idea';
-  document.getElementById('ideaColor').value = 'yellow';
   document.getElementById('ideaModalTitle').textContent = 'New Idea';
   document.getElementById('ideaModalOverlay').classList.add('active');
-  setTimeout(() => document.getElementById('ideaText').focus(), 100);
+  setTimeout(() => document.getElementById('ideaTitle').focus(), 100);
 }
 
 function editIdea(key) {
   const idea = currentIdeas.find(i => i._key === key);
   if (!idea) return;
   document.getElementById('editIdeaKey').value = key;
+  document.getElementById('ideaTitle').value = idea.title || getIdeaTitle(idea);
   document.getElementById('ideaText').value = idea.text || '';
   document.getElementById('ideaCategory').value = idea.category || 'idea';
-  document.getElementById('ideaColor').value = idea.color || 'yellow';
   document.getElementById('ideaModalTitle').textContent = 'Edit Idea';
   document.getElementById('ideaModalOverlay').classList.add('active');
 }
@@ -1521,17 +1629,17 @@ function closeIdeaModal() {
 }
 
 function saveIdea() {
+  const title = document.getElementById('ideaTitle').value.trim();
   const text = document.getElementById('ideaText').value.trim();
-  if (!text) { alert('Please enter an idea'); return; }
+  if (!title) { alert('Please enter a title'); return; }
   const editKey = document.getElementById('editIdeaKey').value;
   const category = document.getElementById('ideaCategory').value;
-  const color = document.getElementById('ideaColor').value;
 
   if (editKey) {
-    if (isConnected && ideasRef) ideasRef.child(editKey).update({ text, category, color, updated: now() });
+    if (isConnected && ideasRef) ideasRef.child(editKey).update({ title, text, category, updated: now() });
   } else {
     const data = {
-      text, category, color,
+      title, text, category,
       author: getNick(),
       authorColor: COLORS[Math.abs(hashCode(currentUid || '')) % COLORS.length],
       votes: {},
@@ -1545,6 +1653,7 @@ function saveIdea() {
 function deleteIdea(key) {
   if (!confirm('Delete this idea?')) return;
   if (isConnected && ideasRef) ideasRef.child(key).remove();
+  if (activeBrainKey === key) { activeBrainKey = null; hideBrainDetail(); }
 }
 
 function toggleVote(key) {
@@ -1565,7 +1674,7 @@ function ideaToTask(key) {
   if (!confirm('Convert this idea to a task?')) return;
   const task = {
     id: genTaskId(),
-    title: idea.text.substring(0, 80),
+    title: idea.title || getIdeaTitle(idea),
     desc: idea.text,
     tag: 'feature',
     priority: 'medium',
