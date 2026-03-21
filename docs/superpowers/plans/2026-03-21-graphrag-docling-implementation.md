@@ -38,13 +38,14 @@ rag_for_accounting/
 │   │   └── crag_gate.py                    # CRAG 품질 평가
 │   ├── generation/
 │   │   ├── __init__.py
-│   │   ├── answer_generator.py             # LLM 응답 생성
+│   │   ├── answer_generator.py             # PydanticAI 기반 응답 생성
 │   │   └── schemas.py                      # PydanticAI 응답 스키마
 │   └── orchestration/
 │       ├── __init__.py
 │       └── graph.py                        # LangGraph 워크플로우 정의
 ├── tests/
 │   ├── __init__.py
+│   ├── test_config.py
 │   ├── parsing/
 │   │   ├── __init__.py
 │   │   ├── test_hwp_converter.py
@@ -57,6 +58,7 @@ rag_for_accounting/
 │   │   ├── __init__.py
 │   │   ├── test_query_rewriter.py
 │   │   ├── test_query_router.py
+│   │   ├── test_edgequake_searcher.py
 │   │   └── test_crag_gate.py
 │   ├── generation/
 │   │   ├── __init__.py
@@ -65,9 +67,11 @@ rag_for_accounting/
 │   └── orchestration/
 │       ├── __init__.py
 │       └── test_graph.py
-└── scripts/
-    ├── ingest.py                           # 배치 인제스트 스크립트
-    └── query.py                            # CLI 질의 스크립트
+├── scripts/
+│   ├── ingest.py                           # 배치 인제스트 스크립트
+│   └── query.py                            # CLI 질의 스크립트
+└── config/
+    └── edgequake_entity_config.json        # EdgeQuake 도메인 엔티티/관계 설정
 ```
 
 ---
@@ -83,7 +87,15 @@ rag_for_accounting/
 - Create: `tests/__init__.py`
 - Test: `tests/test_config.py`
 
-- [ ] **Step 1: pyproject.toml에 의존성 추가**
+- [ ] **Step 1: EdgeQuake Docker 설정 조사**
+
+EdgeQuake 레포를 클론하여 실제 Docker 이미지 이름, 환경변수, API 엔드포인트를 확인한다.
+
+Run: `git clone --depth 1 https://github.com/raphaelmansuy/edgequake.git /tmp/edgequake && ls /tmp/edgequake/docker-compose*.yml /tmp/edgequake/Dockerfile* 2>/dev/null && cat /tmp/edgequake/docker-compose.yml 2>/dev/null || echo "No docker-compose found, check README"`
+
+이 결과를 바탕으로 아래 docker-compose.yml과 EdgeQuake 클라이언트의 API 엔드포인트를 조정한다.
+
+- [ ] **Step 2: pyproject.toml에 의존성 추가**
 
 ```toml
 [project]
@@ -94,12 +106,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "docling>=2.0.0",
+    "openai>=1.0.0",
     "langchain-openai>=0.3.0",
     "langgraph>=0.4.0",
     "pydantic-ai>=0.1.0",
     "httpx>=0.28.0",
     "python-dotenv>=1.0.0",
-    "pyhwp>=0.6.0",
+    "tiktoken>=0.8.0",
 ]
 
 [project.optional-dependencies]
@@ -110,14 +123,16 @@ dev = [
 ]
 ```
 
-- [ ] **Step 2: 의존성 설치**
+> `pyhwp` 제거 — LibreOffice CLI 단일 방식으로 HWP 변환. `tiktoken` 추가 — 청크 토큰 수 계산용. `openai` 명시적 추가.
+
+- [ ] **Step 3: 의존성 설치**
 
 Run: `cd /Users/sboh/Desktop/dev/rag_for_accounting && uv sync --all-extras`
 Expected: 의존성 설치 성공
 
-- [ ] **Step 3: docker-compose.yml 작성**
+- [ ] **Step 4: docker-compose.yml 작성**
 
-EdgeQuake의 공식 Docker Compose를 기반으로 작성. EdgeQuake GitHub 저장소(https://github.com/raphaelmansuy/edgequake)의 docker-compose.yml을 참조하여 PostgreSQL(AGE + pgvector) + EdgeQuake 서비스를 정의한다.
+Step 1에서 조사한 EdgeQuake의 실제 Docker 설정을 기반으로 작성한다. 아래는 예상 구조이며, 실제 이미지 이름/환경변수/포트는 조사 결과에 따라 조정한다.
 
 ```yaml
 version: "3.8"
@@ -154,9 +169,7 @@ volumes:
   pgdata:
 ```
 
-> **참고:** EdgeQuake의 실제 Docker 이미지 이름과 환경변수는 공식 문서를 확인하여 조정 필요. 위는 예상 구조이며, `docker compose up` 전에 EdgeQuake 레포를 클론하여 정확한 설정을 확인한다.
-
-- [ ] **Step 4: .env.example 작성**
+- [ ] **Step 5: .env.example 작성**
 
 ```env
 OPENAI_API_KEY=sk-your-key-here
@@ -164,7 +177,7 @@ POSTGRES_PASSWORD=edgequake_dev
 EDGEQUAKE_URL=http://localhost:8080
 ```
 
-- [ ] **Step 5: config.py 작성 + 테스트**
+- [ ] **Step 6: config.py 작성**
 
 `src/config.py`:
 ```python
@@ -172,17 +185,24 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+
+def _load_env():
+    load_dotenv()
 
 
 class Config:
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    EDGEQUAKE_URL: str = os.getenv("EDGEQUAKE_URL", "http://localhost:8080")
-    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "edgequake_dev")
-    DATA_DIR: Path = Path(os.getenv("DATA_DIR", "data"))
-    CHUNK_SIZE_TARGET: int = 750  # tokens, target 500-1000
-    CHUNK_OVERLAP_SENTENCES: int = 1
+    def __init__(self):
+        _load_env()
+        self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+        self.edgequake_url: str = os.getenv("EDGEQUAKE_URL", "http://localhost:8080")
+        self.postgres_password: str = os.getenv("POSTGRES_PASSWORD", "edgequake_dev")
+        self.data_dir: Path = Path(os.getenv("DATA_DIR", "data"))
+        self.chunk_size_target: int = 750  # tokens, target 500-1000
+        self.chunk_size_max: int = 1000
+        self.chunk_overlap_sentences: int = 1
 ```
+
+- [ ] **Step 7: 테스트 작성**
 
 `tests/test_config.py`:
 ```python
@@ -191,26 +211,34 @@ from src.config import Config
 
 def test_config_defaults():
     config = Config()
-    assert config.EDGEQUAKE_URL == "http://localhost:8080"
-    assert config.CHUNK_SIZE_TARGET == 750
-    assert config.CHUNK_OVERLAP_SENTENCES == 1
+    assert config.edgequake_url == "http://localhost:8080"
+    assert config.chunk_size_target == 750
+    assert config.chunk_size_max == 1000
+    assert config.chunk_overlap_sentences == 1
 ```
 
-- [ ] **Step 6: 테스트 실행**
+- [ ] **Step 8: 테스트 실행**
 
 Run: `cd /Users/sboh/Desktop/dev/rag_for_accounting && uv run pytest tests/test_config.py -v`
 Expected: PASS
 
-- [ ] **Step 7: Docker 환경 확인**
+- [ ] **Step 9: Docker 환경 확인**
 
 Run: `cd /Users/sboh/Desktop/dev/rag_for_accounting && docker compose up -d`
 Expected: postgres, edgequake 컨테이너 정상 실행
+
 Run: `docker compose ps`
 Expected: 두 서비스 모두 healthy/running 상태
 
-> **참고:** EdgeQuake Docker 이미지가 없거나 설정이 다르면 이 단계에서 EdgeQuake 레포를 클론하여 직접 빌드해야 할 수 있다. 이 경우 `git clone https://github.com/raphaelmansuy/edgequake.git` 후 해당 레포의 docker-compose.yml을 참조한다.
+> EdgeQuake Docker 이미지가 없거나 빌드가 필요하면, EdgeQuake 레포를 클론하여 직접 빌드한다.
 
-- [ ] **Step 8: 커밋**
+- [ ] **Step 10: EdgeQuake API 엔드포인트 확인**
+
+Run: `curl http://localhost:8080/swagger-ui 2>/dev/null || curl http://localhost:8080/api-docs 2>/dev/null || curl http://localhost:8080/ 2>/dev/null`
+
+Swagger UI 또는 API 문서에서 실제 엔드포인트를 확인하고 기록한다. 이 정보는 Task 5에서 사용한다.
+
+- [ ] **Step 11: 커밋**
 
 ```bash
 git add pyproject.toml docker-compose.yml .env.example src/__init__.py src/config.py tests/__init__.py tests/test_config.py
@@ -244,7 +272,7 @@ def test_convert_hwp_to_pdf_returns_pdf_path(tmp_path):
     converter = HwpConverter(output_dir=tmp_path)
     with patch("src.parsing.hwp_converter.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
-        expected_pdf.write_bytes(b"fake pdf")  # simulate conversion output
+        expected_pdf.write_bytes(b"fake pdf")
         result = converter.convert(hwp_file)
 
     assert result == expected_pdf
@@ -258,7 +286,7 @@ def test_skip_non_hwp_files(tmp_path):
     converter = HwpConverter(output_dir=tmp_path)
     result = converter.convert(pdf_file)
 
-    assert result == pdf_file  # 변환 없이 그대로 반환
+    assert result == pdf_file
 
 
 def test_convert_failure_raises(tmp_path):
@@ -267,12 +295,12 @@ def test_convert_failure_raises(tmp_path):
 
     converter = HwpConverter(output_dir=tmp_path)
     with patch("src.parsing.hwp_converter.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1, stderr="error")
+        mock_run.return_value = MagicMock(returncode=1, stderr="conversion error")
         try:
             converter.convert(hwp_file)
-            assert False, "Should have raised"
-        except RuntimeError:
-            pass
+            assert False, "Should have raised RuntimeError"
+        except RuntimeError as e:
+            assert "변환 실패" in str(e)
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -351,11 +379,14 @@ from unittest.mock import patch, MagicMock
 from src.parsing.docling_parser import DoclingParser, ParsedDocument
 
 
-def test_parse_returns_parsed_document():
+MOCK_MARKDOWN = "# 제1116호\n## 제1장 목적\n문단 1 내용"
+
+
+def test_parse_returns_parsed_document_with_correct_content():
     parser = DoclingParser()
 
     mock_doc = MagicMock()
-    mock_doc.export_to_markdown.return_value = "# 제1116호\n## 제1장 목적\n문단 1 내용"
+    mock_doc.export_to_markdown.return_value = MOCK_MARKDOWN
     mock_doc.tables = []
 
     with patch("src.parsing.docling_parser.DocumentConverter") as MockConverter:
@@ -367,8 +398,8 @@ def test_parse_returns_parsed_document():
         result = parser.parse(Path("test.pdf"))
 
     assert isinstance(result, ParsedDocument)
-    assert result.markdown is not None
-    assert len(result.markdown) > 0
+    assert result.markdown == MOCK_MARKDOWN
+    assert result.source_path == Path("test.pdf")
 
 
 def test_parsed_document_has_required_fields():
@@ -380,6 +411,7 @@ def test_parsed_document_has_required_fields():
     )
     assert doc.source_path == Path("test.pdf")
     assert doc.metadata["기준서번호"] == "1116"
+    assert doc.tables == []
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -464,11 +496,7 @@ from src.parsing.docling_parser import ParsedDocument
 
 
 def _make_doc(markdown: str) -> ParsedDocument:
-    return ParsedDocument(
-        source_path=Path("test.pdf"),
-        markdown=markdown,
-        tables=[],
-    )
+    return ParsedDocument(source_path=Path("test.pdf"), markdown=markdown, tables=[])
 
 
 def test_extract_cross_references():
@@ -514,6 +542,17 @@ def test_chunk_includes_hierarchy_metadata():
     chunks = preprocessor.chunk(doc)
 
     assert any("제5장" in c.hierarchy_path for c in chunks)
+
+
+def test_chunk_enforces_max_token_limit():
+    preprocessor = Preprocessor(chunk_size_max=50)
+    long_text = "이것은 매우 긴 문단입니다. " * 100
+    markdown = f"# 기준서\n## 제1장\n{long_text}\n"
+    doc = _make_doc(markdown)
+    chunks = preprocessor.chunk(doc)
+
+    # 긴 문단이 분할되어야 함
+    assert len(chunks) > 1
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -528,6 +567,8 @@ Expected: FAIL
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import tiktoken
 
 from src.parsing.docling_parser import ParsedDocument
 
@@ -546,6 +587,13 @@ class Preprocessor:
     STANDARD_PATTERN = re.compile(r"제(\d{4})호")
     PARAGRAPH_PATTERN = re.compile(r"문단\s*(\d+)")
     CROSS_REF_PATTERN = re.compile(r"제(\d{4})호(?:\s*문단\s*(\d+))?")
+
+    def __init__(self, chunk_size_max: int = 1000):
+        self.chunk_size_max = chunk_size_max
+        self._encoder = tiktoken.encoding_for_model("gpt-4o")
+
+    def _count_tokens(self, text: str) -> int:
+        return len(self._encoder.encode(text))
 
     def extract_cross_references(self, text: str) -> list[dict]:
         refs = []
@@ -571,14 +619,63 @@ class Preprocessor:
         for section in sections:
             if not section["content"].strip():
                 continue
-            cross_refs = self.extract_cross_references(section["content"])
-            chunk = Chunk(
-                text=section["content"],
-                hierarchy_path=section["path"],
-                metadata={**metadata},
-                cross_references=cross_refs,
+
+            content = section["content"]
+            token_count = self._count_tokens(content)
+
+            if token_count <= self.chunk_size_max:
+                cross_refs = self.extract_cross_references(content)
+                chunks.append(
+                    Chunk(
+                        text=content,
+                        hierarchy_path=section["path"],
+                        metadata={**metadata},
+                        cross_references=cross_refs,
+                    )
+                )
+            else:
+                # 문장 경계에서 분할
+                sub_chunks = self._split_by_sentences(content, section["path"], metadata)
+                chunks.extend(sub_chunks)
+
+        return chunks
+
+    def _split_by_sentences(self, text: str, path: str, metadata: dict) -> list[Chunk]:
+        sentences = re.split(r"(?<=[.!?。])\s+", text)
+        chunks = []
+        current_sentences: list[str] = []
+        current_tokens = 0
+
+        for sentence in sentences:
+            sentence_tokens = self._count_tokens(sentence)
+            if current_tokens + sentence_tokens > self.chunk_size_max and current_sentences:
+                chunk_text = " ".join(current_sentences)
+                cross_refs = self.extract_cross_references(chunk_text)
+                chunks.append(
+                    Chunk(
+                        text=chunk_text,
+                        hierarchy_path=path,
+                        metadata={**metadata},
+                        cross_references=cross_refs,
+                    )
+                )
+                current_sentences = []
+                current_tokens = 0
+
+            current_sentences.append(sentence)
+            current_tokens += sentence_tokens
+
+        if current_sentences:
+            chunk_text = " ".join(current_sentences)
+            cross_refs = self.extract_cross_references(chunk_text)
+            chunks.append(
+                Chunk(
+                    text=chunk_text,
+                    hierarchy_path=path,
+                    metadata={**metadata},
+                    cross_references=cross_refs,
+                )
             )
-            chunks.append(chunk)
 
         return chunks
 
@@ -594,9 +691,7 @@ class Preprocessor:
                 if current_content_lines:
                     sections.append(
                         {
-                            "path": " > ".join(current_path_parts)
-                            if current_path_parts
-                            else "",
+                            "path": " > ".join(current_path_parts) if current_path_parts else "",
                             "content": "\n".join(current_content_lines),
                         }
                     )
@@ -612,9 +707,7 @@ class Preprocessor:
         if current_content_lines:
             sections.append(
                 {
-                    "path": " > ".join(current_path_parts)
-                    if current_path_parts
-                    else "",
+                    "path": " > ".join(current_path_parts) if current_path_parts else "",
                     "content": "\n".join(current_content_lines),
                 }
             )
@@ -625,13 +718,13 @@ class Preprocessor:
 - [ ] **Step 4: 테스트 실행 — 성공 확인**
 
 Run: `uv run pytest tests/parsing/test_preprocessor.py -v`
-Expected: 4 passed
+Expected: 5 passed
 
 - [ ] **Step 5: 커밋**
 
 ```bash
 git add src/parsing/preprocessor.py tests/parsing/test_preprocessor.py
-git commit -m "feat: 전처리기 구현 (구조 기반 청킹, 상호참조 추출)"
+git commit -m "feat: 전처리기 구현 (구조 기반 청킹, 토큰 제한, 상호참조 추출)"
 ```
 
 ---
@@ -644,6 +737,8 @@ git commit -m "feat: 전처리기 구현 (구조 기반 청킹, 상호참조 추
 - Create: `tests/ingestion/__init__.py`
 - Create: `tests/ingestion/test_edgequake_client.py`
 
+> **중요:** Task 1 Step 10에서 확인한 실제 EdgeQuake API 엔드포인트를 사용한다. 아래는 예상 구조이며, Swagger UI에서 확인한 엔드포인트로 교체한다.
+
 - [ ] **Step 1: 테스트 작성**
 
 `tests/ingestion/test_edgequake_client.py`:
@@ -651,18 +746,11 @@ git commit -m "feat: 전처리기 구현 (구조 기반 청킹, 상호참조 추
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from src.ingestion.edgequake_client import EdgeQuakeClient
-from src.parsing.preprocessor import Chunk
 
 
 @pytest.mark.asyncio
-async def test_ingest_chunk_sends_post_request():
+async def test_ingest_document_sends_post_request():
     client = EdgeQuakeClient(base_url="http://localhost:8080")
-    chunk = Chunk(
-        text="사용권자산의 감가상각",
-        hierarchy_path="제1116호 > 제5장",
-        metadata={"기준서번호": "1116"},
-        cross_references=[{"standard": "1028", "paragraph": "15"}],
-    )
 
     with patch("src.ingestion.edgequake_client.httpx.AsyncClient") as MockClient:
         mock_instance = AsyncMock()
@@ -670,14 +758,14 @@ async def test_ingest_chunk_sends_post_request():
         MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_instance.post.return_value = MagicMock(status_code=200, json=lambda: {"status": "ok"})
 
-        result = await client.ingest_document(chunk.text, chunk.metadata)
+        result = await client.ingest_document("사용권자산의 감가상각", {"기준서번호": "1116"})
 
     mock_instance.post.assert_called_once()
     assert result["status"] == "ok"
 
 
 @pytest.mark.asyncio
-async def test_query_sends_get_request():
+async def test_query_sends_post_request():
     client = EdgeQuakeClient(base_url="http://localhost:8080")
 
     with patch("src.ingestion.edgequake_client.httpx.AsyncClient") as MockClient:
@@ -692,6 +780,21 @@ async def test_query_sends_get_request():
         result = await client.query("리스 회계처리", mode="hybrid")
 
     assert "response" in result
+
+
+@pytest.mark.asyncio
+async def test_health_returns_bool():
+    client = EdgeQuakeClient(base_url="http://localhost:8080")
+
+    with patch("src.ingestion.edgequake_client.httpx.AsyncClient") as MockClient:
+        mock_instance = AsyncMock()
+        MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
+        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_instance.get.return_value = MagicMock(status_code=200)
+
+        result = await client.health()
+
+    assert result is True
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -707,7 +810,10 @@ import httpx
 
 
 class EdgeQuakeClient:
-    """EdgeQuake REST API 클라이언트."""
+    """EdgeQuake REST API 클라이언트.
+
+    참고: API 엔드포인트는 EdgeQuake Swagger UI에서 확인한 실제 경로로 교체 필요.
+    """
 
     def __init__(self, base_url: str = "http://localhost:8080"):
         self.base_url = base_url.rstrip("/")
@@ -722,9 +828,7 @@ class EdgeQuakeClient:
             response.raise_for_status()
             return response.json()
 
-    async def query(
-        self, query: str, mode: str = "hybrid", top_k: int = 10
-    ) -> dict:
+    async def query(self, query: str, mode: str = "hybrid", top_k: int = 10) -> dict:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.base_url}/api/query",
@@ -737,20 +841,16 @@ class EdgeQuakeClient:
     async def health(self) -> bool:
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.base_url}/api/health", timeout=5.0
-                )
+                response = await client.get(f"{self.base_url}/api/health", timeout=5.0)
                 return response.status_code == 200
         except httpx.RequestError:
             return False
 ```
 
-> **참고:** EdgeQuake의 실제 API 엔드포인트와 페이로드 형식은 공식 문서/소스코드를 확인하여 조정 필요. 위는 LightRAG 구현들의 일반적인 패턴 기반이며, `docker compose up` 후 Swagger UI(`http://localhost:8080/swagger-ui`)에서 정확한 API를 확인한다.
-
 - [ ] **Step 4: 테스트 실행 — 성공 확인**
 
 Run: `uv run pytest tests/ingestion/test_edgequake_client.py -v`
-Expected: 2 passed
+Expected: 3 passed
 
 - [ ] **Step 5: 커밋**
 
@@ -761,7 +861,76 @@ git commit -m "feat: EdgeQuake REST API 클라이언트 구현"
 
 ---
 
-## Task 6: PydanticAI 응답 스키마 정의
+## Task 6: EdgeQuake 도메인 커스터마이징 설정
+
+**Files:**
+- Create: `config/edgequake_entity_config.json`
+
+> 이 태스크는 EdgeQuake의 실제 커스터마이징 메커니즘에 따라 조정 필요. EdgeQuake가 프롬프트 커스터마이징을 지원하는 방식(설정 파일, API, 환경변수)을 Task 1에서 조사한 결과를 바탕으로 작성한다.
+
+- [ ] **Step 1: 엔티티/관계 설정 파일 작성**
+
+`config/edgequake_entity_config.json`:
+```json
+{
+  "entity_types": [
+    {
+      "name": "concept",
+      "subtypes": [
+        {
+          "subtype": "standard",
+          "description": "K-IFRS 회계기준서 (예: K-IFRS 1116, 제1028호)",
+          "extraction_hints": ["제\\d{4}호", "K-IFRS\\s*\\d{4}"]
+        },
+        {
+          "subtype": "accounting_concept",
+          "description": "회계 개념 (예: 사용권자산, 감가상각, 공정가치)"
+        }
+      ]
+    },
+    {
+      "name": "event",
+      "description": "회계처리 단계 (예: 최초인식, 후속측정, 제거)"
+    },
+    {
+      "name": "organization",
+      "description": "규제기관 (예: 금융감독원, IASB)"
+    },
+    {
+      "name": "product",
+      "description": "재무제표 항목 (예: 재무상태표, 손익계산서)"
+    }
+  ],
+  "relationship_types": [
+    {"name": "참조", "description": "기준서 간 상호참조"},
+    {"name": "소속", "description": "계층 구조 (장 > 절 > 문단)"},
+    {"name": "적용", "description": "개념 → 회계처리 연결"},
+    {"name": "예외", "description": "조건부 예외 조항", "keywords": ["다만", "제외하고", "적용하지 아니한다"]},
+    {"name": "후속", "description": "처리 순서/단계"}
+  ],
+  "extraction_prompt_additions": "엔티티 추출 시 다음 규칙을 따르세요:\n1. '제XXXX호' 패턴을 우선적으로 standard 엔티티로 추출\n2. '문단 XX' 패턴을 문단 참조로 추출\n3. '다만', '제외하고', '적용하지 아니한다' 등의 표현이 있으면 '예외' 관계로 명시 추출\n4. technology, location 타입은 사용하지 않음"
+}
+```
+
+- [ ] **Step 2: EdgeQuake에 설정 적용**
+
+EdgeQuake의 실제 커스터마이징 방법에 따라 적용한다:
+- API를 통한 설정: `curl -X POST http://localhost:8080/api/config -d @config/edgequake_entity_config.json`
+- 환경변수: docker-compose.yml에 설정 경로 마운트
+- 프롬프트 파일: EdgeQuake 프롬프트 디렉토리에 복사
+
+> 구체적인 적용 방법은 Task 1에서 조사한 EdgeQuake 문서를 참조한다.
+
+- [ ] **Step 3: 커밋**
+
+```bash
+git add config/edgequake_entity_config.json
+git commit -m "feat: EdgeQuake 도메인 커스터마이징 설정 (회계 엔티티/관계 타입)"
+```
+
+---
+
+## Task 7: PydanticAI 응답 스키마 정의
 
 **Files:**
 - Create: `src/generation/__init__.py`
@@ -781,24 +950,24 @@ from src.generation.schemas import Citation, RAGResponse
 def test_citation_requires_standard():
     citation = Citation(기준서="1116", 문단="31-33", 내용="사용권자산을...")
     assert citation.기준서 == "1116"
+    assert citation.문단 == "31-33"
 
 
-def test_rag_response_requires_citations():
-    with pytest.raises(ValidationError):
+def test_rag_response_rejects_empty_citations():
+    with pytest.raises(ValidationError, match="최소 1개의 인용"):
         RAGResponse(answer="답변", citations=[], related_standards=[], confidence=0.9)
 
 
 def test_valid_rag_response():
     response = RAGResponse(
         answer="사용권자산은 정액법으로 감가상각합니다.",
-        citations=[
-            Citation(기준서="1116", 문단="31", 내용="사용권자산의 감가상각...")
-        ],
+        citations=[Citation(기준서="1116", 문단="31", 내용="사용권자산의 감가상각...")],
         related_standards=["1028"],
         confidence=0.92,
     )
     assert len(response.citations) == 1
     assert response.confidence == 0.92
+    assert response.related_standards == ["1028"]
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -847,7 +1016,7 @@ git commit -m "feat: PydanticAI 응답 스키마 정의 (인용 필수)"
 
 ---
 
-## Task 7: Query Rewriter 구현
+## Task 8: Query Rewriter 구현
 
 **Files:**
 - Create: `src/retrieval/__init__.py`
@@ -863,14 +1032,16 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from src.retrieval.query_rewriter import QueryRewriter
 
+EXPECTED_REWRITE = "K-IFRS 1116 사용권자산 감가상각 방법"
+
 
 @pytest.mark.asyncio
-async def test_rewrite_transforms_natural_language():
+async def test_rewrite_returns_transformed_query():
     rewriter = QueryRewriter()
 
     mock_response = AsyncMock()
     mock_response.choices = [
-        AsyncMock(message=AsyncMock(content="K-IFRS 1116 사용권자산 감가상각 방법"))
+        AsyncMock(message=AsyncMock(content=EXPECTED_REWRITE))
     ]
 
     with patch("src.retrieval.query_rewriter.AsyncOpenAI") as MockOpenAI:
@@ -879,8 +1050,7 @@ async def test_rewrite_transforms_natural_language():
 
         result = await rewriter.rewrite("리스 계약에서 감가상각 어떻게 해?")
 
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert result == EXPECTED_REWRITE
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -899,7 +1069,7 @@ REWRITE_PROMPT = """당신은 K-IFRS 회계기준서 검색을 위한 쿼리 변
 
 규칙:
 - 관련 기준서 번호가 있으면 포함 (예: K-IFRS 1116)
-- 회계 전문 용어 사용 (예: "감가상각" → "감가상각", "빌려쓰는 자산" → "사용권자산")
+- 회계 전문 용어 사용 (예: "빌려쓰는 자산" → "사용권자산")
 - 핵심 키워드 중심으로 간결하게
 
 사용자 질문: {query}
@@ -915,9 +1085,7 @@ class QueryRewriter:
     async def rewrite(self, query: str) -> str:
         response = await self.client.chat.completions.create(
             model=self.model,
-            messages=[
-                {"role": "user", "content": REWRITE_PROMPT.format(query=query)}
-            ],
+            messages=[{"role": "user", "content": REWRITE_PROMPT.format(query=query)}],
             temperature=0.0,
             max_tokens=200,
         )
@@ -938,7 +1106,7 @@ git commit -m "feat: Query Rewriter 구현 (자연어 → 회계용어 변환)"
 
 ---
 
-## Task 8: Query Router 구현
+## Task 9: Query Router 구현
 
 **Files:**
 - Create: `src/retrieval/query_router.py`
@@ -953,20 +1121,22 @@ from src.retrieval.query_router import QueryRouter
 
 def test_route_specific_standard_to_local():
     router = QueryRouter()
-    mode = router.route("K-IFRS 1116 문단 31 사용권자산 감가상각")
-    assert mode == "local"
+    assert router.route("K-IFRS 1116 문단 31 사용권자산 감가상각") == "local"
 
 
 def test_route_broad_topic_to_global():
     router = QueryRouter()
-    mode = router.route("리스 관련 기준서 전체 개요")
-    assert mode == "global"
+    assert router.route("리스 관련 기준서 전체 개요") == "global"
 
 
 def test_route_complex_query_to_hybrid():
     router = QueryRouter()
-    mode = router.route("사용권자산 감가상각과 관련 예외 조항")
-    assert mode == "hybrid"
+    assert router.route("사용권자산 감가상각과 관련 예외 조항") == "hybrid"
+
+
+def test_route_standard_ref_with_broad_keyword_to_hybrid():
+    router = QueryRouter()
+    assert router.route("제1116호 관련 기준서 전체") == "hybrid"
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -1001,7 +1171,7 @@ class QueryRouter:
 - [ ] **Step 4: 테스트 실행 — 성공 확인**
 
 Run: `uv run pytest tests/retrieval/test_query_router.py -v`
-Expected: 3 passed
+Expected: 4 passed
 
 - [ ] **Step 5: 커밋**
 
@@ -1012,7 +1182,7 @@ git commit -m "feat: Query Router 구현 (규칙 기반 모드 선택)"
 
 ---
 
-## Task 9: CRAG 품질 게이트 구현
+## Task 10: CRAG 품질 게이트 구현
 
 **Files:**
 - Create: `src/retrieval/crag_gate.py`
@@ -1061,6 +1231,24 @@ async def test_evaluate_wrong():
         )
 
     assert result == CRAGResult.WRONG
+
+
+@pytest.mark.asyncio
+async def test_evaluate_ambiguous():
+    gate = CRAGGate()
+    mock_response = AsyncMock()
+    mock_response.choices = [AsyncMock(message=AsyncMock(content="AMBIGUOUS"))]
+
+    with patch("src.retrieval.crag_gate.AsyncOpenAI") as MockOpenAI:
+        instance = MockOpenAI.return_value
+        instance.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        result = await gate.evaluate(
+            query="리스 관련",
+            search_results=[{"content": "부분적 관련 내용"}],
+        )
+
+    assert result == CRAGResult.AMBIGUOUS
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -1104,22 +1292,13 @@ class CRAGGate:
         self.client = AsyncOpenAI()
         self.model = model
 
-    async def evaluate(
-        self, query: str, search_results: list[dict]
-    ) -> CRAGResult:
-        results_text = "\n---\n".join(
-            r.get("content", str(r)) for r in search_results
-        )
+    async def evaluate(self, query: str, search_results: list[dict]) -> CRAGResult:
+        results_text = "\n---\n".join(r.get("content", str(r)) for r in search_results)
 
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {
-                    "role": "user",
-                    "content": CRAG_PROMPT.format(
-                        query=query, search_results=results_text
-                    ),
-                }
+                {"role": "user", "content": CRAG_PROMPT.format(query=query, search_results=results_text)}
             ],
             temperature=0.0,
             max_tokens=20,
@@ -1137,7 +1316,7 @@ class CRAGGate:
 - [ ] **Step 4: 테스트 실행 — 성공 확인**
 
 Run: `uv run pytest tests/retrieval/test_crag_gate.py -v`
-Expected: 2 passed
+Expected: 3 passed
 
 - [ ] **Step 5: 커밋**
 
@@ -1148,7 +1327,7 @@ git commit -m "feat: CRAG 품질 게이트 구현"
 
 ---
 
-## Task 10: 응답 생성기 구현
+## Task 11: 응답 생성기 구현 (PydanticAI 기반)
 
 **Files:**
 - Create: `src/generation/answer_generator.py`
@@ -1159,8 +1338,7 @@ git commit -m "feat: CRAG 품질 게이트 구현"
 `tests/generation/test_answer_generator.py`:
 ```python
 import pytest
-import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 from src.generation.answer_generator import AnswerGenerator
 from src.generation.schemas import RAGResponse
 
@@ -1169,23 +1347,17 @@ from src.generation.schemas import RAGResponse
 async def test_generate_returns_rag_response():
     generator = AnswerGenerator()
 
-    mock_json = json.dumps(
-        {
-            "answer": "사용권자산은 정액법으로 감가상각합니다.",
-            "citations": [
-                {"기준서": "1116", "문단": "31", "내용": "사용권자산의 감가상각..."}
-            ],
-            "related_standards": ["1028"],
-            "confidence": 0.92,
-        }
+    mock_result = MagicMock()
+    mock_result.data = RAGResponse(
+        answer="사용권자산은 정액법으로 감가상각합니다.",
+        citations=[MagicMock(기준서="1116", 문단="31", 내용="사용권자산의 감가상각...")],
+        related_standards=["1028"],
+        confidence=0.92,
     )
 
-    mock_response = AsyncMock()
-    mock_response.choices = [AsyncMock(message=AsyncMock(content=mock_json))]
-
-    with patch("src.generation.answer_generator.AsyncOpenAI") as MockOpenAI:
-        instance = MockOpenAI.return_value
-        instance.chat.completions.create = AsyncMock(return_value=mock_response)
+    with patch("src.generation.answer_generator.Agent") as MockAgent:
+        instance = MockAgent.return_value
+        instance.run = AsyncMock(return_value=mock_result)
 
         result = await generator.generate(
             query="사용권자산 감가상각",
@@ -1194,6 +1366,7 @@ async def test_generate_returns_rag_response():
 
     assert isinstance(result, RAGResponse)
     assert len(result.citations) >= 1
+    assert result.confidence == 0.92
 ```
 
 - [ ] **Step 2: 테스트 실행 — 실패 확인**
@@ -1205,9 +1378,7 @@ Expected: FAIL
 
 `src/generation/answer_generator.py`:
 ```python
-import json
-
-from openai import AsyncOpenAI
+from pydantic_ai import Agent
 
 from src.generation.schemas import RAGResponse
 
@@ -1218,50 +1389,24 @@ ANSWER_PROMPT = """당신은 K-IFRS 회계기준서 전문가입니다.
 1. 반드시 검색 결과에 있는 내용만 사용하세요
 2. 기준서 번호와 문단 번호를 인용하세요
 3. 관련 예외 조항이 있으면 반드시 언급하세요
-
-질문: {query}
-
-검색 결과:
-{context}
-
-응답을 다음 JSON 형식으로 출력하세요:
-{{
-    "answer": "답변 내용",
-    "citations": [{{"기준서": "번호", "문단": "번호", "내용": "인용 내용"}}],
-    "related_standards": ["관련 기준서 번호들"],
-    "confidence": 0.0~1.0
-}}
-
-JSON 응답:"""
+4. confidence는 검색 결과의 관련성과 완전성에 따라 0.0~1.0 사이로 설정하세요"""
 
 
 class AnswerGenerator:
-    def __init__(self, model: str = "gpt-4o"):
-        self.client = AsyncOpenAI()
-        self.model = model
+    def __init__(self, model: str = "openai:gpt-4o"):
+        self.agent = Agent(
+            model,
+            result_type=RAGResponse,
+            system_prompt=ANSWER_PROMPT,
+        )
 
     async def generate(self, query: str, context: list[dict]) -> RAGResponse:
-        context_text = "\n---\n".join(
-            c.get("content", str(c)) for c in context
-        )
+        context_text = "\n---\n".join(c.get("content", str(c)) for c in context)
 
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": ANSWER_PROMPT.format(
-                        query=query, context=context_text
-                    ),
-                }
-            ],
-            temperature=0.0,
-            response_format={"type": "json_object"},
-        )
+        prompt = f"질문: {query}\n\n검색 결과:\n{context_text}"
 
-        raw = response.choices[0].message.content.strip()
-        data = json.loads(raw)
-        return RAGResponse(**data)
+        result = await self.agent.run(prompt)
+        return result.data
 ```
 
 - [ ] **Step 4: 테스트 실행 — 성공 확인**
@@ -1273,21 +1418,59 @@ Expected: 1 passed
 
 ```bash
 git add src/generation/answer_generator.py tests/generation/test_answer_generator.py
-git commit -m "feat: 응답 생성기 구현 (구조화 JSON 출력)"
+git commit -m "feat: PydanticAI 기반 응답 생성기 구현"
 ```
 
 ---
 
-## Task 11: LangGraph 오케스트레이션 워크플로우 구현
+## Task 12: EdgeQuake 검색 래퍼 구현
 
 **Files:**
-- Create: `src/orchestration/__init__.py`
-- Create: `src/orchestration/graph.py`
 - Create: `src/retrieval/edgequake_searcher.py`
-- Create: `tests/orchestration/__init__.py`
-- Create: `tests/orchestration/test_graph.py`
+- Create: `tests/retrieval/test_edgequake_searcher.py`
 
-- [ ] **Step 1: EdgeQuake 검색 래퍼 작성**
+- [ ] **Step 1: 테스트 작성**
+
+`tests/retrieval/test_edgequake_searcher.py`:
+```python
+import pytest
+from unittest.mock import AsyncMock
+from src.retrieval.edgequake_searcher import EdgeQuakeSearcher
+
+
+@pytest.mark.asyncio
+async def test_search_returns_sources():
+    mock_client = AsyncMock()
+    mock_client.query.return_value = {
+        "response": "답변",
+        "sources": [{"content": "K-IFRS 1116 문단 31..."}],
+    }
+
+    searcher = EdgeQuakeSearcher(client=mock_client)
+    results = await searcher.search("사용권자산", mode="local")
+
+    assert len(results) == 1
+    assert results[0]["content"] == "K-IFRS 1116 문단 31..."
+    mock_client.query.assert_called_once_with("사용권자산", mode="local", top_k=10)
+
+
+@pytest.mark.asyncio
+async def test_search_empty_results():
+    mock_client = AsyncMock()
+    mock_client.query.return_value = {"response": "", "sources": []}
+
+    searcher = EdgeQuakeSearcher(client=mock_client)
+    results = await searcher.search("존재하지않는질의")
+
+    assert results == []
+```
+
+- [ ] **Step 2: 테스트 실행 — 실패 확인**
+
+Run: `uv run pytest tests/retrieval/test_edgequake_searcher.py -v`
+Expected: FAIL
+
+- [ ] **Step 3: 구현**
 
 `src/retrieval/edgequake_searcher.py`:
 ```python
@@ -1300,47 +1483,106 @@ class EdgeQuakeSearcher:
     def __init__(self, client: EdgeQuakeClient | None = None):
         self.client = client or EdgeQuakeClient()
 
-    async def search(
-        self, query: str, mode: str = "hybrid", top_k: int = 10
-    ) -> list[dict]:
+    async def search(self, query: str, mode: str = "hybrid", top_k: int = 10) -> list[dict]:
         result = await self.client.query(query, mode=mode, top_k=top_k)
         return result.get("sources", [])
 ```
 
-- [ ] **Step 2: 테스트 작성**
+- [ ] **Step 4: 테스트 실행 — 성공 확인**
+
+Run: `uv run pytest tests/retrieval/test_edgequake_searcher.py -v`
+Expected: 2 passed
+
+- [ ] **Step 5: 커밋**
+
+```bash
+git add src/retrieval/edgequake_searcher.py tests/retrieval/test_edgequake_searcher.py
+git commit -m "feat: EdgeQuake 검색 래퍼 구현"
+```
+
+---
+
+## Task 13: LangGraph 오케스트레이션 워크플로우 구현
+
+**Files:**
+- Create: `src/orchestration/__init__.py`
+- Create: `src/orchestration/graph.py`
+- Create: `tests/orchestration/__init__.py`
+- Create: `tests/orchestration/test_graph.py`
+
+- [ ] **Step 1: 테스트 작성**
 
 `tests/orchestration/test_graph.py`:
 ```python
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from src.orchestration.graph import build_graph, GraphState
+from unittest.mock import AsyncMock, patch
+from src.orchestration.graph import build_graph, GraphState, should_retry
+from src.retrieval.crag_gate import CRAGResult
 
 
-def test_build_graph_returns_compiled_graph():
+def test_build_graph_has_expected_nodes():
     graph = build_graph()
     assert graph is not None
 
 
-def test_graph_state_has_required_fields():
-    state = GraphState(
-        query="테스트 질문",
-        rewritten_query="",
-        mode="hybrid",
-        search_results=[],
-        crag_result=None,
-        answer=None,
-        retry_count=0,
-    )
-    assert state["query"] == "테스트 질문"
-    assert state["retry_count"] == 0
+def test_should_retry_returns_generate_on_correct():
+    state: GraphState = {
+        "query": "test",
+        "rewritten_query": "test",
+        "mode": "hybrid",
+        "search_results": [],
+        "crag_result": CRAGResult.CORRECT.value,
+        "answer": None,
+        "retry_count": 0,
+    }
+    assert should_retry(state) == "generate"
+
+
+def test_should_retry_returns_retry_on_wrong():
+    state: GraphState = {
+        "query": "test",
+        "rewritten_query": "test",
+        "mode": "hybrid",
+        "search_results": [],
+        "crag_result": CRAGResult.WRONG.value,
+        "answer": None,
+        "retry_count": 0,
+    }
+    assert should_retry(state) == "retry"
+
+
+def test_should_retry_returns_generate_on_max_retries():
+    state: GraphState = {
+        "query": "test",
+        "rewritten_query": "test",
+        "mode": "hybrid",
+        "search_results": [],
+        "crag_result": CRAGResult.WRONG.value,
+        "answer": None,
+        "retry_count": 2,
+    }
+    assert should_retry(state) == "generate"
+
+
+def test_should_retry_returns_retry_on_ambiguous():
+    state: GraphState = {
+        "query": "test",
+        "rewritten_query": "test",
+        "mode": "local",
+        "search_results": [],
+        "crag_result": CRAGResult.AMBIGUOUS.value,
+        "answer": None,
+        "retry_count": 1,
+    }
+    assert should_retry(state) == "retry"
 ```
 
-- [ ] **Step 3: 테스트 실행 — 실패 확인**
+- [ ] **Step 2: 테스트 실행 — 실패 확인**
 
 Run: `uv run pytest tests/orchestration/test_graph.py -v`
 Expected: FAIL
 
-- [ ] **Step 4: 구현**
+- [ ] **Step 3: 구현**
 
 `src/orchestration/graph.py`:
 ```python
@@ -1382,17 +1624,13 @@ async def route_query(state: GraphState) -> GraphState:
 
 async def search(state: GraphState) -> GraphState:
     searcher = EdgeQuakeSearcher()
-    results = await searcher.search(
-        state["rewritten_query"], mode=state["mode"]
-    )
+    results = await searcher.search(state["rewritten_query"], mode=state["mode"])
     return {**state, "search_results": results}
 
 
 async def evaluate_crag(state: GraphState) -> GraphState:
     gate = CRAGGate()
-    result = await gate.evaluate(
-        state["rewritten_query"], state["search_results"]
-    )
+    result = await gate.evaluate(state["rewritten_query"], state["search_results"])
     return {**state, "crag_result": result.value}
 
 
@@ -1410,9 +1648,7 @@ async def retry_search(state: GraphState) -> GraphState:
     next_mode = modes[(current_idx + 1) % len(modes)]
 
     searcher = EdgeQuakeSearcher()
-    results = await searcher.search(
-        state["rewritten_query"], mode=next_mode
-    )
+    results = await searcher.search(state["rewritten_query"], mode=next_mode)
     return {
         **state,
         "mode": next_mode,
@@ -1423,9 +1659,7 @@ async def retry_search(state: GraphState) -> GraphState:
 
 async def generate_answer(state: GraphState) -> GraphState:
     generator = AnswerGenerator()
-    answer = await generator.generate(
-        state["query"], state["search_results"]
-    )
+    answer = await generator.generate(state["query"], state["search_results"])
     return {**state, "answer": answer}
 
 
@@ -1450,12 +1684,12 @@ def build_graph() -> StateGraph:
     return workflow.compile()
 ```
 
-- [ ] **Step 5: 테스트 실행 — 성공 확인**
+- [ ] **Step 4: 테스트 실행 — 성공 확인**
 
 Run: `uv run pytest tests/orchestration/test_graph.py -v`
-Expected: 2 passed
+Expected: 5 passed
 
-- [ ] **Step 6: 커밋**
+- [ ] **Step 5: 커밋**
 
 ```bash
 git add src/retrieval/edgequake_searcher.py src/orchestration/__init__.py src/orchestration/graph.py tests/orchestration/__init__.py tests/orchestration/test_graph.py
@@ -1464,12 +1698,66 @@ git commit -m "feat: LangGraph 오케스트레이션 워크플로우 구현 (CRA
 
 ---
 
-## Task 12: 배치 인제스트 스크립트 구현
+## Task 14: 배치 인제스트 스크립트 구현
 
 **Files:**
 - Create: `scripts/ingest.py`
+- Create: `tests/test_ingest.py`
 
-- [ ] **Step 1: 구현**
+- [ ] **Step 1: 테스트 작성**
+
+`tests/test_ingest.py`:
+```python
+import pytest
+from pathlib import Path
+from unittest.mock import AsyncMock, patch, MagicMock
+from scripts.ingest import ingest_directory
+
+
+@pytest.mark.asyncio
+async def test_ingest_processes_pdf_files(tmp_path):
+    pdf_file = tmp_path / "test.pdf"
+    pdf_file.write_bytes(b"fake pdf")
+
+    with patch("scripts.ingest.DoclingParser") as MockParser, \
+         patch("scripts.ingest.Preprocessor") as MockPreprocessor, \
+         patch("scripts.ingest.EdgeQuakeClient") as MockClient:
+
+        mock_parsed = MagicMock()
+        MockParser.return_value.parse.return_value = mock_parsed
+
+        mock_chunk = MagicMock()
+        mock_chunk.text = "test text"
+        mock_chunk.metadata = {}
+        mock_chunk.hierarchy_path = "test > path"
+        mock_chunk.cross_references = []
+        MockPreprocessor.return_value.chunk.return_value = [mock_chunk]
+
+        MockClient.return_value.ingest_document = AsyncMock(return_value={"status": "ok"})
+
+        stats = await ingest_directory(tmp_path)
+
+    assert stats["total"] == 1
+    assert stats["success"] == 1
+    assert stats["failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_ingest_skips_unsupported_files(tmp_path):
+    txt_file = tmp_path / "test.txt"
+    txt_file.write_text("not supported")
+
+    stats = await ingest_directory(tmp_path)
+
+    assert stats["total"] == 0
+```
+
+- [ ] **Step 2: 테스트 실행 — 실패 확인**
+
+Run: `uv run pytest tests/test_ingest.py -v`
+Expected: FAIL
+
+- [ ] **Step 3: 구현**
 
 `scripts/ingest.py`:
 ```python
@@ -1505,17 +1793,11 @@ async def ingest_directory(data_dir: Path) -> dict:
 
     for file_path in files:
         try:
-            # HWP 변환
             converted = converter.convert(file_path)
-
-            # Docling 파싱
             parsed = parser.parse(converted)
-
-            # 전처리 (청킹)
             chunks = preprocessor.chunk(parsed)
             logger.info(f"  {file_path.name}: {len(chunks)} chunks")
 
-            # EdgeQuake 인제스트
             for chunk in chunks:
                 await client.ingest_document(
                     text=chunk.text,
@@ -1540,7 +1822,7 @@ async def ingest_directory(data_dir: Path) -> dict:
 
 def main():
     config = Config()
-    data_dir = config.DATA_DIR
+    data_dir = config.data_dir
 
     if not data_dir.exists():
         logger.error(f"Data directory not found: {data_dir}")
@@ -1559,16 +1841,21 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: 커밋**
+- [ ] **Step 4: 테스트 실행 — 성공 확인**
+
+Run: `uv run pytest tests/test_ingest.py -v`
+Expected: 2 passed
+
+- [ ] **Step 5: 커밋**
 
 ```bash
-git add scripts/ingest.py
+git add scripts/ingest.py tests/test_ingest.py
 git commit -m "feat: 배치 인제스트 스크립트 구현"
 ```
 
 ---
 
-## Task 13: CLI 질의 스크립트 구현
+## Task 15: CLI 질의 스크립트 구현
 
 **Files:**
 - Create: `scripts/query.py`
@@ -1629,7 +1916,7 @@ git commit -m "feat: CLI 질의 스크립트 구현"
 
 ---
 
-## Task 14: 전체 테스트 실행 및 통합 확인
+## Task 16: 전체 테스트 실행 및 통합 확인
 
 - [ ] **Step 1: 전체 테스트 실행**
 
@@ -1644,12 +1931,12 @@ Expected: All tests passed
 
 ```bash
 git add -A
-git commit -m "fix: 전체 테스트 통과 확인 및 수정"
+git commit -m "test: 전체 테스트 통과 확인"
 ```
 
 ---
 
-## 파일럿 테스트 (Task 14 이후)
+## 파일럿 테스트 (Task 16 이후)
 
 > 전체 구현 후 소규모 파일럿으로 검증:
 > 1. 회계기준서 PDF 5개를 `data/` 디렉토리에 배치
@@ -1657,3 +1944,4 @@ git commit -m "fix: 전체 테스트 통과 확인 및 수정"
 > 3. `uv run python scripts/ingest.py`로 인제스트
 > 4. `uv run python scripts/query.py "사용권자산 감가상각 방법은?"`으로 질의 테스트
 > 5. 응답 품질과 인용 정확도 확인
+> 6. EdgeQuake 그래프 시각화 UI에서 엔티티/관계 구조 확인
