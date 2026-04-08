@@ -54,8 +54,8 @@ QUALITY_COLOR = {
     "bad": "red",
 }
 
-DATASET_PATH = Path("easy_sample.json")
-MD_PATH = Path("easy_sample.md")
+DATASET_PATH = Path("dataset_accounting_sample.json")
+MD_PATH = Path("data/회계_sample.md")
 
 
 # =============================================================================
