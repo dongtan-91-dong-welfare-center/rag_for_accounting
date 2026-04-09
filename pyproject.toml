@@ -5,11 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-<<<<<<< Updated upstream
-    "openpyxl>=3.1.5",
-    "streamlit>=1.55.0",
-=======
-    "docling>=2.0.0",
-    "tiktoken>=0.7.0",
->>>>>>> Stashed changes
+    "docling>=2.85.0",
+    "streamlit>=1.56.0",
 ]
