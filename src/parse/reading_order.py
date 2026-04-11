@@ -9,10 +9,9 @@ Reading Order 재정렬 모듈
 import logging
 from docling_core.types.doc import DoclingDocument
 from docling_core.types.doc.document import RefItem
-from src.parse.parser_dtos import _ItemInfo
+from src.parse.parser_dtos import _ItemInfo, SAME_LINE_RATIO
 
 _log = logging.getLogger(__name__)
-
 
 
 def _resolve_ref(doc: DoclingDocument, ref: str):

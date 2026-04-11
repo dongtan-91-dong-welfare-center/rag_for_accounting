@@ -101,3 +101,6 @@ CLUSTER_DISTANCE_FACTOR = 1.5
 # ── 페이지 걸침 테이블 병합 임계값 ──
 _PAGE_TOP_THRESHOLD = 700   # PDF t좌표가 이 이상이면 페이지 상단
 _PAGE_BOT_THRESHOLD = 150   # PDF b좌표가 이 이하이면 페이지 하단
+
+# 두 아이템의 top y 차이가 (작은 쪽 높이 × 이 비율) 이내면 같은 라인
+SAME_LINE_RATIO = 0.5
