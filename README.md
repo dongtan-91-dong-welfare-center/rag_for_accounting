@@ -34,7 +34,10 @@ uv run python src/main.py
 ```
 src/
 ├── agent/              # 에이전트 로직 및 워크플로우
-│   ├── nodes/          # 워크플로우의 각 노드 (rewrite, search, evaluate, generate)
+│   ├── nodes/          # 워크플로우의 각 노드 (evaluate, generate, rewrite)
+│   │   ├── evaluate.py # 품질 평가 노드
+│   │   ├── generate.py # 답변 생성 노드
+│   │   └── rewrite.py  # 질문 재작성 노드
 │   ├── prompts.py      # LLM 프롬프트 정의
 │   └── workflow.py     # LangGraph 워크플로우 오케스트레이션
 ├── db/                 # 벡터 데이터베이스 연동
@@ -45,7 +48,17 @@ src/
 ├── models/             # 데이터 모델 및 스키마
 │   ├── schemas.py      # Pydantic 스키마 정의
 │   └── state.py        # LangGraph State 정의
-└── main.py             # 애플리케이션 진입점
+├── parse/              # 추가 파싱 및 클러스터링
+│   ├── cluster_merge.py # 클러스터 병합 로직
+│   ├── layout_config.py # 레이아웃 설정
+│   ├── parser.py       # 파서 구현
+│   └── parser_dtos.py  # 파서 DTO 정의
+├── retrieval/          # 검색 및 리랭킹
+│   ├── reranker.py     # 리랭킹 로직
+│   └── searcher.py     # 검색 구현
+└── utils/              # 유틸리티 및 설정
+    ├── config.py       # 설정 관리
+    └── logger.py       # 로깅 유틸리티
 ```
 
 ## 📖 문서 학습
