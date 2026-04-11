@@ -11,29 +11,22 @@
 
 ## 🛠️ 설치 및 실행
 
-### 1. 환경 설정
+### 1. 환경 설정 및 의존성 설정
 
 프로젝트 루트 디렉토리에서 가상 환경을 생성하고 활성화합니다.
+uv 사용을 권장합니다.
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-```
-
-### 2. 의존성 설치
-
-필요한 라이브러리를 설치합니다.
-
-```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### 3. 실행
 
 에이전트 워크플로우를 실행합니다.
 
+<!-- 현재 구현되어 있지 않습니다. -->
 ```bash
-python src/main.py
+uv run python src/main.py
 ```
 
 ## 📂 프로젝트 구조
