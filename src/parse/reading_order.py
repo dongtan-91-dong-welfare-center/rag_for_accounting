@@ -1,9 +1,12 @@
 """
 Reading Order 재정렬 모듈
 
-1. group 컨테이너를 해제하여 모든 아이템을 flat하게 펼침
-2. top y 기준 위→아래 정렬
+1. body.children을 top y 기준 위→아래 정렬 (group은 topmost child 기준 위치)
+2. group 내부 children도 동일하게 정렬
 3. 같은 라인(top y 근접)이면 left→right 정렬
+
+※ group 해제(flatten)는 불가 — Docling이 parent-child 계층을 검증하므로
+   group ref는 body.children에 유지하고, 위치 기준으로만 정렬한다.
 """
 
 import logging
@@ -23,7 +26,8 @@ def _resolve_ref(doc: DoclingDocument, ref: str):
 
 
 def _get_item_info(doc: DoclingDocument, ref: RefItem) -> _ItemInfo | None:
-    """RefItem → 위치 정보. PDF 좌표를 화면 좌표(y 반전)로 변환."""
+    """RefItem → 위치 정보. PDF 좌표를 화면 좌표(y 반전)로 변환.
+    group은 topmost child의 위치를 사용."""
     item = _resolve_ref(doc, ref.cref)
     if item is None:
         return None
@@ -38,25 +42,21 @@ def _get_item_info(doc: DoclingDocument, ref: RefItem) -> _ItemInfo | None:
             left=p.bbox.l, top=nt, right=p.bbox.r, bottom=nb,
             width=p.bbox.r - p.bbox.l,
         )
+
+    # group: topmost child 기준
+    if hasattr(item, "children") and item.children:
+        best = None
+        for child in item.children:
+            ci = _get_item_info(doc, child)
+            if ci and (best is None or ci.top < best.top):
+                best = ci
+        if best:
+            return _ItemInfo(
+                ref=ref, page_no=best.page_no,
+                left=best.left, top=best.top, right=best.right, bottom=best.bottom,
+                width=best.width,
+            )
     return None
-
-
-def _flatten_children(doc: DoclingDocument, children: list[RefItem]) -> list[RefItem]:
-    """group을 재귀적으로 풀어서 leaf 아이템(texts/tables/pictures)만 남긴다."""
-    result = []
-    for ref in children:
-        item = _resolve_ref(doc, ref.cref)
-        if item is None:
-            result.append(ref)
-            continue
-
-        # group이면 children을 재귀적으로 풀기
-        if hasattr(item, "children") and item.children and not (hasattr(item, "prov") and item.prov):
-            result.extend(_flatten_children(doc, item.children))
-        else:
-            result.append(ref)
-
-    return result
 
 
 def _is_same_line(a: _ItemInfo, b: _ItemInfo) -> bool:
@@ -94,24 +94,15 @@ def _sort_items(items: list[_ItemInfo]) -> list[_ItemInfo]:
     return result
 
 
-def reorder_reading_order(doc: DoclingDocument) -> DoclingDocument:
-    """문서 reading order 재정렬.
+def _reorder_children(doc: DoclingDocument, children: list[RefItem]) -> list[RefItem]:
+    """children을 페이지별로 top y 정렬."""
+    if not children:
+        return children
 
-    1. body.children의 group을 해제하여 flat하게 펼침
-    2. 페이지별로 top y 정렬 (위→아래, 같은 라인은 왼→오른)
-    """
-    if not doc.body.children:
-        return doc
-
-    original_count = len(doc.body.children)
-
-    # 1. group 해제 → flat
-    flat_refs = _flatten_children(doc, doc.body.children)
-
-    # 2. 위치 정보 추출
     item_infos: list[_ItemInfo] = []
     no_info_refs: list[RefItem] = []
-    for ref in flat_refs:
+
+    for ref in children:
         info = _get_item_info(doc, ref)
         if info:
             item_infos.append(info)
@@ -119,9 +110,8 @@ def reorder_reading_order(doc: DoclingDocument) -> DoclingDocument:
             no_info_refs.append(ref)
 
     if not item_infos:
-        return doc
+        return children
 
-    # 3. 페이지별 정렬
     pages: dict[int, list[_ItemInfo]] = {}
     for info in item_infos:
         pages.setdefault(info.page_no, []).append(info)
@@ -130,15 +120,39 @@ def reorder_reading_order(doc: DoclingDocument) -> DoclingDocument:
     for page_no in sorted(pages.keys()):
         sorted_items.extend(_sort_items(pages[page_no]))
 
-    # 4. body.children 교체
     new_children = [info.ref for info in sorted_items]
     new_children.extend(no_info_refs)
-    doc.body.children = new_children
+    return new_children
 
+
+def reorder_reading_order(doc: DoclingDocument) -> DoclingDocument:
+    """문서 reading order 재정렬.
+
+    1. group 내부 children 정렬 (top y 위→아래)
+    2. body.children 정렬 (top y 위→아래, group은 topmost child 기준 위치)
+    """
+    if not doc.body.children:
+        return doc
+
+    # 1. group 내부 children 재정렬
+    groups_reordered = 0
+    for group in doc.groups:
+        if hasattr(group, "children") and group.children:
+            old = [r.cref for r in group.children]
+            group.children = _reorder_children(doc, group.children)
+            if [r.cref for r in group.children] != old:
+                groups_reordered += 1
+
+    # 2. body.children 재정렬
+    original_order = [ref.cref for ref in doc.body.children]
+    doc.body.children = _reorder_children(doc, doc.body.children)
+    new_order = [ref.cref for ref in doc.body.children]
+
+    changed = sum(1 for a, b in zip(original_order, new_order) if a != b)
     _log.info(
         f"Reading order 재정렬: "
-        f"group 해제 {original_count}→{len(flat_refs)}개, "
-        f"정렬 완료 {len(doc.body.children)}개"
+        f"body {len(doc.body.children)}개 중 {changed}개 변경, "
+        f"groups {groups_reordered}/{len(doc.groups)}개 내부 정렬"
     )
 
     return doc

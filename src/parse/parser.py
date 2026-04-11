@@ -187,8 +187,8 @@ class DoclingParser:
             while i + 1 < len(entries):
                 nxt = entries[i + 1]
                 if (nxt["page"] == curr["page"] + 1 and
-                    curr["b"] <= self._PAGE_BOT_THRESHOLD and
-                    nxt["t"] >= self._PAGE_TOP_THRESHOLD and
+                    curr["b"] <= _PAGE_BOT_THRESHOLD and
+                    nxt["t"] >= _PAGE_TOP_THRESHOLD and
                     len(curr_df.columns) == len(nxt["df"].columns)):
 
                     nxt_df = nxt["df"]
