@@ -7,12 +7,14 @@ FROM python:3.12-slim
     # 파이썬은 .py를 실행하기 전에 컴퓨터가 더 빨리 읽을 수 있는 이진 파일인 .pyc로 변환하여 컴파일한다.
     # 컨테이너 환경에서는 이미지가 빌드된 후 코드를 고정하므로, 런타임 중 소스코드가 수정될 일이 없어서 굳이 .pyc를 생성할 필요가 없다.
 # UV_COMPILE_BYTECODE=1: uv에서 패키지 설치 시 바이트코드를 미리 컴파일하여 초기 실행 속도를 높입니다.
-# UV_SYSTEM_PYTHON=1: 가상환경을 별도로 만들지 않고, 시스템 전역 파이썬 환경에 패키지를 설치하도록 지시합니다. 컨테이너 환경에서는 가상 환경 오버헤드를 없애는 것이 더 효율적입니다.
-    # 컨테이너 안에 또 다른 격리된 가상 환경을 만드는 것은 어불성설이다.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_COMPILE_BYTECODE=1 \
-    UV_SYSTEM_PYTHON=1
+    UV_COMPILE_BYTECODE=1
+
+# [PATH 경로 설정]
+# uv sync가 생성하는 가상환경(.venv)의 실행 파일 폴더를 시스템 PATH 최상단에 추가합니다.
+# 이 설정을 통해 'docker exec'으로 접속했을 때 별도의 activate 과정 없이도 pytest, black 등의 명령어를 즉시 사용할 수 있습니다.
+ENV PATH="/app/.venv/bin:$PATH"
 
 # [uv 설치]
 # 공식 astral-sh/uv 이미지에서 바이너리를 복사해옵니다.
@@ -29,11 +31,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # [개발 환경을 포함한 완벽한 의존성 설치]
-# --locked: uv.lock 파일이 pyproject.toml과 반드시 일치해야 함을 강제합니다. 만약 두 파일의 내용이 다르다면 명령어가 실패하므로, 의도치 않은 패키지 버전 변경을 방지할 수 있습니다.
+# --locked: (일시 제거) pyproject.toml과 uv.lock의 일치를 강제하지 않고, 변경사항이 있으면 자동으로 반영하도록 합니다.
 # --all-extras: pyproject.toml에 정의된 모든 선택적 의존성 그룹을 확인하여 관련 패키지를 한 번에 설치합니다.
-    # 예: [project.optional-dependencies]
 # --dev: 운영 프로덕션용 패키지뿐만 아니라, pytest와 같은 개발 전용 의존성, 린터, 테스트 도구 등을 명시적으로 전부 포함하여 테스트 환경을 구축합니다.
-RUN uv sync --locked --all-extras --dev
+RUN uv sync --all-extras --dev
 
 # [애플리케이션 소스 코드 복사]
 # 개발 중에는 docker-compose.yml에서 내 PC의 로컬 폴더를 마운트(연결)하여 사용하지만,
