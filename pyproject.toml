@@ -8,3 +8,6 @@ dependencies = [
     "docling>=2.85.0",
     "streamlit>=1.56.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
