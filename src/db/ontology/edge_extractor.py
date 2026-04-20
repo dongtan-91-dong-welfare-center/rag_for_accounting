@@ -5,18 +5,12 @@ LLM은 각 문장의 엣지 타입·참조 대상·속성을 판별해 JSON으�
 """
 
 import json
-import os
 from pydantic import BaseModel, Field
 from typing import Literal
-from openai import OpenAI
 
-# 모듈이 로드될 때 클라이언트를 생성한다.
-# 온톨로지 생성은 builder.py에서만 수행하며, main()에서 load_dotenv()를
-# 가장 먼저 호출하므로 이 시점에는 OPENAI_API_KEY가 이미 세팅되어 있다.
-_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+from src.utils.config import OPENAI_MODEL
+from src.utils.llm_client import client
 
-# LLM에게 역할과 출력 형식을 지정하는 시스템 프롬프트.
-# temperature=0으로 호출하므로 출력이 안정적으로 유지된다.
 _SYSTEM_PROMPT = """당신은 한국 회계기준서 텍스트에서 조항 간 관계(엣지)를 추출하는 전문가입니다.
 주어진 후보 문장 각각에 대해 엣지를 판별하고 JSON으로 반환합니다.
 
@@ -89,8 +83,8 @@ def extract_edges(
     # .chat        : 채팅 기능 그룹
     # .completions : 텍스트 완성(completion) 기능
     # .create(...) : OpenAI 서버로 HTTP 요청 전송, LLM 응답 반환
-    response = _client.chat.completions.create(
-        model="gpt-4o-mini",
+    response = client.chat.completions.create(
+        model=OPENAI_MODEL,
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
