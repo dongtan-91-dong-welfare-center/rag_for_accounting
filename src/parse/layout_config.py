@@ -111,24 +111,40 @@ def _patch_layout_postprocessor(
 
         # ── 겹침 검사 루프 ──
         # 각 클러스터에 대해 주변에 겹치는 클러스터가 있는지 확인합니다.
+        # bbox를 PAD만큼 확장하여, 인접(겹치지 않지만 가까운) 클러스터도
+        # 겹침으로 감지되게 합니다. 이렇게 해야 "의" 같은 조각이 분리되지 않습니다.
+        from docling.datamodel.base_models import BoundingBox as _BB
+        _PAD = 20  # 확장 픽셀
+
         for cluster in clusters:
-            # 공간 인덱스에서 이 클러스터의 bounding box 근처에 있는 후보를 빠르게 찾음
-            candidates = spatial_index.find_candidates(cluster.bbox)
-            # 유효한 클러스터만 남기고, 자기 자신은 제외
+            # bbox를 확장하여 후보 탐색 범위를 넓힘
+            padded = _BB(
+                l=cluster.bbox.l - _PAD,
+                t=cluster.bbox.t - _PAD,
+                r=cluster.bbox.r + _PAD,
+                b=cluster.bbox.b + _PAD,
+            )
+            candidates = spatial_index.find_candidates(padded)
             candidates &= valid_clusters.keys()
             candidates.discard(cluster.id)
 
             for other_id in candidates:
-                # check_overlap: 두 클러스터가 실제로 겹치는지 확인
-                # _ot와 _ct가 핵심! 기본 0.8 대신 사용자가 지정한 값(예: 0.15)을 사용합니다.
+                other_bbox = valid_clusters[other_id].bbox
+                # 원본 overlap 체크
                 if spatial_index.check_overlap(
-                    cluster.bbox,
-                    valid_clusters[other_id].bbox,
-                    _ot,   # overlap_threshold (겹침 비율 기준)
-                    _ct,   # containment_threshold (포함 비율 기준)
+                    cluster.bbox, other_bbox, _ot, _ct,
                 ):
-                    # 겹치면 두 클러스터를 같은 그룹으로 합침
                     uf.union(cluster.id, other_id)
+                    continue
+                # 같은 행 + 인접 거리 이내면 병합
+                if abs(cluster.bbox.t - other_bbox.t) < 15:
+                    h_gap = min(
+                        abs(other_bbox.l - cluster.bbox.r),
+                        abs(cluster.bbox.l - other_bbox.r),
+                    )
+                    overlap_h = not (cluster.bbox.r < other_bbox.l or other_bbox.r < cluster.bbox.l)
+                    if overlap_h or h_gap <= _PAD:
+                        uf.union(cluster.id, other_id)
 
         # ── 그룹별 병합 ──
         # Union-Find에서 같은 그룹으로 묶인 클러스터들을 실제로 하나로 합칩니다.
@@ -169,13 +185,15 @@ def _patch_layout_postprocessor(
     original_postprocess = LayoutPostprocessor.postprocess
 
     def patched_postprocess(self):
-        """원본 postprocess 실행 후 마커 병합을 추가로 진행합니다."""
-        from src.parse.cluster_merge import merge_marker_clusters
+        """원본 postprocess 실행 후 마커 병합 + 인접 병합을 추가로 진행합니다."""
+        from src.parse.cluster_merge import merge_marker_clusters, merge_adjacent_clusters
 
         # 원본 후처리 실행 → 클러스터 목록과 셀 목록을 받음
         clusters, cells = original_postprocess(self)
-        # 마커 클러스터를 인접 본문에 병합
+        # 1. 마커 클러스터(⑴, ⑵ 등)를 인접 본문에 병합
         clusters = merge_marker_clusters(clusters)
+        # 2. 같은 행 인접 클러스터를 거리 기반으로 병합 (OCR 전에 잘 묶기)
+        clusters = merge_adjacent_clusters(clusters)
         return clusters, cells
 
     # 이미 패치된 적이 없을 때만 적용 (중복 패치 방지)

@@ -271,6 +271,99 @@ def merge_marker_clusters(clusters: list[Cluster]) -> list[Cluster]:
 
 
 # ======================================================================
+# 거리 기반 인접 클러스터 병합
+# ======================================================================
+# 같은 행에서 가까이 있는 클러스터를 병합합니다.
+# Layout 모델이 하나의 텍스트 블록을 여러 클러스터로 분리하는 경우를 보정합니다.
+# clustering → OCR 순서이므로, 여기서 잘 묶어야 OCR 결과도 좋아집니다.
+
+
+def merge_adjacent_clusters(clusters: list[Cluster], max_gap: float = 40) -> list[Cluster]:
+    """같은 행에서 인접한 클러스터를 거리 기반으로 병합합니다 (Union-Find).
+
+    Args:
+        clusters: 클러스터 리스트
+        max_gap: 같은 행에서 이 거리(px) 이내면 병합 대상
+
+    Returns:
+        병합된 클러스터 리스트
+    """
+    if len(clusters) <= 1:
+        return clusters
+
+    n = len(clusters)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        px, py = find(x), find(y)
+        if px != py:
+            parent[px] = py
+
+    # 같은 행 + gap 이내인 클러스터 쌍을 union
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = clusters[i], clusters[j]
+            if not _is_same_row(a, b):
+                continue
+            gap = min(
+                abs(b.bbox.l - a.bbox.r),  # a가 왼쪽
+                abs(a.bbox.l - b.bbox.r),  # b가 왼쪽
+            )
+            # 겹치거나 gap 이내
+            overlap = not (a.bbox.r < b.bbox.l or b.bbox.r < a.bbox.l)
+            if overlap or gap <= max_gap:
+                union(i, j)
+
+    # 그룹별 병합
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        root = find(i)
+        groups.setdefault(root, []).append(i)
+
+    merge_count = 0
+    result = []
+    for indices in groups.values():
+        if len(indices) == 1:
+            result.append(clusters[indices[0]])
+            continue
+
+        merge_count += 1
+        # 왼→오른 정렬
+        group_clusters = sorted([clusters[i] for i in indices], key=lambda c: c.bbox.l)
+
+        # bbox 합치기
+        all_bboxes = [c.bbox for c in group_clusters]
+        merged_bbox = BoundingBox(
+            l=min(b.l for b in all_bboxes),
+            t=min(b.t for b in all_bboxes),
+            r=max(b.r for b in all_bboxes),
+            b=max(b.b for b in all_bboxes),
+        )
+
+        # 셀 합치기 (왼→오른 순)
+        merged_cells = []
+        for c in group_clusters:
+            merged_cells.extend(c.cells)
+
+        # 첫 번째 클러스터에 병합 결과 담기
+        best = group_clusters[0]
+        best.bbox = merged_bbox
+        best.cells = merged_cells
+        result.append(best)
+
+    if merge_count:
+        _log.info(f"인접 병합: {merge_count}건, {len(clusters)}→{len(result)}개 클러스터")
+
+    return result
+
+
+# ======================================================================
 # 근접 클러스터링 — 공간적으로 가까운 아이템끼리 묶기
 # ======================================================================
 # reading order 정렬 전에, 가까이 있는 요소들을 하나의 클러스터로 묶어서
