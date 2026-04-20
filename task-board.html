@@ -279,6 +279,180 @@
   }
   .task-stats strong { color: var(--text-primary); }
 
+  /* View Toggle */
+  .view-toggle {
+    display: inline-flex; background: var(--bg-card);
+    border: 1px solid var(--border-default); border-radius: var(--radius-md);
+    padding: 2px;
+  }
+  .view-toggle-btn {
+    padding: 5px 12px; border: none; background: transparent;
+    color: var(--text-muted); font-size: 12px; font-weight: 500;
+    cursor: pointer; border-radius: var(--radius-sm);
+    font-family: inherit; transition: all 0.15s;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .view-toggle-btn:hover { color: var(--text-secondary); }
+  .view-toggle-btn.active {
+    background: var(--accent-indigo); color: #fff;
+  }
+
+  /* Week view */
+  .week-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 28px 0;
+  }
+  .week-nav-btn {
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    color: var(--text-secondary); padding: 5px 10px;
+    border-radius: var(--radius-sm); cursor: pointer;
+    font-size: 12px; font-family: inherit;
+  }
+  .week-nav-btn:hover { background: var(--border-default); color: #fff; }
+  .week-range-label {
+    font-size: 13px; color: var(--text-primary); font-weight: 600;
+  }
+  .week-count-label {
+    margin-left: auto; font-size: 12px; color: var(--text-muted);
+  }
+
+  .week-board {
+    display: grid;
+    grid-template-columns: 180px 180px repeat(7, minmax(160px, 1fr));
+    gap: 10px; padding: 14px 28px 20px;
+    min-height: calc(100vh - 210px);
+    overflow-x: auto;
+  }
+  .week-col {
+    background: var(--bg-surface);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column;
+    min-height: 400px;
+  }
+  .week-col.unsched { border-color: var(--border-default); }
+  .week-col.overdue { border-color: rgba(244,63,94,0.4); }
+  .week-col.weekend { background: var(--bg-base); }
+  .week-col.today { border-color: var(--accent-indigo); box-shadow: 0 0 0 1px rgba(99,102,241,0.3); }
+  .week-col-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 6px;
+  }
+  .week-col-title {
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .week-col-title .wd-date {
+    font-size: 11px; color: var(--text-muted); font-weight: 500;
+  }
+  .week-col.today .week-col-title { color: var(--accent-indigo); }
+  .week-col.overdue .week-col-title { color: var(--accent-rose); }
+  .week-col-count {
+    background: var(--border-subtle); color: var(--text-muted);
+    font-size: 10px; padding: 1px 7px; border-radius: 8px;
+    font-weight: 600;
+  }
+  .week-col-body {
+    padding: 8px; flex: 1; overflow-y: auto;
+  }
+  .week-col-body.drag-over {
+    background: rgba(99,102,241,0.06);
+  }
+
+  .mini-card {
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm); padding: 8px 10px;
+    margin-bottom: 6px; cursor: grab;
+    position: relative; transition: all 0.12s;
+  }
+  .mini-card:hover {
+    border-color: var(--accent-indigo);
+    transform: translateY(-1px);
+  }
+  .mini-card.dragging { opacity: 0.4; }
+  .mini-card-top {
+    display: flex; align-items: center; gap: 4px;
+    margin-bottom: 3px;
+  }
+  .mini-card-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mini-card-id {
+    font-size: 9px; color: var(--accent-indigo);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .mini-card-issue {
+    margin-left: auto; font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #c4b5fd;
+  }
+  .mini-card-error {
+    font-size: 10px; color: var(--accent-rose); cursor: pointer;
+  }
+  .mini-card-title {
+    font-size: 12px; color: var(--text-primary);
+    line-height: 1.35; word-break: break-word;
+  }
+  .mini-card-assignee {
+    font-size: 10px; color: var(--text-muted); margin-top: 3px;
+  }
+
+  /* Matrix view */
+  .matrix-wrap {
+    padding: 14px 28px 20px;
+    overflow: auto;
+    min-height: calc(100vh - 210px);
+  }
+  .matrix-table {
+    border-collapse: separate; border-spacing: 6px;
+    width: 100%; min-width: 1100px;
+  }
+  .matrix-table th, .matrix-table td {
+    vertical-align: top; padding: 0;
+  }
+  .matrix-corner {
+    background: var(--bg-base);
+    min-width: 140px;
+  }
+  .matrix-col-header {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 8px 10px;
+    font-size: 12px; font-weight: 600;
+    color: var(--text-primary);
+    min-width: 140px;
+  }
+  .matrix-col-header.today { border-color: var(--accent-indigo); color: var(--accent-indigo); }
+  .matrix-col-header.weekend { background: var(--bg-base); color: var(--text-muted); }
+  .matrix-col-header.overdue { border-color: rgba(244,63,94,0.4); color: var(--accent-rose); }
+  .matrix-col-header .mh-date {
+    font-size: 10px; color: var(--text-muted); font-weight: 500;
+    margin-left: 5px;
+  }
+  .matrix-row-header {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    min-width: 140px;
+  }
+  .matrix-cell {
+    background: var(--bg-deep);
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 6px; min-width: 140px;
+    min-height: 56px;
+  }
+  .matrix-cell.drag-over {
+    background: rgba(99,102,241,0.08);
+    border-color: var(--accent-indigo);
+  }
+
   .board {
     display: flex; gap: 16px; padding: 20px 28px;
     overflow-x: auto; min-height: calc(100vh - 170px);
@@ -378,6 +552,64 @@
   .card-actions button.delete-btn:hover { background: #dc2626; }
 
   .card-date { font-size: 10px; color: var(--text-muted); }
+
+  /* Due date badges */
+  .card-due {
+    font-size: 10px; padding: 2px 7px; border-radius: 4px;
+    font-weight: 600; letter-spacing: 0.2px;
+    display: inline-flex; align-items: center; gap: 3px;
+  }
+  .due-overdue { background: #7f1d1d; color: #fca5a5; }
+  .due-today { background: #78350f; color: #fcd34d; }
+  .due-thisweek { background: #065f46; color: #6ee7b7; }
+  .due-future { background: var(--border-subtle); color: var(--text-secondary); }
+
+  /* GitHub issue badge */
+  .card-issue {
+    font-size: 9px; padding: 2px 6px; border-radius: 4px;
+    font-weight: 600; font-family: 'JetBrains Mono', monospace;
+    background: rgba(139, 92, 246, 0.18); color: #c4b5fd;
+    text-decoration: none;
+    display: inline-flex; align-items: center; gap: 2px;
+  }
+  .card-issue:hover { background: rgba(139, 92, 246, 0.3); }
+
+  /* Sync error badge */
+  .card-sync-error {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: #7f1d1d; color: #fca5a5; cursor: pointer;
+    border: none; font-family: inherit; font-weight: 600;
+  }
+  .card-sync-error:hover { background: #991b1b; }
+
+  .card-top-badges {
+    position: absolute; top: 8px; right: 8px;
+    display: flex; gap: 4px; align-items: center;
+  }
+  .card:hover .card-top-badges { display: none; }
+
+  /* Task modal: Due Date row */
+  .weekday-hint {
+    font-size: 12px; color: var(--text-muted); margin-left: 8px;
+    font-weight: 500;
+  }
+  .sync-checkbox-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-card); border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    margin-bottom: 14px;
+  }
+  .sync-checkbox-row input[type="checkbox"] {
+    width: auto; margin: 0;
+  }
+  .sync-checkbox-row label {
+    margin: 0; font-size: 13px; color: var(--text-primary);
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+  }
+  .sync-checkbox-row .sync-note {
+    font-size: 11px; color: var(--text-muted); margin-left: auto;
+  }
 
   .add-card-btn {
     width: 100%; padding: 8px; background: transparent;
@@ -879,11 +1111,16 @@
 <div class="section-panel active" id="panelTasks">
   <div class="task-toolbar">
     <div class="task-toolbar-left">
+      <div class="view-toggle" id="viewToggle">
+        <button class="view-toggle-btn active" data-view="kanban" onclick="switchTaskView('kanban')">Kanban</button>
+        <button class="view-toggle-btn" data-view="week" onclick="switchTaskView('week')">Week</button>
+        <button class="view-toggle-btn" data-view="matrix" onclick="switchTaskView('matrix')">Matrix</button>
+      </div>
       <div class="task-stats" id="taskStats"></div>
     </div>
     <div class="task-toolbar-right">
-      <input type="text" class="search-box" id="searchInput" placeholder="Search..." oninput="renderBoard()" style="width:160px;">
-      <select class="filter-select" id="filterTag" onchange="renderBoard()">
+      <input type="text" class="search-box" id="searchInput" placeholder="Search..." oninput="renderTaskView()" style="width:160px;">
+      <select class="filter-select" id="filterTag" onchange="renderTaskView()">
         <option value="">All Tags</option>
         <option value="bug">Bug</option>
         <option value="feature">Feature</option>
@@ -891,12 +1128,14 @@
         <option value="docs">Docs</option>
         <option value="urgent">Urgent</option>
       </select>
-      <select class="filter-select" id="filterPriority" onchange="renderBoard()">
+      <select class="filter-select" id="filterPriority" onchange="renderTaskView()">
         <option value="">All Priority</option>
         <option value="high">High</option>
         <option value="medium">Medium</option>
         <option value="low">Low</option>
       </select>
+      <button class="btn btn-secondary btn-sm" onclick="openGithubConfigModal()" title="GitHub Settings">&#9881; GitHub</button>
+      <button class="btn btn-secondary btn-sm" id="syncBtn" onclick="pullFromGithub()" title="Pull issues from GitHub">&#128259; Sync</button>
       <button class="btn btn-secondary btn-sm" onclick="exportTasks()">Export</button>
       <button class="btn btn-secondary btn-sm" onclick="document.getElementById('importFile').click()">Import</button>
       <input type="file" id="importFile" accept=".json" style="display:none" onchange="importTasks(event)">
@@ -904,6 +1143,26 @@
     </div>
   </div>
   <div class="board" id="board"></div>
+  <div id="weekView" style="display:none;">
+    <div class="week-header">
+      <button class="week-nav-btn" onclick="moveWeek(-1)">&#9664;</button>
+      <span class="week-range-label" id="weekRangeLabel"></span>
+      <button class="week-nav-btn" onclick="moveWeek(1)">&#9654;</button>
+      <button class="week-nav-btn" onclick="goToThisWeek()">Today</button>
+      <span class="week-count-label" id="weekCountLabel"></span>
+    </div>
+    <div class="week-board" id="weekBoard"></div>
+  </div>
+  <div id="matrixView" style="display:none;">
+    <div class="week-header">
+      <button class="week-nav-btn" onclick="moveWeek(-1)">&#9664;</button>
+      <span class="week-range-label" id="matrixRangeLabel"></span>
+      <button class="week-nav-btn" onclick="moveWeek(1)">&#9654;</button>
+      <button class="week-nav-btn" onclick="goToThisWeek()">Today</button>
+      <span class="week-count-label" id="matrixCountLabel"></span>
+    </div>
+    <div class="matrix-wrap" id="matrixBoard"></div>
+  </div>
 </div>
 
 <!-- ═══════════════════════════════════════════
@@ -1015,7 +1274,8 @@
     <div style="display:flex;gap:10px;">
       <div class="form-group" style="flex:1;">
         <label>Assignee</label>
-        <input type="text" id="taskAssignee" placeholder="Name (optional)">
+        <input type="text" id="taskAssignee" placeholder="Name (optional)" list="assigneeSuggestions">
+        <datalist id="assigneeSuggestions"></datalist>
       </div>
       <div class="form-group" style="flex:1;">
         <label>Status</label>
@@ -1026,6 +1286,15 @@
           <option value="done">Done</option>
         </select>
       </div>
+    </div>
+    <div class="form-group">
+      <label>Due Date <span class="weekday-hint" id="dueDateWeekday"></span></label>
+      <input type="date" id="taskDueDate" onchange="updateDueDateWeekday()">
+    </div>
+    <div class="sync-checkbox-row">
+      <input type="checkbox" id="taskGithubSync">
+      <label for="taskGithubSync">Sync to GitHub Issue</label>
+      <span class="sync-note" id="syncNote"></span>
     </div>
     <div class="form-actions">
       <button class="btn btn-secondary" onclick="closeTaskModal()">Cancel</button>
@@ -1089,6 +1358,48 @@
     <div class="form-actions">
       <button class="btn btn-secondary" onclick="closeMeetingModal()">Cancel</button>
       <button class="btn btn-primary" onclick="createMeeting()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- GitHub Config Modal -->
+<div class="modal-overlay" id="githubConfigOverlay" onclick="if(event.target===this)closeGithubConfigModal()">
+  <div class="modal" style="width:520px;">
+    <h2>GitHub Sync Settings</h2>
+    <div class="setup-steps">
+      <ol>
+        <li><a href="https://github.com/settings/tokens/new?scopes=repo&description=TaskBoard" target="_blank" style="color:#818cf8;">Create a Personal Access Token</a> with <code>repo</code> scope</li>
+        <li>Copy the token and paste it below</li>
+        <li>Enter the repo as <code>owner/name</code> (e.g. <code>my-org/my-repo</code>)</li>
+      </ol>
+    </div>
+    <div class="form-group" style="margin-top:14px;">
+      <label>Repository (owner/name)</label>
+      <input type="text" id="githubRepoInput" placeholder="owner/name" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Personal Access Token</label>
+      <input type="password" id="githubTokenInput" placeholder="ghp_..." autocomplete="off">
+    </div>
+    <div id="githubConfigStatus" style="font-size:12px;color:var(--text-muted);min-height:18px;margin-bottom:6px;"></div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeGithubConfigModal()">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="clearGithubConfig()" style="margin-right:auto;">Disconnect</button>
+      <button class="btn btn-primary" onclick="saveGithubConfig()">Save & Validate</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sync Error Dialog -->
+<div class="modal-overlay" id="syncErrorOverlay" onclick="if(event.target===this)closeSyncErrorDialog()">
+  <div class="modal" style="width:480px;">
+    <h2>Sync Error</h2>
+    <div id="syncErrorBody" style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:16px;"></div>
+    <div class="form-actions" style="flex-direction:column;gap:8px;align-items:stretch;">
+      <button class="btn btn-primary" id="syncErrRetryBtn" onclick="syncErrorRetry()">Retry push</button>
+      <button class="btn btn-secondary" id="syncErrDiscardBtn" onclick="syncErrorDiscard()">Discard local → Pull from GitHub</button>
+      <button class="btn btn-secondary" id="syncErrUnlinkBtn" onclick="syncErrorUnlink()">Unlink from GitHub</button>
+      <button class="btn btn-ghost" onclick="closeSyncErrorDialog()">Close</button>
     </div>
   </div>
 </div>
@@ -1165,6 +1476,9 @@ let isConnected = false;
 let currentUid = null;
 let activeTab = 'tasks';
 let activeMeetingKey = null;
+let activeView = localStorage.getItem('task-board-view') || 'kanban';
+let weekAnchorIso = todayIsoDate(); // date within currently-viewed week
+window.githubConfig = null;
 
 // ═══════════════════════════════════════════════════════════════
 // TAB SWITCHING
@@ -1256,7 +1570,7 @@ function listenTasks() {
     const data = snap.val() || {};
     currentTasks = Object.keys(data).map(k => ({ _key: k, ...data[k] }));
     document.getElementById('taskBadge').textContent = currentTasks.length;
-    renderBoard();
+    renderTaskView();
   });
 }
 
@@ -1299,6 +1613,96 @@ function genTaskId() {
 function now() { return new Date().toISOString(); }
 
 // ═══════════════════════════════════════════════════════════════
+// DATE / WEEKDAY UTILITIES
+// ═══════════════════════════════════════════════════════════════
+const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
+
+function todayIsoDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function parseDateOnly(iso) {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function formatDateWithWeekday(iso) {
+  const d = parseDateOnly(iso);
+  if (!d) return '';
+  return `${d.getMonth()+1}/${d.getDate()} (${WEEKDAY_KR[d.getDay()]})`;
+}
+
+function dueDateColorClass(iso, status) {
+  if (!iso) return '';
+  if (status === 'done') return 'due-future';
+  const due = parseDateOnly(iso);
+  const today = parseDateOnly(todayIsoDate());
+  if (!due || !today) return '';
+  const diffDays = Math.round((due - today) / 86400000);
+  if (diffDays < 0) return 'due-overdue';
+  if (diffDays === 0) return 'due-today';
+  const todayWd = today.getDay() === 0 ? 7 : today.getDay();
+  const daysToSun = 7 - todayWd;
+  if (diffDays <= daysToSun) return 'due-thisweek';
+  return 'due-future';
+}
+
+function getWeekRange(anchorIso) {
+  const d = parseDateOnly(anchorIso) || parseDateOnly(todayIsoDate());
+  const wd = d.getDay() === 0 ? 7 : d.getDay();
+  const mon = new Date(d); mon.setDate(d.getDate() - (wd - 1));
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const x = new Date(mon); x.setDate(mon.getDate() + i);
+    days.push(x);
+  }
+  return days;
+}
+
+function dateToIso(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function isOverdueForWeek(task, weekRange) {
+  if (!task.dueDate) return false;
+  if (task.status === 'done') return false;
+  const due = parseDateOnly(task.dueDate);
+  if (!due) return false;
+  return due < weekRange[0];
+}
+
+function isInWeek(task, weekRange) {
+  if (!task.dueDate) return false;
+  const due = parseDateOnly(task.dueDate);
+  if (!due) return false;
+  return due >= weekRange[0] && due <= weekRange[6];
+}
+
+function updateDueDateWeekday() {
+  const val = document.getElementById('taskDueDate').value;
+  const hint = document.getElementById('dueDateWeekday');
+  hint.textContent = val ? `(${WEEKDAY_KR[parseDateOnly(val).getDay()]})` : '';
+}
+
+function getUniqueAssignees(tasks) {
+  const set = new Set();
+  (tasks || currentTasks).forEach(t => {
+    const a = (t.assignee || '').trim();
+    if (a) set.add(a);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'ko'));
+}
+
+function refreshAssigneeSuggestions() {
+  const list = document.getElementById('assigneeSuggestions');
+  if (!list) return;
+  list.innerHTML = getUniqueAssignees().map(a => `<option value="${escHtml(a)}">`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TASK BOARD
 // ═══════════════════════════════════════════════════════════════
 function getFilteredTasks() {
@@ -1321,17 +1725,7 @@ function getFilteredTasks() {
 
 function renderBoard() {
   const tasks = getFilteredTasks();
-  const all = currentTasks;
   const board = document.getElementById('board');
-  const stats = document.getElementById('taskStats');
-
-  stats.innerHTML = `
-    <span>Total: <strong>${all.length}</strong></span>
-    <span>To Do: <strong>${all.filter(t=>t.status==='todo').length}</strong></span>
-    <span>Progress: <strong>${all.filter(t=>t.status==='progress').length}</strong></span>
-    <span>Review: <strong>${all.filter(t=>t.status==='review').length}</strong></span>
-    <span>Done: <strong>${all.filter(t=>t.status==='done').length}</strong></span>
-  `;
 
   board.innerHTML = COLUMNS.map(col => {
     const colTasks = tasks.filter(t => t.status === col.id)
@@ -1363,12 +1757,22 @@ function renderBoard() {
 function renderCard(t) {
   const tagLabel = { bug:'Bug', feature:'Feature', improve:'Improve', docs:'Docs', urgent:'Urgent' };
   const prioLabel = { high:'High', medium:'Med', low:'Low' };
-  const date = t.created ? new Date(t.created).toLocaleDateString('ko-KR', { month:'short', day:'numeric' }) : '';
   const key = t._key || t.id;
+  const dueCls = dueDateColorClass(t.dueDate, t.status);
+  const dueText = t.dueDate ? formatDateWithWeekday(t.dueDate) : '';
+  const repoSlug = (window.githubConfig && window.githubConfig.repo) || '';
+  const issueUrl = t.githubIssueNumber && repoSlug
+    ? `https://github.com/${repoSlug}/issues/${t.githubIssueNumber}` : '';
   return `
     <div class="card" draggable="true" data-key="${escHtml(key)}"
          ondragstart="event.dataTransfer.setData('text/plain','${escHtml(key)}');this.classList.add('dragging')"
          ondragend="this.classList.remove('dragging')">
+      <div class="card-top-badges">
+        ${t.syncError ? `<button class="card-sync-error" onclick="openSyncErrorDialog('${escHtml(key)}')" title="${escHtml(t.syncError)}">&#9888;</button>` : ''}
+        ${t.githubIssueNumber ? (issueUrl
+          ? `<a class="card-issue" href="${issueUrl}" target="_blank" onclick="event.stopPropagation()">#${t.githubIssueNumber}</a>`
+          : `<span class="card-issue">#${t.githubIssueNumber}</span>`) : ''}
+      </div>
       <div class="card-actions">
         <button onclick="editTask('${escHtml(key)}')" title="Edit">&#9998;</button>
         <button class="delete-btn" onclick="deleteTask('${escHtml(key)}')" title="Delete">&times;</button>
@@ -1380,8 +1784,9 @@ function renderCard(t) {
         <div class="card-tags">
           ${t.tag ? `<span class="tag tag-${t.tag}">${tagLabel[t.tag]||t.tag}</span>` : ''}
           <span class="card-priority priority-${t.priority||'medium'}">${prioLabel[t.priority]||'Med'}</span>
+          ${dueText ? `<span class="card-due ${dueCls}">&#128197; ${dueText}</span>` : ''}
         </div>
-        <div class="card-date">${t.assignee ? escHtml(t.assignee)+' &middot; ' : ''}${date}</div>
+        <div class="card-date">${t.assignee ? escHtml(t.assignee) : ''}</div>
       </div>
     </div>
   `;
@@ -1390,11 +1795,244 @@ function renderCard(t) {
 function dropCard(event, newStatus) {
   event.preventDefault();
   const key = event.dataTransfer.getData('text/plain');
-  if (isConnected && tasksRef) tasksRef.child(key).update({ status: newStatus, updated: now() });
+  if (!isConnected || !tasksRef) return;
+  const t = currentTasks.find(x => x._key === key);
+  tasksRef.child(key).update({ status: newStatus, updated: now() }).then(() => {
+    if (t && typeof maybePushAfterSave === 'function') {
+      maybePushAfterSave({ ...t, status: newStatus, updated: now() });
+    }
+  });
+}
+
+function switchTaskView(view) {
+  activeView = view;
+  localStorage.setItem('task-board-view', view);
+  document.querySelectorAll('.view-toggle-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === view);
+  });
+  document.getElementById('board').style.display = (view === 'kanban') ? '' : 'none';
+  document.getElementById('weekView').style.display = (view === 'week') ? '' : 'none';
+  document.getElementById('matrixView').style.display = (view === 'matrix') ? '' : 'none';
+  renderTaskView();
+}
+
+function renderTaskView() {
+  updateTaskStats();
+  if (activeView === 'kanban') renderBoard();
+  else if (activeView === 'week') renderWeekView();
+  else if (activeView === 'matrix') renderMatrixView();
+}
+
+function updateTaskStats() {
+  const all = currentTasks;
+  const stats = document.getElementById('taskStats');
+  if (!stats) return;
+  stats.innerHTML = `
+    <span>Total: <strong>${all.length}</strong></span>
+    <span>To Do: <strong>${all.filter(t=>t.status==='todo').length}</strong></span>
+    <span>Progress: <strong>${all.filter(t=>t.status==='progress').length}</strong></span>
+    <span>Review: <strong>${all.filter(t=>t.status==='review').length}</strong></span>
+    <span>Done: <strong>${all.filter(t=>t.status==='done').length}</strong></span>
+  `;
+}
+
+function moveWeek(delta) {
+  const d = parseDateOnly(weekAnchorIso) || parseDateOnly(todayIsoDate());
+  d.setDate(d.getDate() + delta * 7);
+  weekAnchorIso = dateToIso(d);
+  renderTaskView();
+}
+
+function goToThisWeek() {
+  weekAnchorIso = todayIsoDate();
+  renderTaskView();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WEEK / MATRIX RENDERING
+// ═══════════════════════════════════════════════════════════════
+const WEEK_COL_NAMES = ['월', '화', '수', '목', '금', '토', '일'];
+
+function renderMiniCard(t) {
+  const key = t._key || t.id;
+  const dotColor = { todo:'#6b7280', progress:'#3b82f6', review:'#f59e0b', done:'#10b981' }[t.status||'todo'];
+  const errorBtn = t.syncError
+    ? `<span class="mini-card-error" title="${escHtml(t.syncError)}" onclick="event.stopPropagation();openSyncErrorDialog('${escHtml(key)}')">&#9888;</span>`
+    : '';
+  const issueBadge = t.githubIssueNumber
+    ? `<span class="mini-card-issue">#${t.githubIssueNumber}</span>`
+    : '';
+  const assigneeLine = t.assignee
+    ? `<div class="mini-card-assignee">${escHtml(t.assignee)}</div>`
+    : '';
+  return `
+    <div class="mini-card" draggable="true" data-key="${escHtml(key)}"
+         onclick="editTask('${escHtml(key)}')"
+         ondragstart="event.dataTransfer.setData('text/plain','${escHtml(key)}');this.classList.add('dragging');event.stopPropagation();"
+         ondragend="this.classList.remove('dragging')">
+      <div class="mini-card-top">
+        <span class="mini-card-dot" style="background:${dotColor}"></span>
+        <span class="mini-card-id">${escHtml(t.id||'')}</span>
+        ${errorBtn}
+        ${issueBadge}
+      </div>
+      <div class="mini-card-title">${escHtml(t.title||'')}</div>
+      ${assigneeLine}
+    </div>
+  `;
+}
+
+function buildWeekColumn(title, count, dropTarget, cardsHtml, extraClass) {
+  const cls = 'week-col' + (extraClass ? ' ' + extraClass : '');
+  const dropAttrs = dropTarget !== null
+    ? `data-drop="${escHtml(dropTarget)}"
+       ondragover="event.preventDefault();this.classList.add('drag-over')"
+       ondragleave="this.classList.remove('drag-over')"
+       ondrop="onWeekDrop(event,'${escHtml(dropTarget)}');this.classList.remove('drag-over')"`
+    : '';
+  return `
+    <div class="${cls}">
+      <div class="week-col-header">
+        <div class="week-col-title">${title}</div>
+        <span class="week-col-count">${count}</span>
+      </div>
+      <div class="week-col-body" ${dropAttrs}>${cardsHtml}</div>
+    </div>
+  `;
+}
+
+function renderWeekView() {
+  const tasks = getFilteredTasks();
+  const week = getWeekRange(weekAnchorIso);
+  const todayIso = todayIsoDate();
+  const rangeLabel = `${week[0].getFullYear()}.${week[0].getMonth()+1}.${week[0].getDate()} ~ ${week[6].getMonth()+1}.${week[6].getDate()}`;
+  document.getElementById('weekRangeLabel').textContent = rangeLabel;
+
+  const unscheduled = tasks.filter(t => !t.dueDate);
+  const overdue = tasks.filter(t => isOverdueForWeek(t, week));
+  const prioOrder = { high:0, medium:1, low:2 };
+  const byDay = week.map(d => {
+    const iso = dateToIso(d);
+    return tasks.filter(t => t.dueDate === iso)
+      .sort((a, b) => (prioOrder[a.priority]||1) - (prioOrder[b.priority]||1));
+  });
+  const total = unscheduled.length + overdue.length + byDay.reduce((s, a) => s + a.length, 0);
+  document.getElementById('weekCountLabel').textContent = `${total} tasks`;
+
+  const cols = [];
+  cols.push(buildWeekColumn('&#128229; Unscheduled', unscheduled.length, 'unsched', unscheduled.map(renderMiniCard).join(''), 'unsched'));
+  cols.push(buildWeekColumn('&#9888; Overdue', overdue.length, null, overdue.map(renderMiniCard).join(''), 'overdue'));
+  for (let i = 0; i < 7; i++) {
+    const d = week[i];
+    const iso = dateToIso(d);
+    const isToday = iso === todayIso;
+    const isWeekend = i >= 5;
+    const extra = [];
+    if (isToday) extra.push('today');
+    if (isWeekend) extra.push('weekend');
+    const title = `${WEEK_COL_NAMES[i]}${isToday ? ' &#128205;' : ''} <span class="wd-date">${d.getMonth()+1}/${d.getDate()}</span>`;
+    cols.push(buildWeekColumn(title, byDay[i].length, iso, byDay[i].map(renderMiniCard).join(''), extra.join(' ')));
+  }
+  document.getElementById('weekBoard').innerHTML = cols.join('');
+}
+
+function onWeekDrop(event, target) {
+  event.preventDefault();
+  const key = event.dataTransfer.getData('text/plain');
+  if (!key || !isConnected || !tasksRef) return;
+  const t = currentTasks.find(x => x._key === key);
+  if (!t) return;
+  const newDueDate = (target === 'unsched') ? null : target;
+  if (t.dueDate === newDueDate) return;
+  const updates = { dueDate: newDueDate, updated: now() };
+  tasksRef.child(key).update(updates).then(() => {
+    if (typeof maybePushAfterSave === 'function') {
+      maybePushAfterSave({ ...t, ...updates });
+    }
+  });
+}
+
+function renderMatrixView() {
+  const tasks = getFilteredTasks();
+  const week = getWeekRange(weekAnchorIso);
+  const todayIso = todayIsoDate();
+  const rangeLabel = `${week[0].getFullYear()}.${week[0].getMonth()+1}.${week[0].getDate()} ~ ${week[6].getMonth()+1}.${week[6].getDate()}`;
+  document.getElementById('matrixRangeLabel').textContent = rangeLabel;
+
+  const assigneesReal = getUniqueAssignees(tasks);
+  const rows = [...assigneesReal, ''];
+  document.getElementById('matrixCountLabel').textContent = `${tasks.length} tasks`;
+
+  const colKeys = ['unsched', 'overdue', ...week.map(dateToIso)];
+  const colHeaders = [];
+  colHeaders.push(`<th class="matrix-col-header">&#128229; Unsched</th>`);
+  colHeaders.push(`<th class="matrix-col-header overdue">&#9888; Overdue</th>`);
+  for (let i = 0; i < 7; i++) {
+    const d = week[i];
+    const iso = dateToIso(d);
+    const cls = ['matrix-col-header'];
+    if (iso === todayIso) cls.push('today');
+    if (i >= 5) cls.push('weekend');
+    colHeaders.push(`<th class="${cls.join(' ')}">${WEEK_COL_NAMES[i]}<span class="mh-date">${d.getMonth()+1}/${d.getDate()}</span></th>`);
+  }
+
+  const bodyRows = rows.map(assignee => {
+    const cells = colKeys.map(ck => {
+      const cellTasks = tasks.filter(t => {
+        const aVal = (t.assignee || '').trim();
+        const hasAssignee = assignee ? (aVal === assignee) : !aVal;
+        if (!hasAssignee) return false;
+        if (ck === 'unsched') return !t.dueDate;
+        if (ck === 'overdue') return isOverdueForWeek(t, week);
+        return t.dueDate === ck;
+      });
+      return `
+        <td>
+          <div class="matrix-cell" data-assignee="${escHtml(assignee)}" data-drop="${escHtml(ck)}"
+               ondragover="event.preventDefault();this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="onMatrixDrop(event,'${escHtml(assignee)}','${escHtml(ck)}');this.classList.remove('drag-over')">
+            ${cellTasks.map(renderMiniCard).join('')}
+          </div>
+        </td>
+      `;
+    }).join('');
+    const label = assignee
+      ? escHtml(assignee)
+      : '<span style="color:var(--text-muted);font-weight:500;">Unassigned</span>';
+    return `<tr><th class="matrix-row-header">${label}</th>${cells}</tr>`;
+  }).join('');
+
+  document.getElementById('matrixBoard').innerHTML = `
+    <table class="matrix-table">
+      <thead><tr><th class="matrix-corner"></th>${colHeaders.join('')}</tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+  `;
+}
+
+function onMatrixDrop(event, newAssignee, target) {
+  event.preventDefault();
+  const key = event.dataTransfer.getData('text/plain');
+  if (!key || !isConnected || !tasksRef) return;
+  const t = currentTasks.find(x => x._key === key);
+  if (!t) return;
+  const updates = { updated: now() };
+  if (target === 'unsched') updates.dueDate = null;
+  else if (target !== 'overdue') updates.dueDate = target;
+  const oldA = (t.assignee || '').trim();
+  if (oldA !== newAssignee) updates.assignee = newAssignee || '';
+  if (!('assignee' in updates) && updates.dueDate === t.dueDate) return;
+  tasksRef.child(key).update(updates).then(() => {
+    if (typeof maybePushAfterSave === 'function') {
+      maybePushAfterSave({ ...t, ...updates });
+    }
+  });
 }
 
 // Task CRUD
 function openTaskModal(defaultStatus) {
+  refreshAssigneeSuggestions();
   document.getElementById('editTaskId').value = '';
   document.getElementById('taskTitle').value = '';
   document.getElementById('taskDesc').value = '';
@@ -1402,6 +2040,12 @@ function openTaskModal(defaultStatus) {
   document.getElementById('taskPriority').value = 'medium';
   document.getElementById('taskAssignee').value = '';
   document.getElementById('taskStatus').value = defaultStatus || 'todo';
+  document.getElementById('taskDueDate').value = '';
+  document.getElementById('dueDateWeekday').textContent = '';
+  const syncCb = document.getElementById('taskGithubSync');
+  syncCb.checked = false;
+  syncCb.disabled = false;
+  document.getElementById('syncNote').textContent = '';
   document.getElementById('taskModalTitle').textContent = 'New Task';
   document.getElementById('taskModalOverlay').classList.add('active');
   setTimeout(() => document.getElementById('taskTitle').focus(), 100);
@@ -1410,6 +2054,7 @@ function openTaskModal(defaultStatus) {
 function editTask(key) {
   const t = currentTasks.find(x => x._key === key);
   if (!t) return;
+  refreshAssigneeSuggestions();
   document.getElementById('editTaskId').value = key;
   document.getElementById('taskTitle').value = t.title || '';
   document.getElementById('taskDesc').value = t.desc || '';
@@ -1417,6 +2062,17 @@ function editTask(key) {
   document.getElementById('taskPriority').value = t.priority || 'medium';
   document.getElementById('taskAssignee').value = t.assignee || '';
   document.getElementById('taskStatus').value = t.status || 'todo';
+  document.getElementById('taskDueDate').value = t.dueDate || '';
+  updateDueDateWeekday();
+  const syncCb = document.getElementById('taskGithubSync');
+  syncCb.checked = !!t.githubSync;
+  if (t.githubIssueNumber) {
+    syncCb.disabled = true;
+    document.getElementById('syncNote').textContent = `Linked to Issue #${t.githubIssueNumber}`;
+  } else {
+    syncCb.disabled = false;
+    document.getElementById('syncNote').textContent = '';
+  }
   document.getElementById('taskModalTitle').textContent = 'Edit Task';
   document.getElementById('taskModalOverlay').classList.add('active');
 }
@@ -1429,6 +2085,8 @@ function saveTask() {
   const title = document.getElementById('taskTitle').value.trim();
   if (!title) { alert('Please enter a title'); return; }
   const editKey = document.getElementById('editTaskId').value;
+  const dueDate = document.getElementById('taskDueDate').value || null;
+  const githubSync = document.getElementById('taskGithubSync').checked;
   const data = {
     title,
     desc: document.getElementById('taskDesc').value.trim(),
@@ -1436,14 +2094,29 @@ function saveTask() {
     priority: document.getElementById('taskPriority').value,
     assignee: document.getElementById('taskAssignee').value.trim(),
     status: document.getElementById('taskStatus').value,
+    dueDate,
+    githubSync,
     updated: now(),
   };
   if (editKey) {
-    if (isConnected && tasksRef) tasksRef.child(editKey).update(data);
+    if (isConnected && tasksRef) {
+      tasksRef.child(editKey).update(data).then(() => {
+        if (typeof maybePushAfterSave === 'function') {
+          const merged = { ...(currentTasks.find(x => x._key === editKey) || {}), ...data, _key: editKey };
+          maybePushAfterSave(merged);
+        }
+      });
+    }
   } else {
     data.id = genTaskId();
     data.created = now();
-    if (isConnected && tasksRef) tasksRef.push(data);
+    if (isConnected && tasksRef) {
+      const newRef = tasksRef.push(data);
+      newRef.then && newRef.then(() => {});
+      if (typeof maybePushAfterSave === 'function') {
+        maybePushAfterSave({ ...data, _key: newRef.key });
+      }
+    }
   }
   closeTaskModal();
 }
@@ -1477,6 +2150,389 @@ function importTasks(event) {
   };
   reader.readAsText(file);
   event.target.value = '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GITHUB SYNC
+// ═══════════════════════════════════════════════════════════════
+const GH_CONFIG_KEY = 'task-board-github-config';
+const GH_LABELS = {
+  'status:todo':     { color: '6b7280', description: 'Task board: To Do' },
+  'status:progress': { color: '3b82f6', description: 'Task board: In Progress' },
+  'status:review':   { color: 'f59e0b', description: 'Task board: Review' },
+  'priority:low':    { color: '93c5fd', description: 'Task board: Low priority' },
+  'priority:medium': { color: 'fcd34d', description: 'Task board: Medium priority' },
+  'priority:high':   { color: 'fca5a5', description: 'Task board: High priority' },
+};
+let syncErrorTaskKey = null;
+let syncInProgress = false;
+
+function loadGithubConfig() {
+  const raw = localStorage.getItem(GH_CONFIG_KEY);
+  if (!raw) { window.githubConfig = null; return; }
+  try { window.githubConfig = JSON.parse(raw); }
+  catch { window.githubConfig = null; }
+}
+
+function hasGithubConfig() {
+  return !!(window.githubConfig && window.githubConfig.token && window.githubConfig.repo);
+}
+
+function openGithubConfigModal() {
+  const cfg = window.githubConfig || {};
+  document.getElementById('githubRepoInput').value = cfg.repo || '';
+  document.getElementById('githubTokenInput').value = cfg.token || '';
+  document.getElementById('githubConfigStatus').textContent = '';
+  document.getElementById('githubConfigOverlay').classList.add('active');
+}
+
+function closeGithubConfigModal() {
+  document.getElementById('githubConfigOverlay').classList.remove('active');
+}
+
+function clearGithubConfig() {
+  if (!confirm('Disconnect from GitHub? (Tokens will be removed from this browser.)')) return;
+  localStorage.removeItem(GH_CONFIG_KEY);
+  window.githubConfig = null;
+  closeGithubConfigModal();
+  renderTaskView();
+}
+
+async function saveGithubConfig() {
+  const repo = document.getElementById('githubRepoInput').value.trim();
+  const token = document.getElementById('githubTokenInput').value.trim();
+  const status = document.getElementById('githubConfigStatus');
+  if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+    status.textContent = 'Repo must be in "owner/name" format.';
+    status.style.color = 'var(--accent-rose)';
+    return;
+  }
+  if (!token) {
+    status.textContent = 'Token is required.';
+    status.style.color = 'var(--accent-rose)';
+    return;
+  }
+  status.style.color = 'var(--text-muted)';
+  status.textContent = 'Validating token...';
+  try {
+    const userRes = await ghFetch('/user', { token });
+    if (!userRes.ok) throw new Error('Invalid token (GET /user failed: ' + userRes.status + ')');
+    status.textContent = 'Checking repository access...';
+    const repoRes = await ghFetch(`/repos/${repo}`, { token });
+    if (!repoRes.ok) throw new Error('Cannot access repo (status ' + repoRes.status + ')');
+    const userData = await userRes.json();
+    status.textContent = 'Creating labels...';
+    await ensureLabels(repo, token);
+    window.githubConfig = { repo, token, login: userData.login };
+    localStorage.setItem(GH_CONFIG_KEY, JSON.stringify(window.githubConfig));
+    status.style.color = 'var(--accent-emerald)';
+    status.textContent = `Connected as ${userData.login}`;
+    setTimeout(() => { closeGithubConfigModal(); renderTaskView(); }, 600);
+  } catch (e) {
+    status.style.color = 'var(--accent-rose)';
+    status.textContent = e.message || String(e);
+  }
+}
+
+function ghHeaders(token) {
+  return {
+    'Authorization': 'token ' + (token || (window.githubConfig && window.githubConfig.token)),
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+}
+
+function ghFetch(path, opts) {
+  opts = opts || {};
+  const token = opts.token || (window.githubConfig && window.githubConfig.token);
+  const init = {
+    method: opts.method || 'GET',
+    headers: Object.assign({}, ghHeaders(token), opts.headers || {}),
+  };
+  if (opts.body) init.body = JSON.stringify(opts.body);
+  return fetch('https://api.github.com' + path, init);
+}
+
+async function ensureLabels(repo, token) {
+  const res = await ghFetch(`/repos/${repo}/labels?per_page=100`, { token });
+  if (!res.ok) throw new Error('Failed to list labels (' + res.status + ')');
+  const existing = new Set((await res.json()).map(l => l.name));
+  const wanted = Object.keys(GH_LABELS);
+  for (const name of wanted) {
+    if (existing.has(name)) continue;
+    const spec = GH_LABELS[name];
+    await ghFetch(`/repos/${repo}/labels`, {
+      method: 'POST', token,
+      body: { name, color: spec.color, description: spec.description },
+    });
+  }
+}
+
+async function ensureTagLabel(repo, token, tag) {
+  if (!tag) return;
+  const name = 'tag:' + tag;
+  const res = await ghFetch(`/repos/${repo}/labels/${encodeURIComponent(name)}`, { token });
+  if (res.ok) return;
+  const tagColors = { bug:'7f1d1d', feature:'1e3a5f', improve:'365314', docs:'4a1d96', urgent:'92400e' };
+  await ghFetch(`/repos/${repo}/labels`, {
+    method: 'POST', token,
+    body: { name, color: tagColors[tag] || '6b7280', description: 'Task board tag: ' + tag },
+  });
+}
+
+function taskToLabels(task) {
+  const labels = [];
+  if (task.tag) labels.push('tag:' + task.tag);
+  if (task.priority) labels.push('priority:' + task.priority);
+  if (task.status && task.status !== 'done') labels.push('status:' + task.status);
+  return labels;
+}
+
+function labelsToTaskFields(labels) {
+  const out = {};
+  for (const l of (labels || [])) {
+    const name = typeof l === 'string' ? l : l.name;
+    if (name.startsWith('tag:')) out.tag = name.slice(4);
+    else if (name.startsWith('priority:')) out.priority = name.slice(9);
+    else if (name.startsWith('status:')) out.status = name.slice(7);
+  }
+  return out;
+}
+
+function buildIssueBody(task) {
+  const meta = `<!-- taskboard-meta\ntaskId: ${task.id || ''}\ndueDate: ${task.dueDate || ''}\n-->\n\n`;
+  return meta + (task.desc || '');
+}
+
+function parseIssueMeta(body) {
+  if (!body) return { meta: {}, desc: '' };
+  const m = body.match(/^<!--\s*taskboard-meta\s*([\s\S]*?)-->\s*\n?/);
+  if (!m) return { meta: {}, desc: body };
+  const meta = {};
+  m[1].split('\n').forEach(line => {
+    const kv = line.match(/^\s*(\w+)\s*:\s*(.*?)\s*$/);
+    if (kv) meta[kv[1]] = kv[2];
+  });
+  return { meta, desc: body.slice(m[0].length) };
+}
+
+async function pushTaskToGithub(task) {
+  if (!hasGithubConfig()) throw new Error('GitHub not configured');
+  const { repo, token } = window.githubConfig;
+  await ensureTagLabel(repo, token, task.tag);
+  const payload = {
+    title: task.title || '(no title)',
+    body: buildIssueBody(task),
+    labels: taskToLabels(task),
+    state: task.status === 'done' ? 'closed' : 'open',
+  };
+  if (task.assignee) {
+    try {
+      const a = await ghFetch(`/repos/${repo}/assignees/${encodeURIComponent(task.assignee)}`, { token });
+      if (a.status === 204) payload.assignees = [task.assignee];
+    } catch {}
+  }
+  let res;
+  if (task.githubIssueNumber) {
+    res = await ghFetch(`/repos/${repo}/issues/${task.githubIssueNumber}`, {
+      method: 'PATCH', token, body: payload,
+    });
+  } else {
+    const createPayload = Object.assign({}, payload);
+    delete createPayload.state;
+    res = await ghFetch(`/repos/${repo}/issues`, { method: 'POST', token, body: createPayload });
+    if (res.ok && task.status === 'done') {
+      const issue = await res.clone().json();
+      await ghFetch(`/repos/${repo}/issues/${issue.number}`, {
+        method: 'PATCH', token, body: { state: 'closed' },
+      });
+    }
+  }
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json()).message || ''; } catch {}
+    throw new Error(`GitHub push failed (${res.status}): ${detail}`);
+  }
+  const data = await res.json();
+  return { issueNumber: data.number, updatedAt: data.updated_at };
+}
+
+async function maybePushAfterSave(task) {
+  if (!task.githubSync || !hasGithubConfig()) return;
+  try {
+    const { issueNumber } = await pushTaskToGithub(task);
+    const updates = { lastSyncedAt: now(), syncError: null };
+    if (!task.githubIssueNumber) updates.githubIssueNumber = issueNumber;
+    if (tasksRef && task._key) tasksRef.child(task._key).update(updates);
+  } catch (e) {
+    if (tasksRef && task._key) {
+      tasksRef.child(task._key).update({ syncError: (e && e.message) ? e.message : String(e) });
+    }
+  }
+}
+
+async function pullFromGithub() {
+  if (!hasGithubConfig()) { openGithubConfigModal(); return; }
+  if (syncInProgress) return;
+  syncInProgress = true;
+  const btn = document.getElementById('syncBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing...'; }
+  const { repo, token } = window.githubConfig;
+  let page = 1, fetched = [], safety = 0;
+  try {
+    while (safety++ < 10) {
+      const res = await ghFetch(`/repos/${repo}/issues?state=all&per_page=100&page=${page}`, { token });
+      if (!res.ok) throw new Error('Fetch issues failed: ' + res.status);
+      const arr = await res.json();
+      const issues = arr.filter(x => !x.pull_request);
+      fetched.push(...issues);
+      if (arr.length < 100) break;
+      page++;
+    }
+    const byNumber = new Map();
+    currentTasks.forEach(t => { if (t.githubIssueNumber) byNumber.set(t.githubIssueNumber, t); });
+    let created = 0, updated = 0, skipped = 0;
+    for (const issue of fetched) {
+      const { meta, desc } = parseIssueMeta(issue.body || '');
+      const taskId = meta.taskId || null;
+      let existing = byNumber.get(issue.number);
+      if (!existing && taskId) {
+        existing = currentTasks.find(t => t.id === taskId);
+      }
+      const fields = labelsToTaskFields(issue.labels);
+      const taskPayload = {
+        title: issue.title,
+        desc,
+        tag: fields.tag || '',
+        priority: fields.priority || 'medium',
+        status: issue.state === 'closed' ? 'done' : (fields.status || 'todo'),
+        dueDate: meta.dueDate || null,
+        assignee: (issue.assignees && issue.assignees[0] && issue.assignees[0].login) || (existing && existing.assignee) || '',
+        githubSync: true,
+        githubIssueNumber: issue.number,
+        lastSyncedAt: now(),
+        syncError: null,
+        updated: now(),
+      };
+      if (!existing) {
+        taskPayload.id = taskId || genTaskId();
+        taskPayload.created = issue.created_at || now();
+        tasksRef.push(taskPayload);
+        created++;
+      } else if (existing.syncError) {
+        skipped++;
+      } else {
+        const issueUpdated = new Date(issue.updated_at).getTime();
+        const lastSynced = existing.lastSyncedAt ? new Date(existing.lastSyncedAt).getTime() : 0;
+        if (issueUpdated > lastSynced) {
+          tasksRef.child(existing._key).update(taskPayload);
+          updated++;
+        } else {
+          skipped++;
+        }
+      }
+    }
+    showToast(`Sync: +${created} new, ${updated} updated, ${skipped} skipped`);
+  } catch (e) {
+    showToast('Sync failed: ' + (e && e.message ? e.message : e), 'error');
+  } finally {
+    syncInProgress = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '&#128259; Sync';
+      setTimeout(() => {}, 100);
+    }
+  }
+}
+
+function showToast(msg, kind) {
+  let el = document.getElementById('tbToast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'tbToast';
+    el.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:400;padding:12px 18px;border-radius:10px;font-size:13px;box-shadow:0 6px 24px rgba(0,0,0,0.4);max-width:360px;';
+    document.body.appendChild(el);
+  }
+  el.style.background = kind === 'error' ? '#7f1d1d' : '#065f46';
+  el.style.color = kind === 'error' ? '#fca5a5' : '#6ee7b7';
+  el.style.border = '1px solid ' + (kind === 'error' ? '#991b1b' : '#047857');
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.transition = 'opacity 0.4s'; el.style.opacity = '0'; }, 4500);
+}
+
+// Sync error resolution
+function openSyncErrorDialog(key) {
+  const t = currentTasks.find(x => x._key === key);
+  if (!t) return;
+  syncErrorTaskKey = key;
+  const body = document.getElementById('syncErrorBody');
+  const issueLine = t.githubIssueNumber ? `<div>Issue: #${t.githubIssueNumber}</div>` : '';
+  body.innerHTML = `
+    <div style="color:var(--accent-rose);font-weight:600;margin-bottom:8px;">${escHtml(t.syncError || 'Unknown error')}</div>
+    <div>Task: <strong>${escHtml(t.title || '')}</strong></div>
+    ${issueLine}
+  `;
+  document.getElementById('syncErrDiscardBtn').disabled = !t.githubIssueNumber;
+  document.getElementById('syncErrUnlinkBtn').disabled = false;
+  document.getElementById('syncErrorOverlay').classList.add('active');
+}
+
+function closeSyncErrorDialog() {
+  syncErrorTaskKey = null;
+  document.getElementById('syncErrorOverlay').classList.remove('active');
+}
+
+async function syncErrorRetry() {
+  const key = syncErrorTaskKey;
+  const t = currentTasks.find(x => x._key === key);
+  if (!t) return;
+  closeSyncErrorDialog();
+  await maybePushAfterSave(t);
+}
+
+async function syncErrorDiscard() {
+  const key = syncErrorTaskKey;
+  const t = currentTasks.find(x => x._key === key);
+  if (!t || !t.githubIssueNumber || !hasGithubConfig()) return;
+  const { repo, token } = window.githubConfig;
+  try {
+    const res = await ghFetch(`/repos/${repo}/issues/${t.githubIssueNumber}`, { token });
+    if (!res.ok) throw new Error('Failed to fetch issue: ' + res.status);
+    const issue = await res.json();
+    const { meta, desc } = parseIssueMeta(issue.body || '');
+    const fields = labelsToTaskFields(issue.labels);
+    tasksRef.child(key).update({
+      title: issue.title,
+      desc,
+      tag: fields.tag || '',
+      priority: fields.priority || 'medium',
+      status: issue.state === 'closed' ? 'done' : (fields.status || 'todo'),
+      dueDate: meta.dueDate || null,
+      assignee: (issue.assignees && issue.assignees[0] && issue.assignees[0].login) || '',
+      lastSyncedAt: now(),
+      syncError: null,
+      updated: now(),
+    });
+    closeSyncErrorDialog();
+    showToast('Discarded local changes — pulled from GitHub');
+  } catch (e) {
+    showToast('Discard failed: ' + e.message, 'error');
+  }
+}
+
+function syncErrorUnlink() {
+  const key = syncErrorTaskKey;
+  if (!key || !tasksRef) return;
+  tasksRef.child(key).update({
+    githubSync: false,
+    githubIssueNumber: null,
+    syncError: null,
+    lastSyncedAt: null,
+  });
+  closeSyncErrorDialog();
+  showToast('Unlinked from GitHub');
 }
 
 
@@ -2073,6 +3129,8 @@ document.addEventListener('keydown', e => {
 // BOOT
 // ═══════════════════════════════════════════════════════════════
 (function boot() {
+  loadGithubConfig();
+  switchTaskView(activeView);
   const savedConfig = localStorage.getItem(CONFIG_KEY);
   if (savedConfig) {
     try {
@@ -2087,7 +3145,7 @@ document.addEventListener('keydown', e => {
   } else {
     showStatus(false, 'Firebase not connected — setup required');
     hideLoading();
-    renderBoard();
+    renderTaskView();
     renderBrainBoard();
     renderMeetingList();
   }
