@@ -1274,8 +1274,7 @@
     <div style="display:flex;gap:10px;">
       <div class="form-group" style="flex:1;">
         <label>Assignee</label>
-        <input type="text" id="taskAssignee" placeholder="Name (optional)" list="assigneeSuggestions">
-        <datalist id="assigneeSuggestions"></datalist>
+        <select id="taskAssignee"></select>
       </div>
       <div class="form-group" style="flex:1;">
         <label>Status</label>
@@ -1449,6 +1448,36 @@ const COLUMNS = [
   { id: 'review',   name: 'Review',      dot: 'dot-review' },
   { id: 'done',     name: 'Done',        dot: 'dot-done' },
 ];
+
+const ASSIGNEE_ALL = '전원';
+
+function getCollaborators() {
+  return (window.githubConfig && Array.isArray(window.githubConfig.collaborators))
+    ? window.githubConfig.collaborators.slice()
+    : [];
+}
+
+function getAssigneeOptions() {
+  const cols = getCollaborators();
+  return [ASSIGNEE_ALL, ...cols];
+}
+
+function rebuildAssigneeDropdown() {
+  const sel = document.getElementById('taskAssignee');
+  if (!sel) return;
+  const current = sel.value;
+  const opts = getAssigneeOptions();
+  const customCurrent = current && !opts.includes(current) && current !== '' ? current : null;
+  const parts = ['<option value="">Unassigned</option>'];
+  for (const name of opts) {
+    parts.push(`<option value="${escHtml(name)}">${escHtml(name)}</option>`);
+  }
+  if (customCurrent) {
+    parts.push(`<option value="${escHtml(customCurrent)}">${escHtml(customCurrent)} (legacy)</option>`);
+  }
+  sel.innerHTML = parts.join('');
+  sel.value = current;
+}
 
 const CONFIG_KEY = 'task-board-firebase-config';
 const NICK_KEY = 'task-board-nickname';
@@ -1694,12 +1723,6 @@ function getUniqueAssignees(tasks) {
     if (a) set.add(a);
   });
   return Array.from(set).sort((a, b) => a.localeCompare(b, 'ko'));
-}
-
-function refreshAssigneeSuggestions() {
-  const list = document.getElementById('assigneeSuggestions');
-  if (!list) return;
-  list.innerHTML = getUniqueAssignees().map(a => `<option value="${escHtml(a)}">`).join('');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1959,8 +1982,7 @@ function renderMatrixView() {
   const rangeLabel = `${week[0].getFullYear()}.${week[0].getMonth()+1}.${week[0].getDate()} ~ ${week[6].getMonth()+1}.${week[6].getDate()}`;
   document.getElementById('matrixRangeLabel').textContent = rangeLabel;
 
-  const assigneesReal = getUniqueAssignees(tasks);
-  const rows = [...assigneesReal, ''];
+  const rows = [...getAssigneeOptions(), ''];
   document.getElementById('matrixCountLabel').textContent = `${tasks.length} tasks`;
 
   const colKeys = ['unsched', 'overdue', ...week.map(dateToIso)];
@@ -2032,7 +2054,7 @@ function onMatrixDrop(event, newAssignee, target) {
 
 // Task CRUD
 function openTaskModal(defaultStatus) {
-  refreshAssigneeSuggestions();
+  rebuildAssigneeDropdown();
   document.getElementById('editTaskId').value = '';
   document.getElementById('taskTitle').value = '';
   document.getElementById('taskDesc').value = '';
@@ -2054,7 +2076,7 @@ function openTaskModal(defaultStatus) {
 function editTask(key) {
   const t = currentTasks.find(x => x._key === key);
   if (!t) return;
-  refreshAssigneeSuggestions();
+  rebuildAssigneeDropdown();
   document.getElementById('editTaskId').value = key;
   document.getElementById('taskTitle').value = t.title || '';
   document.getElementById('taskDesc').value = t.desc || '';
@@ -2221,13 +2243,15 @@ async function saveGithubConfig() {
     const repoRes = await ghFetch(`/repos/${repo}`, { token });
     if (!repoRes.ok) throw new Error('Cannot access repo (status ' + repoRes.status + ')');
     const userData = await userRes.json();
+    status.textContent = 'Fetching collaborators...';
+    const collaborators = await fetchCollaborators(repo, token);
     status.textContent = 'Creating labels...';
     await ensureLabels(repo, token);
-    window.githubConfig = { repo, token, login: userData.login };
+    window.githubConfig = { repo, token, login: userData.login, collaborators };
     localStorage.setItem(GH_CONFIG_KEY, JSON.stringify(window.githubConfig));
     status.style.color = 'var(--accent-emerald)';
-    status.textContent = `Connected as ${userData.login}`;
-    setTimeout(() => { closeGithubConfigModal(); renderTaskView(); }, 600);
+    status.textContent = `Connected as ${userData.login} · ${collaborators.length} collaborator(s)`;
+    setTimeout(() => { closeGithubConfigModal(); renderTaskView(); }, 800);
   } catch (e) {
     status.style.color = 'var(--accent-rose)';
     status.textContent = e.message || String(e);
@@ -2251,6 +2275,23 @@ function ghFetch(path, opts) {
   };
   if (opts.body) init.body = JSON.stringify(opts.body);
   return fetch('https://api.github.com' + path, init);
+}
+
+async function fetchCollaborators(repo, token) {
+  const out = [];
+  let page = 1, safety = 0;
+  while (safety++ < 5) {
+    const res = await ghFetch(`/repos/${repo}/collaborators?per_page=100&page=${page}`, { token });
+    if (!res.ok) {
+      if (res.status === 403 || res.status === 404) return [];
+      throw new Error('Collaborators fetch failed (' + res.status + ')');
+    }
+    const arr = await res.json();
+    for (const c of arr) out.push(c.login);
+    if (arr.length < 100) break;
+    page++;
+  }
+  return out;
 }
 
 async function ensureLabels(repo, token) {
@@ -2326,11 +2367,15 @@ async function pushTaskToGithub(task) {
     labels: taskToLabels(task),
     state: task.status === 'done' ? 'closed' : 'open',
   };
-  if (task.assignee) {
+  if (task.assignee === ASSIGNEE_ALL) {
+    payload.assignees = getCollaborators();
+  } else if (task.assignee) {
     try {
       const a = await ghFetch(`/repos/${repo}/assignees/${encodeURIComponent(task.assignee)}`, { token });
       if (a.status === 204) payload.assignees = [task.assignee];
     } catch {}
+  } else {
+    payload.assignees = [];
   }
   let res;
   if (task.githubIssueNumber) {
@@ -2380,6 +2425,11 @@ async function pullFromGithub() {
   const { repo, token } = window.githubConfig;
   let page = 1, fetched = [], safety = 0;
   try {
+    try {
+      const cols = await fetchCollaborators(repo, token);
+      window.githubConfig.collaborators = cols;
+      localStorage.setItem(GH_CONFIG_KEY, JSON.stringify(window.githubConfig));
+    } catch {}
     while (safety++ < 10) {
       const res = await ghFetch(`/repos/${repo}/issues?state=all&per_page=100&page=${page}`, { token });
       if (!res.ok) throw new Error('Fetch issues failed: ' + res.status);
@@ -2400,6 +2450,16 @@ async function pullFromGithub() {
         existing = currentTasks.find(t => t.id === taskId);
       }
       const fields = labelsToTaskFields(issue.labels);
+      const cols = getCollaborators();
+      const issueAssignees = (issue.assignees || []).map(a => a.login);
+      let mappedAssignee = '';
+      if (cols.length && issueAssignees.length === cols.length && cols.every(c => issueAssignees.includes(c))) {
+        mappedAssignee = ASSIGNEE_ALL;
+      } else if (issueAssignees.length) {
+        mappedAssignee = issueAssignees[0];
+      } else if (existing) {
+        mappedAssignee = existing.assignee || '';
+      }
       const taskPayload = {
         title: issue.title,
         desc,
@@ -2407,7 +2467,7 @@ async function pullFromGithub() {
         priority: fields.priority || 'medium',
         status: issue.state === 'closed' ? 'done' : (fields.status || 'todo'),
         dueDate: meta.dueDate || null,
-        assignee: (issue.assignees && issue.assignees[0] && issue.assignees[0].login) || (existing && existing.assignee) || '',
+        assignee: mappedAssignee,
         githubSync: true,
         githubIssueNumber: issue.number,
         lastSyncedAt: now(),
@@ -2503,6 +2563,14 @@ async function syncErrorDiscard() {
     const issue = await res.json();
     const { meta, desc } = parseIssueMeta(issue.body || '');
     const fields = labelsToTaskFields(issue.labels);
+    const cols = getCollaborators();
+    const issueAssignees = (issue.assignees || []).map(a => a.login);
+    let mappedAssignee = '';
+    if (cols.length && issueAssignees.length === cols.length && cols.every(c => issueAssignees.includes(c))) {
+      mappedAssignee = ASSIGNEE_ALL;
+    } else if (issueAssignees.length) {
+      mappedAssignee = issueAssignees[0];
+    }
     tasksRef.child(key).update({
       title: issue.title,
       desc,
@@ -2510,7 +2578,7 @@ async function syncErrorDiscard() {
       priority: fields.priority || 'medium',
       status: issue.state === 'closed' ? 'done' : (fields.status || 'todo'),
       dueDate: meta.dueDate || null,
-      assignee: (issue.assignees && issue.assignees[0] && issue.assignees[0].login) || '',
+      assignee: mappedAssignee,
       lastSyncedAt: now(),
       syncError: null,
       updated: now(),
