@@ -1,21 +1,29 @@
-"""
-📖 [개념 설명]: state.py가 하는 일
-이 파일은 LangGraph 파이프라인에서 각 부서(노드)가 서로 데이터를 주고받을 때 사용하는 '공통 결재판(상태 객체)'의 양식을 정의하는 곳입니다. 
+# FUNC-009: LangGraph 파이프라인 전체 노드가 공유하는 상태 객체
+from pydantic import BaseModel, field_validator
+from typing import TypedDict
+from src.models.schemas import RewrittenQuery, RetrievedChunk, RerankingResult, EvaluationResult, FinalResponse
 
-질문 분석(Rewrite) -> 문서 검색(Search) -> 품질 평가(Evaluate) -> 답변 생성(Generate) 등 여러 단계를 거치는 동안, 데이터가 유실되거나 변수명이 헷갈리지 않도록 파이썬의 TypedDict 등을 사용하여 데이터의 타입과 구조를 엄격하게 고정합니다. 모든 노드는 오직 이 State 객체 하나만을 읽고 씁니다.
+class ErrorLog(TypedDict):
+    timestamp:  str   # ISO 8601 (UTC), 예: "2026-04-19T10:00:00Z"
+    node:       str   # 노드명: "rewrite" | "search" | "rerank" | "evaluate" | "generate"
+    error_type: str   # 예외 클래스명, 예: "TimeoutError"
+    message:    str   # str(e)
 
-✅ TODO LIST:
-- [ ] LangGraph에서 사용할 기본 상태(State) 클래스 정의 (TypedDict 상속 권장)
-- [ ] 입력 단계 데이터 필드 추가
-    - `original_query` (str): 사용자가 처음 입력한 원본 질문
-    - `target_standard` (str): 질의에서 추출된 회계기준 (예: 'K-IFRS' 또는 'K-GAAP')
-- [ ] 검색 단계 데이터 필드 추가
-    - `search_queries` (list[str]): AI가 검색용으로 분해/재작성한 최적화된 키워드 목록
-    - `retrieved_nodes` (list[Any]): Milvus DB에서 하이브리드 검색으로 가져온 기준서 문서 청크들
-- [ ] 평가 단계 데이터 필드 추가
-    - `evaluation_result` (dict): 검색된 문서의 유효성 검사 결과
-        - 예: {"is_relevant": bool, "requires_external_reference": bool}
-- [ ] 출력 단계 데이터 필드 추가
-    - `final_response` (dict): 최종 생성된 구조화된 답변 데이터
-        - 예: {"answer": str, "standard_name": str, "clause": str}
-"""
+class GraphState(BaseModel):
+    """LangGraph StateGraph의 공유 상태"""
+    # error_logs를 노드가 실행될 때마다 기존 로그에 추가하고 싶다면 Annotated를 활용할 수 있음
+    query:            str
+    rewritten_query:  RewrittenQuery | None  = None
+    retrieved_chunks: list[RetrievedChunk]   = []
+    reranked_chunks:  list[RerankingResult]  = []
+    evaluation:       EvaluationResult | None = None
+    final_response:   FinalResponse | None   = None
+    rewrite_count:    int                    = 0      # 초기값 0, 상한: MAX_REWRITE_COUNT
+    error_logs:       list[ErrorLog]         = []
+    metadata:         dict                   = {}     # 예: {"search_mode": "hybrid"}
+
+    # Pseudo validator:
+    # @field_validator("rewrite_count")
+    # def count_non_negative(cls, v):
+    #     assert v >= 0
+    #     return v

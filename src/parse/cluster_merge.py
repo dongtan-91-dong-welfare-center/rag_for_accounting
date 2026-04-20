@@ -268,3 +268,74 @@ def merge_marker_clusters(clusters: list[Cluster]) -> list[Cluster]:
     # 최종 결과 로그: 몇 건이 병합되었고, 클러스터 수가 어떻게 변했는지 기록
     _log.info(f"마커 병합: {len(merged_to)}건 처리, {len(clusters)}→{len(result_clusters)}개 클러스터")
     return result_clusters
+
+
+# ======================================================================
+# 근접 클러스터링 — 공간적으로 가까운 아이템끼리 묶기
+# ======================================================================
+# reading order 정렬 전에, 가까이 있는 요소들을 하나의 클러스터로 묶어서
+# "한 덩어리"로 읽히도록 합니다.
+# 주변에 더 이상 가까운 context가 없을 때까지 계속 묶습니다 (Union-Find).
+
+from src.parse.parser_dtos import _ItemInfo, CLUSTER_DISTANCE_FACTOR
+
+
+def _bbox_distance(a: _ItemInfo, b: _ItemInfo) -> float:
+    """두 아이템 bbox 사이 최단 거리 (겹치면 0)"""
+    dx = max(0.0, max(a.left - b.right, b.left - a.right))
+    dy = max(0.0, max(a.top - b.bottom, b.top - a.bottom))
+    return (dx ** 2 + dy ** 2) ** 0.5
+
+
+def _avg_item_height(items: list[_ItemInfo]) -> float:
+    heights = [i.bottom - i.top for i in items if i.bottom > i.top]
+    return sum(heights) / len(heights) if heights else 20.0
+
+
+def cluster_nearby_items(items: list[_ItemInfo]) -> list[list[_ItemInfo]]:
+    """공간적으로 가까운 아이템끼리 클러스터로 묶습니다 (Union-Find).
+
+    거리 임계값 = 평균 아이템 높이 × CLUSTER_DISTANCE_FACTOR
+    주변에 더 이상 가까운 아이템이 없을 때까지 반복적으로 묶습니다.
+
+    Args:
+        items: 한 페이지 내 아이템 리스트
+
+    Returns:
+        클러스터 리스트. 각 클러스터는 _ItemInfo 리스트.
+        클러스터 간 순서는 (min_top, min_left) 기준 Top→Down, Left→Right.
+    """
+    if len(items) <= 1:
+        return [items] if items else []
+
+    max_dist = _avg_item_height(items) * CLUSTER_DISTANCE_FACTOR
+    n = len(items)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        px, py = find(x), find(y)
+        if px != py:
+            parent[px] = py
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _bbox_distance(items[i], items[j]) <= max_dist:
+                union(i, j)
+
+    groups: dict[int, list[_ItemInfo]] = {}
+    for i in range(n):
+        root = find(i)
+        groups.setdefault(root, []).append(items[i])
+
+    # 클러스터 간 순서: Top→Down, Left→Right
+    sorted_clusters = sorted(
+        groups.values(),
+        key=lambda c: (min(i.top for i in c), min(i.left for i in c)),
+    )
+    return sorted_clusters

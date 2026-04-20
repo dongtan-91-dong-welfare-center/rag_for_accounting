@@ -13,6 +13,7 @@ DTO란?
 """
 import re
 from dataclasses import dataclass, field
+from docling_core.types.doc.document import RefItem
 
 # ──────────────────────────────────────────────────────────────────
 # 레이아웃 후처리 임계값 (Docling 내부 레이아웃 분석에서 사용)
@@ -77,3 +78,29 @@ class ParsedDocument:
 
     # metadata : 문서에 대한 부가 정보 (예: 원본 파일 경로)
     metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class _ItemInfo:
+    """정렬을 위한 아이템 메타 정보."""
+    ref: RefItem
+    page_no: int
+    left: float
+    top: float
+    right: float
+    bottom: float
+    width: float
+
+# 두 아이템의 수직 겹침이 이 비율 이상이면 "같은 라인"으로 간주
+SAME_LINE_OVERLAP_RATIO = 0.5
+# XY-Cut에서 gap이 이 값(평균 아이템 높이 대비 비율) 이상이면 분할
+MIN_GAP_RATIO = 0.3
+# 클러스터링: 아이템 간 거리가 이 값(평균 아이템 높이 배수) 이내면 같은 클러스터
+CLUSTER_DISTANCE_FACTOR = 1.5
+
+# ── 페이지 걸침 테이블 병합 임계값 ──
+_PAGE_TOP_THRESHOLD = 700   # PDF t좌표가 이 이상이면 페이지 상단
+_PAGE_BOT_THRESHOLD = 150   # PDF b좌표가 이 이하이면 페이지 하단
+
+# 두 아이템의 top y 차이가 (작은 쪽 높이 × 이 비율) 이내면 같은 라인
+SAME_LINE_RATIO = 0.5

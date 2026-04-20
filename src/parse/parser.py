@@ -17,7 +17,7 @@ Docling이란?
 """
 import html
 from pathlib import Path
-from src.parse.parser_dtos import ParsedDocument
+from src.parse.parser_dtos import ParsedDocument, _PAGE_TOP_THRESHOLD, _PAGE_BOT_THRESHOLD
 from docling.document_converter import DocumentConverter
 
 
@@ -120,6 +120,12 @@ class DoclingParser:
         result = converter.convert(str(file_path))
         doc = result.document
 
+        # ── 2.5단계: Reading Order 재정렬 ──
+        # Docling 기본 reading order를 재귀 XY-Cut + 근접 클러스터링으로 교정합니다.
+        # Top→Down, Left→Right 원칙에 맞게 body.children 순서를 재정렬합니다.
+        from src.parse.reading_order import reorder_reading_order
+        doc = reorder_reading_order(doc)
+
         # ── 3단계: 마크다운 텍스트 추출 ──
         # export_to_markdown()은 문서 내용을 마크다운 형식 문자열로 변환합니다.
         # html.unescape()는 HTML 엔티티를 원래 문자로 되돌립니다.
@@ -127,25 +133,9 @@ class DoclingParser:
         # Docling이 내부적으로 HTML 인코딩을 사용하는 경우가 있어서 이 처리가 필요합니다.
         markdown_text = html.unescape(doc.export_to_markdown())
 
-        # ── 4단계: 표(Table) 추출 ──
-        # doc.tables는 문서에서 감지된 모든 표의 리스트입니다.
-        # 각 표를 pandas DataFrame으로 변환한 뒤,
-        # {"headers": [열 이름들], "rows": [[행1 데이터], [행2 데이터], ...]} 형태로 저장합니다.
-        tables = []
-        for table in doc.tables:
-            # export_to_dataframe()은 표를 pandas DataFrame으로 변환합니다.
-            # DataFrame은 엑셀 시트와 비슷한 2차원 데이터 구조입니다.
-            df = table.export_to_dataframe()
-
-            # df.values는 DataFrame의 데이터 부분을 numpy 배열로 반환합니다.
-            # .tolist()로 파이썬 기본 리스트로 변환합니다. (JSON 직렬화 등에 필요)
-            values = df.values
-            rows = values.tolist() if hasattr(values, "tolist") else list(values)
-
-            tables.append({
-                "headers": list(df.columns),  # 열 이름(헤더) 리스트
-                "rows": rows,                 # 각 행의 데이터 리스트
-            })
+        # ── 4단계: 표(Table) 추출 + 페이지 걸침 테이블 병합 ──
+        # doc.tables에서 표를 추출하되, 연속 페이지에 걸쳐 나뉜 테이블을 병합합니다.
+        tables = self._extract_and_merge_tables(doc)
 
         # ── 5단계: 결과 반환 ──
         # 추출한 모든 정보를 ParsedDocument에 담아서 반환합니다.
@@ -155,6 +145,79 @@ class DoclingParser:
             tables=tables,
             metadata={"source_path": str(file_path)},  # 원본 파일 경로를 메타데이터로 저장
         )
+
+    def _extract_and_merge_tables(self, doc) -> list[dict]:
+        """doc.tables에서 표를 추출하고, 연속 페이지에 걸친 테이블을 병합합니다.
+
+        병합 조건:
+          1. 연속 페이지 (page N → page N+1)
+          2. 현재 테이블이 페이지 하단까지 내려감 (b ≤ 150)
+          3. 다음 테이블이 페이지 상단부터 시작 (t ≥ 700)
+          4. 컬럼 수가 동일
+
+        병합 시 두 번째 테이블의 헤더 처리:
+          - 첫 번째 테이블과 헤더가 동일하면 → 반복 헤더이므로 제거
+          - 숫자 헤더(0,1,2...)면 → 헤더 없는 연속이므로 그대로 행으로 추가
+        """
+        if not doc.tables:
+            return []
+
+        # 각 테이블의 메타 정보 + DataFrame 추출
+        entries = []
+        for table in doc.tables:
+            df = table.export_to_dataframe()
+            page_no = table.prov[0].page_no if table.prov else -1
+            t = table.prov[0].bbox.t if table.prov else 0
+            b = table.prov[0].bbox.b if table.prov else 0
+            entries.append({
+                "df": df,
+                "page": page_no,
+                "t": t,
+                "b": b,
+            })
+
+        # 병합 처리
+        merged: list[dict] = []
+        i = 0
+        while i < len(entries):
+            curr = entries[i]
+            curr_df = curr["df"]
+
+            # 다음 테이블과 병합 가능한지 확인
+            while i + 1 < len(entries):
+                nxt = entries[i + 1]
+                if (nxt["page"] == curr["page"] + 1 and
+                    curr["b"] <= _PAGE_BOT_THRESHOLD and
+                    nxt["t"] >= _PAGE_TOP_THRESHOLD and
+                    len(curr_df.columns) == len(nxt["df"].columns)):
+
+                    nxt_df = nxt["df"]
+                    # 헤더가 동일하면 반복 헤더 → 행만 가져옴
+                    if list(curr_df.columns) == list(nxt_df.columns):
+                        import pandas as pd
+                        curr_df = pd.concat([curr_df, nxt_df], ignore_index=True)
+                    else:
+                        # 숫자 헤더(0,1,2...) → 헤더 없는 연속, 행으로 추가
+                        nxt_df.columns = curr_df.columns
+                        import pandas as pd
+                        curr_df = pd.concat([curr_df, nxt_df], ignore_index=True)
+
+                    # 연속 병합을 위해 page 갱신
+                    curr = {"df": curr_df, "page": nxt["page"],
+                            "t": nxt["t"], "b": nxt["b"]}
+                    i += 1
+                else:
+                    break
+
+            values = curr_df.values
+            rows = values.tolist() if hasattr(values, "tolist") else list(values)
+            merged.append({
+                "headers": list(curr_df.columns),
+                "rows": rows,
+            })
+            i += 1
+
+        return merged
 
     def table_to_text(self, table: dict) -> str:
         """

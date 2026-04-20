@@ -11,29 +11,22 @@
 
 ## 🛠️ 설치 및 실행
 
-### 1. 환경 설정
+### 1. 환경 설정 및 의존성 설정
 
 프로젝트 루트 디렉토리에서 가상 환경을 생성하고 활성화합니다.
+uv 사용을 권장합니다.
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-```
-
-### 2. 의존성 설치
-
-필요한 라이브러리를 설치합니다.
-
-```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### 3. 실행
 
 에이전트 워크플로우를 실행합니다.
 
+<!-- 현재 구현되어 있지 않습니다. -->
 ```bash
-python src/main.py
+uv run python src/main.py
 ```
 
 ## 📂 프로젝트 구조
@@ -41,7 +34,10 @@ python src/main.py
 ```
 src/
 ├── agent/              # 에이전트 로직 및 워크플로우
-│   ├── nodes/          # 워크플로우의 각 노드 (rewrite, search, evaluate, generate)
+│   ├── nodes/          # 워크플로우의 각 노드 (evaluate, generate, rewrite)
+│   │   ├── evaluate.py # 품질 평가 노드
+│   │   ├── generate.py # 답변 생성 노드
+│   │   └── rewrite.py  # 질문 재작성 노드
 │   ├── prompts.py      # LLM 프롬프트 정의
 │   └── workflow.py     # LangGraph 워크플로우 오케스트레이션
 ├── db/                 # 벡터 데이터베이스 연동
@@ -52,7 +48,17 @@ src/
 ├── models/             # 데이터 모델 및 스키마
 │   ├── schemas.py      # Pydantic 스키마 정의
 │   └── state.py        # LangGraph State 정의
-└── main.py             # 애플리케이션 진입점
+├── parse/              # 추가 파싱 및 클러스터링
+│   ├── cluster_merge.py # 클러스터 병합 로직
+│   ├── layout_config.py # 레이아웃 설정
+│   ├── parser.py       # 파서 구현
+│   └── parser_dtos.py  # 파서 DTO 정의
+├── retrieval/          # 검색 및 리랭킹
+│   ├── reranker.py     # 리랭킹 로직
+│   └── searcher.py     # 검색 구현
+└── utils/              # 유틸리티 및 설정
+    ├── config.py       # 설정 관리
+    └── logger.py       # 로깅 유틸리티
 ```
 
 ## 📖 문서 학습
