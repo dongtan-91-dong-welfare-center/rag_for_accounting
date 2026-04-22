@@ -132,7 +132,6 @@ def rewrite_query(state: GraphState) -> GraphState:
         state.is_accounting_query = is_accounting
 
         if not is_accounting:
-            state.search_queries = [state.query]
             state.rewritten_query = RewrittenQuery(
                 original=state.query,
                 strategy="bypass",
@@ -141,10 +140,7 @@ def rewrite_query(state: GraphState) -> GraphState:
             return state
 
         strategy = select_strategy(state.query)
-        state.query_strategy = strategy
-
         queries = _STRATEGY_FN[strategy](state.query)
-        state.search_queries = queries
         state.rewritten_query = RewrittenQuery(
             original=state.query,
             strategy=strategy,
@@ -152,7 +148,6 @@ def rewrite_query(state: GraphState) -> GraphState:
         )
 
     except Exception as e:
-        state.search_queries = [state.query]
         state.rewritten_query = RewrittenQuery(
             original=state.query,
             strategy="bypass",
