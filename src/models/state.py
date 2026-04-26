@@ -5,7 +5,7 @@ from src.models.schemas import RewrittenQuery, RetrievedChunk, RerankingResult, 
 
 class ErrorLog(TypedDict):
     timestamp:  str   # ISO 8601 (UTC), 예: "2026-04-19T10:00:00Z"
-    node:       str   # 노드명: "rewrite" | "search" | "rerank" | "evaluate" | "generate"
+    node:       str   # 노드명: "rewrite" | "search" | "rerank" | "evaluate" | "generate" | "parse" | "ontology" | "index"
     error_type: str   # 예외 클래스명, 예: "TimeoutError"
     message:    str   # str(e)
 
