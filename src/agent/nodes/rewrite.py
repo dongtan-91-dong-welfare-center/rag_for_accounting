@@ -51,6 +51,7 @@ def classify_and_select(query: str) -> tuple[bool, str]:
         strategy = data.get("strategy", "hyde")
         return is_accounting, strategy
     except Exception:
+        # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("classify_and_select failed: %s", e))
         return True, "hyde"
 
 
@@ -67,6 +68,7 @@ def apply_hyde(query: str) -> list[str]:
         if hypo:
             return [query, hypo]
     except Exception:
+        # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("apply_hyde failed: %s", e))
         pass
     return [query]
 
@@ -84,6 +86,7 @@ def apply_decompose(query: str) -> list[str]:
         if subs:
             return [query] + subs
     except Exception:
+        # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("apply_decompose failed: %s", e))
         pass
     return [query]
 
@@ -101,6 +104,7 @@ def apply_stepback(query: str) -> list[str]:
         if abstract:
             return [query, abstract]
     except Exception:
+        # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("apply_stepback failed: %s", e))
         pass
     return [query]
 
