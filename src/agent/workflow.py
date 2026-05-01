@@ -114,12 +114,17 @@ def generate_response(state: GraphState) -> GraphState:
 def route_after_evaluate(state: GraphState) -> str:
     """
     TODO: FUNC-009 (평가 후 라우팅 결정)
-    평가 결과에 따라 다음 노드를 결정한다.
-    - needs_external=True → 'rewrite' (재검색)
-    - 그 외 → 'generate'
+    평가 결과 또는 에러 상태에 따라 다음 노드를 결정한다.
     """
+    # evaluate 노드에서 에러 발생 여부 확인 (명시적 에러 감지)
+    if state.error_logs and state.error_logs[-1]["node"] == "evaluate":
+        # 평가 단계 실패 시, 재작성 루프를 타지 않고 바로 generate로 진행
+        return "generate"
+
+    # 정상적인 CRAG 루프 분기
     if state.evaluation and state.evaluation.needs_external and state.rewrite_count < MAX_REWRITE_COUNT:
         return "rewrite"
+
     return "generate"
 
 def build_workflow() -> StateGraph:
