@@ -1,9 +1,9 @@
 # FUNC-009: LangGraph StateGraph 파이프라인 정의
 
-from datetime import datetime, timezone
+from datetime import datetime
 from functools import wraps
 from langgraph.graph import StateGraph, START, END
-from src.utils.config import MAX_REWRITE_COUNT
+from src.utils.config import MAX_REWRITE_COUNT, KST
 from src.utils.exception import AccountingRAGError
 from src.models.state import GraphState
 from src.models.schemas import RetrievedChunk, FinalResponse, EvaluationResult, RerankingResult
@@ -25,7 +25,7 @@ def handle_node_errors(node_name: str):
             except Exception as e:
                 # 예상치 못한 예외 처리
                 error_log = {
-                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "timestamp": datetime.now(KST).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "node": node_name,
                     "error_type": "UNKNOWN",
                     "message": str(e)

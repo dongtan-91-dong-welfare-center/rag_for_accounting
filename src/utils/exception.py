@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 from pathlib import Path
 
 # src.models.state의 ErrorLog 타입 참조 (타입 힌팅용)
 from src.models.state import ErrorLog
+from src.utils.config import KST
 
 # 허용되는 노드 타입 (LangGraph의 각 노드)
 NodeType = Literal["rewrite", "search", "rerank", "evaluate", "generate", "parse", "ontology", "index"]
@@ -39,7 +40,7 @@ class AccountingRAGError(Exception):
         :return: ErrorLog 타입의 딕셔너리
         """
         return {
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timestamp": datetime.now(KST).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "node": self.node,
             "error_type": self.error_type,
             "message": self.message
