@@ -82,3 +82,18 @@ class TestErrorHandling:
             assert final_state["error_logs"][-1]["node"] == "rewrite"
             assert final_state["error_logs"][-1]["error_type"] == "CM-002"  # LLMAPIConnectionError의 코드
             assert final_state["final_response"] is not None
+
+    def test_generic_exception_caught(self, initial_state):
+        """일반 예외 발생 시 UNKNOWN 타입으로 기록되는지 검증"""
+        
+        def raw_fail(state):
+            raise ValueError("커넥션 오류")
+        decorated_fail = handle_node_errors("search")(raw_fail)
+
+        with patch("src.agent.workflow.hybrid_search", side_effect=decorated_fail):
+            app = build_workflow()
+            final_state = app.invoke(initial_state)
+            
+            assert final_state["error_logs"][-1]["node"] == "search"
+            assert final_state["error_logs"][-1]["error_type"] == "UNKNOWN"
+            assert "커넥션 오류" in final_state["error_logs"][-1]["message"]
