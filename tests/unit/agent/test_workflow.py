@@ -44,10 +44,63 @@ class TestWorkflowConstruction:
 
     def test_workflow_initial_state_structure(self, initial_state):
         """초기 GraphState 구조 및 기본값 검증"""
-        assert initial_state.query == "유형자산의 감가상각 방법은 무엇인가요?"
+        assert initial_state.query == "영업권 손상차손 인식 기준은?"
         assert initial_state.rewrite_count == 0
         assert initial_state.error_logs == []
         assert initial_state.retrieved_chunks == []
         assert initial_state.reranked_chunks == []
         assert initial_state.evaluation is None
         assert initial_state.final_response is None
+
+class TestNormalFlowPath:
+    """
+    Test Group 2: 정상 경로
+    목표: 정상적인 상황에서 파이프라인이 의도된 순서대로 실행되는지 확인
+    """
+
+    def test_normal_path_complete_flow(self, workflow_app, initial_state):
+        """표준 쿼리에 대해 모든 노드가 순서대로 실행되는지 검증"""
+        # invoke 호출(사전에 정의한 순서대로 상태를 전달하며 노드를 실행하도록 설정)
+        final_state: dict = workflow_app.invoke(initial_state)
+        
+        # TODO: 현재는 workflow.py에 정의한 Mock을 대상으로 하지만, 로직 구현 이후에는 LLM의 API를 호출하므로 테스트 항목을 적절하게 변경하여야 함
+        # 검증 항목
+        assert final_state["final_response"] is not None
+        assert final_state["final_response"].is_answerable is True
+        assert len(final_state["error_logs"]) == 0
+        
+        # 각 단계별 데이터 적재 확인
+        assert final_state["rewrite_count"] == 1
+        assert len(final_state["retrieved_chunks"]) == 2  # Mock에서 2개 반환
+        assert len(final_state["reranked_chunks"]) == 2
+        assert final_state["evaluation"] is not None
+        assert final_state["evaluation"].needs_external is False
+
+    def test_rewrite_count_increments(self, workflow_app, initial_state):
+        """rewrite 노드 진입 시 카운트 증가 검증"""
+        final_state = workflow_app.invoke(initial_state)
+        assert final_state["rewrite_count"] == 1
+
+    def test_search_returns_chunks(self, workflow_app, initial_state):
+        """search 노드에서 retrieved_chunks 생성 검증"""
+        final_state = workflow_app.invoke(initial_state)
+        assert len(final_state["retrieved_chunks"]) >= 2
+
+    def test_rerank_transforms_chunks(self, workflow_app, initial_state):
+        """rerank 노드에서 RerankingResult로 변환 검증"""
+        final_state = workflow_app.invoke(initial_state)
+        assert len(final_state["reranked_chunks"]) == len(final_state["retrieved_chunks"])
+        assert hasattr(final_state["reranked_chunks"][0], "rerank_score")
+
+    def test_evaluate_returns_result(self, workflow_app, initial_state):
+        """evaluate 노드에서 EvaluationResult 생성 검증"""
+        final_state = workflow_app.invoke(initial_state)
+        assert final_state["evaluation"] is not None
+        assert final_state["evaluation"].is_relevant is True
+
+    def test_generate_response_created(self, workflow_app, initial_state):
+        """generate 노드에서 FinalResponse 생성 검증"""
+        final_state = workflow_app.invoke(initial_state)
+        assert final_state["final_response"] is not None
+        # Mock 답변 내용 포함 여부 확인
+        assert "채권형 매도가능증권" in final_state["final_response"].answer
