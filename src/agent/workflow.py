@@ -6,7 +6,10 @@ from langgraph.graph import StateGraph, START, END
 from src.utils.config import MAX_REWRITE_COUNT, KST
 from src.utils.exception import AccountingRAGError
 from src.models.state import GraphState
-from src.models.schemas import RetrievedChunk, FinalResponse, EvaluationResult, RerankingResult
+from src.models.schemas import (
+    RetrievedChunk, FinalResponse, EvaluationResult, 
+    RerankingResult, Citation
+)
 
 def handle_node_errors(node_name: str):
     """
@@ -15,13 +18,13 @@ def handle_node_errors(node_name: str):
     """
     def decorator(func):
         @wraps(func)
-        def wrapper(state: GraphState) -> GraphState:
+        def wrapper(state: GraphState) -> dict:
             try:
                 return func(state)
             except AccountingRAGError as e:
                 # 커스텀 예외 처리(Exception.py에서 정의)
-                state.error_logs.append(e.to_error_log())
-                return state
+                new_logs = state.error_logs + [e.to_error_log()]
+                return {"error_logs": new_logs}
             except Exception as e:
                 # 예상치 못한 예외 처리
                 error_log = {
@@ -30,86 +33,110 @@ def handle_node_errors(node_name: str):
                     "error_type": "UNKNOWN",
                     "message": str(e)
                 }
-                state.error_logs.append(error_log)
-                return state
+                new_logs = state.error_logs + [error_log]
+                return {"error_logs": new_logs}
         return wrapper
     return decorator
 
 @handle_node_errors("rewrite")
-def rewrite_query(state: GraphState) -> GraphState:
+def rewrite_query(state: GraphState) -> dict:
     """
     TODO: FUNC-004 (질의 재작성 노드) - Mock 구현
     실제 구현 대기 (src/agent/nodes/rewrite.py)
     """
-    state.rewrite_count += 1
-    return state
+    return {"rewrite_count": state.rewrite_count + 1}
 
 @handle_node_errors("search")
-def hybrid_search(state: GraphState) -> GraphState:
+def hybrid_search(state: GraphState) -> dict:
     """
     TODO: FUNC-005 (하이브리드 검색 노드) - Mock 구현
     실제 구현 대기 (src/retrieval/searcher.py)
     """
-    state.retrieved_chunks = [
-        RetrievedChunk(document_id="DOC-001", chunk_id="1", content="유형자산의 감가상각은..."),
-        RetrievedChunk(document_id="DOC-002", chunk_id="2", content="전환사채를 투자목적으로..."),
-    ]
-    return state
+    return {
+        "retrieved_chunks": [
+            RetrievedChunk(
+                chunk_id="1", 
+                document_id="DOC-001", 
+                content="유형자산의 감가상각은...", 
+                score=0.9, 
+                metadata={}
+            ),
+            RetrievedChunk(
+                chunk_id="2", 
+                document_id="DOC-002", 
+                content="전환사채를 투자목적으로...", 
+                score=0.8, 
+                metadata={}
+            ),
+        ]
+    }
 
 @handle_node_errors("rerank")
-def rerank(state: GraphState) -> GraphState:
+def rerank(state: GraphState) -> dict:
     """
     TODO: FUNC-006 (재정렬 노드) - Mock 구현
     실제 구현 대기 (src/retrieval/reranker.py)
     """
-    # 더미 구현: 검색된 청크를 그대로 재정렬 결과로 매핑
-    state.reranked_chunks = [
+    # 더미 구현: 검색된 청크 수만큼 재정렬 결과 생성
+    reranked = [
         RerankingResult(
-            document_id=chunk.document_id,
-            chunk_id=chunk.chunk_id,
-            content=chunk.content,
-            score=0.9
+            chunk=chunk,
+            rerank_score=0.95
         ) for chunk in state.retrieved_chunks
     ]
-    return state
+    return {"reranked_chunks": reranked}
 
 @handle_node_errors("evaluate")
-def evaluate_context(state: GraphState) -> GraphState:
+def evaluate_context(state: GraphState) -> dict:
     """
     TODO: FUNC-007 (컨텍스트 평가 노드) - Mock 구현
     실제 구현 대기 (src/agent/nodes/evaluate.py)
     """
     # 더미 구현: 항상 추가 검색이 필요 없는 것으로 평가
-    state.evaluation = EvaluationResult(
-        is_relevant=True,
-        needs_external=False,
-        reasoning="더미 평가: 검색된 컨텍스트가 충분히 관련성 있음"
-    )
-    return state
+    return {
+        "evaluation": EvaluationResult(
+            is_relevant=True,
+            needs_external=False,
+            confidence=0.9,
+            reasoning="더미 평가: 검색된 컨텍스트가 충분히 관련성 있음"
+        )
+    }
 
 @handle_node_errors("generate")
-def generate_response(state: GraphState) -> GraphState:
+def generate_response(state: GraphState) -> dict:
     """
     TODO: FUNC-008 (답변 생성 노드) - Mock 구현
     실제 구현 대기 (src/agent/nodes/generate.py)
     """
     # Fail-Fast 회피: 청크가 없더라도 이곳에서 기본 메시지 처리
     if not state.reranked_chunks:
-        state.final_response = FinalResponse(
-            answer="죄송합니다. 제공된 자료에서 관련 정보를 찾지 못했습니다.",
-            citations=[],
-            is_answerable=False,
-            confidence_score=0.0
-        )
-        return state
+        return {
+            "final_response": FinalResponse(
+                answer="죄송합니다. 제공된 자료에서 관련 정보를 찾지 못했습니다.",
+                citations=[],
+                is_answerable=False,
+                confidence_score=0.0
+            )
+        }
 
-    state.final_response = FinalResponse(
-        answer="채권형 매도가능증권은 유효이자율법에 따라...",
-        citations=["DOC-001", "DOC-002"],
-        is_answerable=True,
-        confidence_score=0.95
-    )
-    return state
+    # Citation 객체 생성
+    citations = [
+        Citation(
+            document_id=r.chunk.document_id,
+            chunk_id=r.chunk.chunk_id,
+            content=r.chunk.content,
+            relevance_score=r.rerank_score
+        ) for r in state.reranked_chunks
+    ]
+
+    return {
+        "final_response": FinalResponse(
+            answer="채권형 매도가능증권은 유효이자율법에 따라...",
+            citations=citations,
+            is_answerable=True,
+            confidence_score=0.95
+        )
+    }
 
 def route_after_evaluate(state: GraphState) -> str:
     """
