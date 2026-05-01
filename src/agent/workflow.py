@@ -1,10 +1,41 @@
 # FUNC-009: LangGraph StateGraph 파이프라인 정의
 
+from datetime import datetime, timezone
+from functools import wraps
 from langgraph.graph import StateGraph, START, END
 from src.utils.config import MAX_REWRITE_COUNT
+from src.utils.exception import AccountingRAGError
 from src.models.state import GraphState
 from src.models.schemas import RetrievedChunk, FinalResponse, EvaluationResult, RerankingResult
 
+def handle_node_errors(node_name: str):
+    """
+    각 노드에서 발생하는 예외를 캐치하여 state.error_logs에 기록하고,
+    워크플로우가 중단되지 않도록 상태를 반환하는 데코레이터입니다.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(state: GraphState) -> GraphState:
+            try:
+                return func(state)
+            except AccountingRAGError as e:
+                # 커스텀 예외 처리(Exception.py에서 정의)
+                state.error_logs.append(e.to_error_log())
+                return state
+            except Exception as e:
+                # 예상치 못한 예외 처리
+                error_log = {
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "node": node_name,
+                    "error_type": "UNKNOWN",
+                    "message": str(e)
+                }
+                state.error_logs.append(error_log)
+                return state
+        return wrapper
+    return decorator
+
+@handle_node_errors("rewrite")
 def rewrite_query(state: GraphState) -> GraphState:
     """
     TODO: FUNC-004 (질의 재작성 노드) - Mock 구현
@@ -13,6 +44,7 @@ def rewrite_query(state: GraphState) -> GraphState:
     state.rewrite_count += 1
     return state
 
+@handle_node_errors("search")
 def hybrid_search(state: GraphState) -> GraphState:
     """
     TODO: FUNC-005 (하이브리드 검색 노드) - Mock 구현
@@ -24,6 +56,7 @@ def hybrid_search(state: GraphState) -> GraphState:
     ]
     return state
 
+@handle_node_errors("rerank")
 def rerank(state: GraphState) -> GraphState:
     """
     TODO: FUNC-006 (재정렬 노드) - Mock 구현
@@ -40,6 +73,7 @@ def rerank(state: GraphState) -> GraphState:
     ]
     return state
 
+@handle_node_errors("evaluate")
 def evaluate_context(state: GraphState) -> GraphState:
     """
     TODO: FUNC-007 (컨텍스트 평가 노드) - Mock 구현
@@ -53,6 +87,7 @@ def evaluate_context(state: GraphState) -> GraphState:
     )
     return state
 
+@handle_node_errors("generate")
 def generate_response(state: GraphState) -> GraphState:
     """
     TODO: FUNC-008 (답변 생성 노드) - Mock 구현
@@ -97,20 +132,20 @@ def build_workflow() -> StateGraph:
     """
     workflow = StateGraph(GraphState)
 
-    # 1. 노드 추가
+    # 노드 추가
     workflow.add_node("rewrite", rewrite_query)
     workflow.add_node("search", hybrid_search)
     workflow.add_node("rerank", rerank)
     workflow.add_node("evaluate", evaluate_context)
     workflow.add_node("generate", generate_response)
 
-    # 2. 엣지 연결 (고정 흐름)
+    # 엣지 연결 (고정 흐름)
     workflow.add_edge(START, "rewrite")
     workflow.add_edge("rewrite", "search")
     workflow.add_edge("search", "rerank")
     workflow.add_edge("rerank", "evaluate")
 
-    # 3. 조건부 엣지 연결 (평가 결과에 따른 분기)
+    # 조건부 엣지 연결 (평가 결과에 따른 분기)
     workflow.add_conditional_edges(
         "evaluate",
         route_after_evaluate,
@@ -122,5 +157,5 @@ def build_workflow() -> StateGraph:
 
     workflow.add_edge("generate", END)
 
-    # 4. 그래프 컴파일
+    # 그래프 컴파일
     return workflow.compile()
