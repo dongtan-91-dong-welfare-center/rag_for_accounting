@@ -10,6 +10,7 @@ def rewrite_query(state: GraphState) -> GraphState:
     TODO: FUNC-004 (질의 재작성 노드) - Mock 구현
     실제 구현 대기 (src/agent/nodes/rewrite.py)
     """
+    state.rewrite_count += 1
     return state
 
 def hybrid_search(state: GraphState) -> GraphState:
