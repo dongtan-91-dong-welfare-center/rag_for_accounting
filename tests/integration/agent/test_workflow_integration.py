@@ -4,7 +4,7 @@ from src.agent.workflow import build_workflow, handle_node_errors
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
 from src.models.schemas import EvaluationResult
-from src.utils.exception import AccountingRAGError, LLMAPIConnectionError
+from src.utils.exception import AccountingRAGError, LLMAPIConnectionError, RerankFailureError
 
 @pytest.fixture
 def initial_state():
@@ -97,3 +97,20 @@ class TestErrorHandling:
             assert final_state["error_logs"][-1]["node"] == "search"
             assert final_state["error_logs"][-1]["error_type"] == "UNKNOWN"
             assert "커넥션 오류" in final_state["error_logs"][-1]["message"]
+
+    def test_workflow_continues_after_error(self, initial_state):
+        """중간 노드에서 에러가 발생해도 마지막 generate 노드까지 도달하는지 검증"""
+        
+        def raw_fail(state):
+            raise RerankFailureError(
+                message="Rerank failure",
+                node="rerank"
+            )
+        decorated_fail = handle_node_errors("rerank")(raw_fail)
+
+        with patch("src.agent.workflow.rerank", side_effect=decorated_fail):
+            app = build_workflow()
+            final_state = app.invoke(initial_state)
+            
+            assert any(log["node"] == "rerank" for log in final_state["error_logs"])
+            assert final_state["final_response"] is not None
