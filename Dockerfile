@@ -31,7 +31,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # [개발 환경을 포함한 완벽한 의존성 설치]
-# --locked: (일시 제거) pyproject.toml과 uv.lock의 일치를 강제하지 않고, 변경사항이 있으면 자동으로 반영하도록 합니다.
+# --locked: pyproject.toml과 uv.lock이 일치하지 않는 경우, 빌드를 중단합니다. 다만, 개발 환경에서는 자주 의존성이 변경되므로 이를 적용하지 않았습니다. 
+# !TODO: 운영 환경에서는 --locked을 적용해야 합니다.
 # --all-extras: pyproject.toml에 정의된 모든 선택적 의존성 그룹을 확인하여 관련 패키지를 한 번에 설치합니다.
 # --dev: 운영 프로덕션용 패키지뿐만 아니라, pytest와 같은 개발 전용 의존성, 린터, 테스트 도구 등을 명시적으로 전부 포함하여 테스트 환경을 구축합니다.
 RUN uv sync --all-extras --dev
