@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   database:
     # [데이터베이스 맞춤형(커스텀) 빌드]
