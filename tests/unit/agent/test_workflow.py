@@ -1,7 +1,10 @@
 import pytest
 from langgraph.graph.state import CompiledStateGraph
-from src.agent.workflow import build_workflow
+from unittest.mock import patch
+from src.agent.workflow import build_workflow, route_after_evaluate
 from src.models.state import GraphState
+from src.utils.config import MAX_REWRITE_COUNT
+from src.models.schemas import EvaluationResult
 
 @pytest.fixture
 def initial_state():
@@ -53,10 +56,7 @@ class TestWorkflowConstruction:
         assert initial_state.final_response is None
 
 class TestNormalFlowPath:
-    """
-    Test Group 2: 정상 경로
-    목표: 정상적인 상황에서 파이프라인이 의도된 순서대로 실행되는지 확인
-    """
+    """정상적인 상황에서 파이프라인이 의도된 순서대로 실행되는지 확인"""
 
     def test_normal_path_complete_flow(self, workflow_app, initial_state):
         """표준 쿼리에 대해 모든 노드가 순서대로 실행되는지 검증"""
@@ -104,3 +104,48 @@ class TestNormalFlowPath:
         assert final_state["final_response"] is not None
         # Mock 답변 내용 포함 여부 확인
         assert "채권형 매도가능증권" in final_state["final_response"].answer
+
+class TestCRAGLoopPath:
+    """조건부 라우팅이 정확히 작동하여 재검색 루프를 형성하는지 확인"""
+
+    def test_route_after_evaluate_to_rewrite(self):
+        """needs_external=True이고 카운트 미달일 때 rewrite 반환 검증"""
+        state = GraphState(
+            query="영업권 손상차손 인식 기준은?",
+            evaluation=EvaluationResult(
+                is_relevant=True, 
+                needs_external=True, 
+                confidence=0.8, 
+                reasoning="추가 검색 필요"
+            ),
+            rewrite_count=1
+        )
+        assert route_after_evaluate(state) == "rewrite"
+
+    def test_route_after_evaluate_to_generate_on_max_count(self):
+        """MAX_REWRITE_COUNT 도달 시 needs_external=True라도 generate 반환 검증"""
+        state = GraphState(
+            query="영업권 손상차손 인식 기준은?",
+            evaluation=EvaluationResult(
+                is_relevant=True, 
+                needs_external=True, 
+                confidence=0.8, 
+                reasoning="한계 도달"
+            ),
+            rewrite_count=MAX_REWRITE_COUNT
+        )
+        assert route_after_evaluate(state) == "generate"
+
+    def test_route_after_evaluate_to_generate_on_needs_external_false(self):
+        """needs_external=False일 때 generate 반환 검증"""
+        state = GraphState(
+            query="영업권 손상차손 인식 기준은?",
+            evaluation=EvaluationResult(
+                is_relevant=True, 
+                needs_external=False, 
+                confidence=0.8, 
+                reasoning="검색 충분함"
+            ),
+            rewrite_count=1
+        )
+        assert route_after_evaluate(state) == "generate"
