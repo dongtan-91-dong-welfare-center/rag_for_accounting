@@ -14,12 +14,18 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-accounting_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounting_password}
       POSTGRES_DB: ${POSTGRES_DB:-accounting_db}
+
+    # [포트 매핑]
+    # 외부(로컬 PC 관리 도구 등)에서 접속할 호스트 포트(좌)와 DB가 대기 중인 컨테이너 내부 포트(우)를 연결합니다.
+    # 완전히 차단된 컨테이너 환경에 통로를 뚫어 로컬 PC 관리 도구(DBeaver, pgAdmin 등)나
+    # rag_for_accounting 어플리케이션이 데이터베이스에 접근할 수 있도록 해줍니다.
     ports:
       - "5432:5432"
     volumes:
       # 컨테이너가 재시작되거나 파괴되어도 데이터베이스 내부의 테이블, 인덱스 등의 실제 데이터가 유실되지 않도록
-      # 로컬에 이름 있는 볼륨(named volume)으로 연결하여 영구 보존합니다.
+      # 로컬에 이름 있는 볼륨(postgres_data)으로 연결하여 영구 보존합니다.
       - postgres_data:/var/lib/postgresql/data
+      
     # [Apache AGE 메모리 강제 로딩]
     # Apache AGE의 그래프 통신 및 연산 기능을 활성화하기 위해, DB 프로세스가 기동할 때 postgresql.conf 설정을 오버라이드 합니다.
     # '-c shared_preload_libraries=age' 옵션을 통해 제일 먼저 메모리에 age 관련 로직을 할당하도록 강제합니다.
