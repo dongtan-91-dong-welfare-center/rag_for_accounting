@@ -40,7 +40,7 @@ class AccountingRAGError(Exception):
         :return: ErrorLog 타입의 딕셔너리
         """
         return {
-            "timestamp": datetime.now(KST).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timestamp": datetime.now(KST).isoformat(), # datetime 객체를 ISO 8601 국제 표준 형식의 문자열로 변환
             "node": self.node,
             "error_type": self.error_type,
             "message": self.message

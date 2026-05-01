@@ -25,7 +25,7 @@ def handle_node_errors(node_name: str):
             except Exception as e:
                 # 예상치 못한 예외 처리
                 error_log = {
-                    "timestamp": datetime.now(KST).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "timestamp": datetime.now(KST).isoformat(), # datetime 객체를 ISO 8601 국제 표준 형식의 문자열로 변환
                     "node": node_name,
                     "error_type": "UNKNOWN",
                     "message": str(e)
