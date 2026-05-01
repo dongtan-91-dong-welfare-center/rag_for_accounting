@@ -1,7 +1,7 @@
 # FUNC-009: LangGraph StateGraph 파이프라인 정의
 
 from langgraph.graph import StateGraph, START, END
-from src.config import MAX_REWRITE_COUNT
+from src.utils.config import MAX_REWRITE_COUNT
 from src.models.state import GraphState
 from src.models.schemas import RetrievedChunk, FinalResponse, EvaluationResult, RerankingResult
 
