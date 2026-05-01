@@ -4,7 +4,12 @@ from src.agent.workflow import build_workflow, handle_node_errors
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
 from src.models.schemas import EvaluationResult
-from src.utils.exception import AccountingRAGError, LLMAPIConnectionError, RerankFailureError
+from src.utils.exception import (
+    AccountingRAGError, 
+    LLMAPIConnectionError, 
+    RerankFailureError, 
+    LLMResponseFormatError
+)
 
 @pytest.fixture
 def initial_state():
@@ -114,3 +119,23 @@ class TestErrorHandling:
             
             assert any(log["node"] == "rerank" for log in final_state["error_logs"])
             assert final_state["final_response"] is not None
+
+    def test_error_log_structure(self, initial_state):
+        """ErrorLog 객체의 구조(timestamp, node, error_type, message) 검증"""
+        from src.agent.workflow import handle_node_errors
+        
+        def raw_fail(state):
+            raise LLMResponseFormatError(
+                message="generate error"
+            )
+        decorated_fail = handle_node_errors("generate")(raw_fail)
+
+        with patch("src.agent.workflow.generate_response", side_effect=decorated_fail):
+            app = build_workflow()
+            final_state = app.invoke(initial_state)
+            
+            log = final_state["error_logs"][-1]
+            assert "T" in log["timestamp"]
+            assert "+09:00" in log["timestamp"] or "Z" in log["timestamp"]
+            assert "generate" == log["node"]
+            assert "GN-401" == log["error_type"]
