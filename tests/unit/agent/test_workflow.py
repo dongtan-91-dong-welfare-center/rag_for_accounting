@@ -156,3 +156,9 @@ class TestStateTransition:
     def test_retrieved_chunks_empty_initially(self, initial_state):
         """워크플로우 시작 전 검색 결과 리스트가 비어있는 상태인지 확인"""
         assert initial_state.retrieved_chunks == []
+
+    def test_reranked_chunks_depend_on_retrieved(self, workflow_app, initial_state):
+        """리랭킹 결과의 개수가 원본 검색 결과의 개수와 일치하는지 확인"""
+        final_state = workflow_app.invoke(initial_state)
+        # Mock 노드 기준: retrieved_chunks(2개) -> reranked_chunks(2개)
+        assert len(final_state["reranked_chunks"]) == len(final_state["retrieved_chunks"])
