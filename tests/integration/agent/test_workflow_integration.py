@@ -8,7 +8,8 @@ from src.utils.exception import (
     AccountingRAGError, 
     LLMAPIConnectionError, 
     RerankFailureError, 
-    LLMResponseFormatError
+    LLMResponseFormatError,
+    SearchTimeoutError
 )
 
 @pytest.fixture
@@ -64,7 +65,7 @@ class TestWorkflowIntegration:
             assert final_state["final_response"] is not None
 
 class TestErrorHandling:
-    """각 노드에서 예외 발생 시 워크플로우가 중단되지 않고 계속 진행되는지 확인"""
+    """각 노드에서 예외 발생 시 워크플로우가 중단되지 않고 계속 진행되는지 및 에러 로깅 동작 확인"""
 
     def test_accounting_rag_error_caught(self, initial_state):
         """커스텀 예외 발생 시 error_logs에 기록되고 워크플로우가 계속되는지 검증"""
@@ -73,7 +74,7 @@ class TestErrorHandling:
         def raw_fail(state):
             # 전용 예외 클래스(LLMAPIConnectionError) 활용
             raise LLMAPIConnectionError(
-                message="LLM API 서버 응답 지연",
+                message="LLM API 서버 응답 지연(테스트)",
                 node="rewrite"
             )
         # handle_node_errors('rewrite') -> handle_node_errors_decorator -> raw_fail 순으로 호출됨
@@ -136,6 +137,33 @@ class TestErrorHandling:
             
             log = final_state["error_logs"][-1]
             assert "T" in log["timestamp"]
-            assert "+09:00" in log["timestamp"] or "Z" in log["timestamp"]
+            assert "+09:00" in log["timestamp"]  # KST 오프셋 검증 포함
             assert "generate" == log["node"]
             assert "GN-401" == log["error_type"]
+
+    def test_error_logs_append_not_replace(self, initial_state):
+        """복수 노드에서 커스텀 에러 발생 시 로그가 누적되는지 검증 (rewrite, search, rerank)"""
+        
+        def fail_rewrite(state): raise LLMAPIConnectionError("LLM fail", "rewrite")
+        def fail_search(state): raise SearchTimeoutError("Search timeout")
+        def fail_rerank(state): raise RerankFailureError("Rerank fail")
+
+        with patch("src.agent.workflow.rewrite_query", side_effect=handle_node_errors("rewrite")(fail_rewrite)), \
+             patch("src.agent.workflow.hybrid_search", side_effect=handle_node_errors("search")(fail_search)), \
+             patch("src.agent.workflow.rerank", side_effect=handle_node_errors("rerank")(fail_rerank)):
+            
+            app = build_workflow()
+            final_state = app.invoke(initial_state)
+            
+            # 3개 이상의 노드에서 에러가 쌓였는지 확인
+            assert len(final_state["error_logs"]) >= 3
+            nodes_with_errors = [log["node"] for log in final_state["error_logs"]]
+            assert "rewrite" in nodes_with_errors
+            assert "search" in nodes_with_errors
+            assert "rerank" in nodes_with_errors
+
+            # 에러 타입 코드가 정확히 기록되었는지 확인
+            error_types = [log["error_type"] for log in final_state["error_logs"]]
+            assert "CM-002" in error_types # LLMAPIConnectionError
+            assert "SE-101" in error_types # SearchTimeoutError
+            assert "RR-201" in error_types # RerankFailureError
