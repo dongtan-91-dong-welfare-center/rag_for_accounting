@@ -9,7 +9,8 @@ from src.utils.exception import (
     LLMAPIConnectionError, 
     RerankFailureError, 
     LLMResponseFormatError,
-    SearchTimeoutError
+    SearchTimeoutError,
+    EvaluationParsingError,
 )
 
 @pytest.fixture
@@ -182,3 +183,17 @@ class TestErrorHandling:
             rerank_logs = [log for log in final_state["error_logs"] if log["node"] == "rerank"]
             assert len(rerank_logs) > 0
 
+    def test_route_after_evaluate_error_detection(self, initial_state):
+        """evaluate 노드에서 에러 발생 시 route_after_evaluate가 이를 감지하고 generate로 분기하는지 검증"""
+        def fail_evaluate(state): raise EvaluationParsingError("Evaluation fail")
+
+        with patch("src.agent.workflow.evaluate_context") as mock_eval:
+            mock_eval.side_effect = handle_node_errors("evaluate")(fail_evaluate)
+            
+            app = build_workflow()
+            final_state = app.invoke(initial_state)
+            
+            # evaluate 노드 에러 확인
+            assert any(log["node"] == "evaluate" for log in final_state["error_logs"])
+            # 에러 감지 후 루프를 돌지 않고 바로 generate로 종료되었는지 확인 (rewrite_count가 추가로 늘어나지 않음)
+            assert final_state["rewrite_count"] == 1
