@@ -149,3 +149,10 @@ class TestCRAGLoopPath:
             rewrite_count=1
         )
         assert route_after_evaluate(state) == "generate"
+
+class TestStateTransition:
+    """파이프라인 전 과정에서 GraphState의 정합성이 유지되는지 확인"""
+
+    def test_retrieved_chunks_empty_initially(self, initial_state):
+        """워크플로우 시작 전 검색 결과 리스트가 비어있는 상태인지 확인"""
+        assert initial_state.retrieved_chunks == []
