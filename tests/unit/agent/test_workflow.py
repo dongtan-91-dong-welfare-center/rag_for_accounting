@@ -170,4 +170,14 @@ class TestStateTransition:
     def test_final_response_none_initially(self, initial_state):
         """워크플로우 시작 전 최종 응답 필드가 None으로 초기화되어 있는지 확인"""
         assert initial_state.final_response is None
+
+    def test_state_accumulation_full_flow(self, workflow_app, initial_state):
+        """전체 실행 완료 후 모든 중간 상태 데이터가 보존되는지 확인"""
+        final_state = workflow_app.invoke(initial_state)
         
+        assert final_state["query"] is not None
+        assert final_state["rewrite_count"] >= 1
+        assert len(final_state["retrieved_chunks"]) > 0
+        assert len(final_state["reranked_chunks"]) > 0
+        assert final_state["evaluation"] is not None
+        assert final_state["final_response"] is not None
