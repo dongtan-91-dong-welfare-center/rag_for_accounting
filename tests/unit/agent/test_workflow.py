@@ -162,3 +162,12 @@ class TestStateTransition:
         final_state = workflow_app.invoke(initial_state)
         # Mock 노드 기준: retrieved_chunks(2개) -> reranked_chunks(2개)
         assert len(final_state["reranked_chunks"]) == len(final_state["retrieved_chunks"])
+
+    def test_evaluation_none_initially(self, initial_state):
+        """워크플로우 시작 전 평가 결과 필드가 None으로 초기화되어 있는지 확인"""
+        assert initial_state.evaluation is None
+
+    def test_final_response_none_initially(self, initial_state):
+        """워크플로우 시작 전 최종 응답 필드가 None으로 초기화되어 있는지 확인"""
+        assert initial_state.final_response is None
+        
