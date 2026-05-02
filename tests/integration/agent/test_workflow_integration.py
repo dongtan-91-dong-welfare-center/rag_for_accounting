@@ -215,3 +215,24 @@ class TestEdgeCases:
             # is_answerable이 False인 답변이 생성되어야 함
             assert final_state["final_response"].is_answerable is False
             assert "정보를 찾지 못했습니다" in final_state["final_response"].answer
+
+    def test_irrelevant_query_flow(self, initial_state):
+        """질의가 관련 없는 것으로 평가되었을 때의 흐름 검증"""
+        # TODO: 향후 rewrite 노드에서 질문 분류 로직 구현 시, 
+        # 비회계 주제에 대해서는 bypass 전략을 지정하고 바로 generate로 이동하는지 재확인 필요
+        with patch("src.agent.workflow.evaluate_context") as mock_eval:
+            mock_eval.return_value = {
+                "evaluation": EvaluationResult(
+                    is_relevant=False,
+                    needs_external=False,
+                    confidence=1.0,
+                    reasoning="회계와 관련 없는 질의"
+                )
+            }
+            
+            app = build_workflow()
+            final_state = app.invoke(initial_state)
+            
+            assert final_state["rewrite_count"] == 1 
+            assert final_state["evaluation"].is_relevant is False
+            assert final_state["final_response"] is not None
