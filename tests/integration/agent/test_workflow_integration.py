@@ -197,3 +197,21 @@ class TestErrorHandling:
             assert any(log["node"] == "evaluate" for log in final_state["error_logs"])
             # 에러 감지 후 루프를 돌지 않고 바로 generate로 종료되었는지 확인 (rewrite_count가 추가로 늘어나지 않음)
             assert final_state["rewrite_count"] == 1
+
+class TestEdgeCases:
+    """비정상적인 입력이나 검색 결과 부재 시의 대응 확인"""
+
+    def test_empty_retrieval_flow(self, initial_state):
+        """검색 결과가 없을 때 최종 답변이 '찾을 수 없음'으로 생성되는지 검증"""
+        with patch("src.agent.workflow.hybrid_search") as mock_search:
+            # 검색 결과가 비어있는 상황 모의
+            mock_search.return_value = {"retrieved_chunks": []}
+            
+            app = build_workflow()
+            final_state = app.invoke(initial_state)
+            
+            # reranked_chunks도 비어있어야 함
+            assert len(final_state["reranked_chunks"]) == 0
+            # is_answerable이 False인 답변이 생성되어야 함
+            assert final_state["final_response"].is_answerable is False
+            assert "정보를 찾지 못했습니다" in final_state["final_response"].answer
