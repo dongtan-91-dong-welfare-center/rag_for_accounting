@@ -167,3 +167,18 @@ class TestErrorHandling:
             assert "CM-002" in error_types # LLMAPIConnectionError
             assert "SE-101" in error_types # SearchTimeoutError
             assert "RR-201" in error_types # RerankFailureError
+
+    def test_error_node_field_accuracy(self, initial_state):
+        """에러 로그의 node 필드가 실제 에러가 발생한 노드명과 정확히 일치하는지 검증"""
+        def fail_rerank(state): raise RerankFailureError("Rerank fail")
+
+        with patch("src.agent.workflow.rerank") as mock_rerank:
+            mock_rerank.side_effect = handle_node_errors("rerank")(fail_rerank)
+            
+            app = build_workflow()
+            final_state = app.invoke(initial_state)
+            
+            # 정확한 노드명이 기록되었는지 확인
+            rerank_logs = [log for log in final_state["error_logs"] if log["node"] == "rerank"]
+            assert len(rerank_logs) > 0
+
