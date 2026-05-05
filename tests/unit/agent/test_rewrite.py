@@ -34,7 +34,7 @@ def _mock_raw_resp(raw: str) -> MagicMock:
 def test_state_default_fields():
     state = GraphState(original_query="영업권 손상차손 인식 기준은?")
     assert state.is_accounting_query is True
-    assert state.crag_count == 0
+    assert state.rewrite_count == 0
     assert state.rewritten_query is None
 
 
@@ -137,7 +137,7 @@ class TestApplyHyde:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"hypothetical_answer": "리스부채는 리스료의 현재가치로 측정합니다."}
             )
-            result = apply_hyde(self.QUERY)
+            result = apply_hyde(self.QUERY, "ALL")
         assert result[0] == self.QUERY
         assert result[1] == "리스부채는 리스료의 현재가치로 측정합니다."
         assert len(result) == 2
@@ -145,7 +145,7 @@ class TestApplyHyde:
     def test_llm_failure_returns_original_only(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("timeout")
-            result = apply_hyde(self.QUERY)
+            result = apply_hyde(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_empty_hypothetical_returns_original_only(self):
@@ -153,14 +153,14 @@ class TestApplyHyde:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"hypothetical_answer": ""}
             )
-            result = apply_hyde(self.QUERY)
+            result = apply_hyde(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_markdown_wrapper_stripped_and_parsed(self):
         wrapped = "```json\n{\"hypothetical_answer\": \"리스부채는 현재가치로 측정합니다.\"}\n```"
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_raw_resp(wrapped)
-            result = apply_hyde(self.QUERY)
+            result = apply_hyde(self.QUERY, "ALL")
         assert result == [self.QUERY, "리스부채는 현재가치로 측정합니다."]
 
 
@@ -176,7 +176,7 @@ class TestApplyDecompose:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": subs}
             )
-            result = apply_decompose(self.QUERY)
+            result = apply_decompose(self.QUERY, "ALL")
         assert result[0] == self.QUERY
         assert result[1:] == subs
         assert len(result) == 3
@@ -184,7 +184,7 @@ class TestApplyDecompose:
     def test_llm_failure_returns_original_only(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("timeout")
-            result = apply_decompose(self.QUERY)
+            result = apply_decompose(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_empty_subqueries_returns_original_only(self):
@@ -192,14 +192,14 @@ class TestApplyDecompose:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": []}
             )
-            result = apply_decompose(self.QUERY)
+            result = apply_decompose(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_markdown_wrapper_stripped_and_parsed(self):
         wrapped = "```json\n{\"sub_queries\": [\"유형자산 감가상각 방법은?\", \"무형자산 상각 방법은?\"]}\n```"
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_raw_resp(wrapped)
-            result = apply_decompose(self.QUERY)
+            result = apply_decompose(self.QUERY, "ALL")
         assert result[0] == self.QUERY
         assert len(result) == 3
 
@@ -215,7 +215,7 @@ class TestApplyStepback:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"abstract_query": "영업권 손상차손 인식 및 측정 기준은?"}
             )
-            result = apply_stepback(self.QUERY)
+            result = apply_stepback(self.QUERY, "ALL")
         assert result[0] == self.QUERY
         assert result[1] == "영업권 손상차손 인식 및 측정 기준은?"
         assert len(result) == 2
@@ -223,7 +223,7 @@ class TestApplyStepback:
     def test_llm_failure_returns_original_only(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("timeout")
-            result = apply_stepback(self.QUERY)
+            result = apply_stepback(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_empty_abstract_returns_original_only(self):
@@ -231,14 +231,14 @@ class TestApplyStepback:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"abstract_query": ""}
             )
-            result = apply_stepback(self.QUERY)
+            result = apply_stepback(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_markdown_wrapper_stripped_and_parsed(self):
         wrapped = "```json\n{\"abstract_query\": \"영업권 손상차손 인식 기준은?\"}\n```"
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_raw_resp(wrapped)
-            result = apply_stepback(self.QUERY)
+            result = apply_stepback(self.QUERY, "ALL")
         assert result == [self.QUERY, "영업권 손상차손 인식 기준은?"]
 
 
