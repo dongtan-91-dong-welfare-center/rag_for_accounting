@@ -40,7 +40,7 @@ class IndexingResult(BaseModel):
 
 class RewrittenQuery(BaseModel):
     """재작성 질의 — rewrite 노드 출력. search_queries를 search 노드에 전달한다."""
-    original:       str       # 사용자 원문 쿼리
+    original_query:       str       # 사용자 원문 쿼리
     strategy:       str       # "hyde" | "decompose" | "stepback" | "bypass"
     search_queries: list[str] # 검색에 사용할 쿼리 목록 (원문 항상 포함)
 

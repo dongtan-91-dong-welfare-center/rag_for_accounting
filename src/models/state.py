@@ -19,7 +19,7 @@ class GraphState(BaseModel):
     전체 흐름은 [상태 다이어그램](docs/assets/arch-state.svg)을 참고하세요.
     """
     # 사용자 초기 입력값
-    query:                str                    # 워크플로우 시작 시 주입됨. 불변에 가깝게 유지
+    original_query:                str                    # 워크플로우 시작 시 주입됨. 불변에 가깝게 유지
 
     # !TODO: UI 구현 시 사용자가 선택한 기준서(K-GAAP / K-IFRS / 모두)를 이 필드에 담아 GraphState를 생성해야 함
     standard_filter:      Literal["GAAP", "KIFRS", "ALL"] = "ALL"  # UI에서 사용자가 선택한 기준서 범위
