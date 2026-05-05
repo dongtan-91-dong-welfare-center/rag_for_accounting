@@ -37,6 +37,8 @@ def hybrid_search(query: str, top_k: int = 5, metadata_filter: dict | None = Non
     """
     - FUNC-005: 하이브리드 검색 (Dense + Sparse)
     - metadata_filter: 회계기준(K-IFRS/K-GAAP) 필터링 포함
+    # !TODO: state.standard_filter를 metadata_filter={"standard_type": standard_filter}로
+    #        변환해 vector_search/graph_search WHERE 절에 전달. "ALL"이면 필터 없음.
     """
     # Pseudo:
     # [1단계: 각 검색 실행 — 각각 top_k // 2개 후보 수집]
