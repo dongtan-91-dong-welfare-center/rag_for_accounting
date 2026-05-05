@@ -27,6 +27,17 @@ from src.utils.config import OPENAI_MODEL
 from src.utils.llm_client import client
 
 
+_STANDARD_LABEL: dict[str, str] = {
+    "GAAP":  "일반기업회계기준(K-GAAP)만 적용",
+    "KIFRS": "한국채택국제회계기준(K-IFRS)만 적용",
+    "ALL":   "K-GAAP 및 K-IFRS 모두 적용",
+}
+
+
+def _standard_context(standard_filter: str) -> str:
+    return _STANDARD_LABEL.get(standard_filter, _STANDARD_LABEL["ALL"])
+
+
 def _strip_markdown(content: str) -> str:
     # LLM이 JSON을 마크다운 코드 블록(```json ... ```)으로 감싸 반환하는 경우 래퍼 제거
     # (?:json)? — "json" 언어 태그가 있어도 없어도 매칭 (```json / ``` 둘 다 처리)
@@ -55,12 +66,14 @@ def classify_and_select(query: str) -> tuple[bool, str]:
         return True, "hyde"
 
 
-def apply_hyde(query: str) -> list[str]:
+def apply_hyde(query: str, standard_filter: str) -> list[str]:
     """원문 + 가상 답변을 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": HYDE_PROMPT.format(query=query)}],
+            messages=[{"role": "user", "content": HYDE_PROMPT.format(
+                query=query, standard_context=_standard_context(standard_filter)
+            )}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -73,12 +86,14 @@ def apply_hyde(query: str) -> list[str]:
     return [query]
 
 
-def apply_decompose(query: str) -> list[str]:
+def apply_decompose(query: str, standard_filter: str) -> list[str]:
     """원문 + 서브쿼리들을 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": DECOMPOSE_PROMPT.format(query=query)}],
+            messages=[{"role": "user", "content": DECOMPOSE_PROMPT.format(
+                query=query, standard_context=_standard_context(standard_filter)
+            )}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -91,12 +106,14 @@ def apply_decompose(query: str) -> list[str]:
     return [query]
 
 
-def apply_stepback(query: str) -> list[str]:
+def apply_stepback(query: str, standard_filter: str) -> list[str]:
     """원문 + 추상화된 원칙 쿼리를 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": STEPBACK_PROMPT.format(query=query)}],
+            messages=[{"role": "user", "content": STEPBACK_PROMPT.format(
+                query=query, standard_context=_standard_context(standard_filter)
+            )}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -118,6 +135,10 @@ _STRATEGY_FN = {
 
 def rewrite_query(state: GraphState) -> GraphState:
     """rewrite 노드 진입점. state를 받아 search_queries를 채운 뒤 반환한다."""
+    # !TODO: 평가 임계치 미달로 CRAG 루프를 통해 재진입할 때의 처리 방식 결정 필요.
+    #        - classify_and_select는 재호출 불필요 (질의·is_accounting 불변) → state 값 재사용
+    #        - 전략 교체 여부: 동일 전략 재시도 vs. hyde→decompose→stepback 순 에스컬레이션
+    #        - rewrite_count 증가 시점: 이 함수 진입 직후 state.rewrite_count += 1
     try:
         is_accounting, strategy = classify_and_select(state.query)
         state.is_accounting_query = is_accounting
@@ -130,7 +151,7 @@ def rewrite_query(state: GraphState) -> GraphState:
             )
             return state
 
-        queries = _STRATEGY_FN[strategy](state.query)
+        queries = _STRATEGY_FN[strategy](state.query, state.standard_filter)
         state.rewritten_query = RewrittenQuery(
             original=state.query,
             strategy=strategy,

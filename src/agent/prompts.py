@@ -41,8 +41,9 @@ CLASSIFY_STRATEGY_PROMPT: str = """당신은 사용자 질의를 분석하여 �
 - "decompose": 두 가지 이상의 독립적인 회계 주제를 동시에 묻는 복합 질의 → 하위 질문으로 분해
 - "hyde"    : 그 외 일반적인 회계 질의 (기본값)"""
 
-HYDE_PROMPT: str = """당신은 한국 회계기준서(K-IFRS/K-GAAP) 전문가입니다.
+HYDE_PROMPT: str = """당신은 한국 회계기준서 전문가입니다.
 아래 질문에 대해 기준서에 나올 법한 답변을 2~3문장으로 작성하세요.
+적용 기준서 범위: {standard_context}
 정확하지 않아도 됩니다. 기준서 문체와 전문 용어를 사용하는 것이 중요합니다.
 
 질문: {query}
@@ -51,6 +52,7 @@ HYDE_PROMPT: str = """당신은 한국 회계기준서(K-IFRS/K-GAAP) 전문가�
 {{"hypothetical_answer": "기준서 문체의 가상 답변"}}"""
 
 DECOMPOSE_PROMPT: str = """당신은 복합 회계 질의를 단순 질의들로 분해하는 전문가입니다.
+적용 기준서 범위: {standard_context}
 
 원문 질의: {query}
 
@@ -61,6 +63,7 @@ DECOMPOSE_PROMPT: str = """당신은 복합 회계 질의를 단순 질의들로
 {{"sub_queries": ["하위질문1", "하위질문2", "하위질문3"]}}"""
 
 STEPBACK_PROMPT: str = """당신은 구체적인 회계 질의를 일반 원칙 질의로 추상화하는 전문가입니다.
+적용 기준서 범위: {standard_context}
 
 구체적 질의: {query}
 
