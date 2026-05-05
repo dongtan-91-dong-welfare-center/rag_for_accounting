@@ -39,10 +39,10 @@ class IndexingResult(BaseModel):
     #     return v
 
 class RewrittenQuery(BaseModel):
-    """재작성 질의 — 원본 질의를 검색 최적화한 결과 (FUNC-004 출력)"""
-    original: str
-    rewritten: str
-    reasoning: str
+    """재작성 질의 — rewrite 노드 출력. search_queries를 search 노드에 전달한다."""
+    original:       str       # 사용자 원문 쿼리
+    strategy:       str       # "hyde" | "decompose" | "stepback" | "bypass"
+    search_queries: list[str] # 검색에 사용할 쿼리 목록 (원문 항상 포함)
 
 class RetrievedChunk(BaseModel):
     """검색된 청크 — Dense/Sparse/Hybrid 검색 결과 단위 (FUNC-005 출력)"""

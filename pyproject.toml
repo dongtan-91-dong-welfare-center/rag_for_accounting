@@ -7,6 +7,17 @@ requires-python = ">=3.12"
 dependencies = [
     "docling>=2.85.0",
     "streamlit>=1.56.0",
+    "pydantic>=2.0.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+# !TODO: 패키지를 PyPI 등 외부에 배포할 경우, dependency-groups 대신
+#        [project.optional-dependencies]로 전환 필요 (외부 사용자가 pip install pkg[dev] 형태로 설치할 수 있도록)
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
 ]
 
 [dependency-groups]
