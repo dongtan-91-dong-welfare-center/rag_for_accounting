@@ -1,0 +1,76 @@
+services:
+  database:
+    # [데이터베이스 맞춤형(커스텀) 빌드]
+    # 공식 이미지를 바로 사용하지 않고 db.Dockerfile을 참조하여,
+      # 공식 이미지는 그래프 DB(AGE)나 벡터 검색(pgvector) 기능이 포함되어 있지 않다.
+    # pgvector(벡터 검색)와 apache-age(그래프 DB) 확장이 포함된 전용 커스텀 DB 컨테이너 이미지를 즉석에서 빌드합니다.
+    build:
+      context: .
+      dockerfile: db.Dockerfile
+    container_name: accounting_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-accounting_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounting_password}
+      POSTGRES_DB: ${POSTGRES_DB:-accounting_db}
+
+    # [포트 매핑]
+    # 외부(로컬 PC 관리 도구 등)에서 접속할 호스트 포트(좌)와 DB가 대기 중인 컨테이너 내부 포트(우)를 연결합니다.
+    # 완전히 차단된 컨테이너 환경에 통로를 뚫어 로컬 PC 관리 도구(DBeaver, pgAdmin 등)나
+    # rag_for_accounting 어플리케이션이 데이터베이스에 접근할 수 있도록 해줍니다.
+    ports:
+      - "5432:5432"
+    volumes:
+      # 컨테이너가 재시작되거나 파괴되어도 데이터베이스 내부의 테이블, 인덱스 등의 실제 데이터가 유실되지 않도록
+      # 로컬에 이름 있는 볼륨(postgres_data)으로 연결하여 영구 보존합니다.
+      - postgres_data:/var/lib/postgresql/data
+      
+    # [Apache AGE 메모리 강제 로딩]
+    # Apache AGE의 그래프 통신 및 연산 기능을 활성화하기 위해, DB 프로세스가 기동할 때 postgresql.conf 설정을 오버라이드 합니다.
+    # '-c shared_preload_libraries=age' 옵션을 통해 제일 먼저 메모리에 age 관련 로직을 할당하도록 강제합니다.
+    command: ["postgres", "-c", "shared_preload_libraries=age"]
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: accounting_app
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-accounting_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounting_password}
+      POSTGRES_DB: ${POSTGRES_DB:-accounting_db}
+      AGE_GRAPH_NAME: ${AGE_GRAPH_NAME:-accounting_graph}
+    volumes:
+      # [실시간 코드 동기화]
+      # 로컬 PC의 현재 디렉토리 코드를 컨테이너의 /app 시스템으로 실시간 마운트시켜 놓습니다.
+        # [핵심 개념 정리: 레이어 캐싱 vs 실시간 마운트]
+        # 1. 레이어 캐싱 (Build 타임)
+        #    - 작동 시점: `docker build` 실행 시
+        #    - 대상: 베이스 이미지, 시스템 패키지, 파이썬 의존성
+        #    - 목적: 변하지 않는 환경의 설치 시간을 최소화하여 빌드 속도 향상
+        # 2. 실시간 마운트 (Runtime/Volume)
+        #    - 작동 시점: `docker-compose up` 실행 중 (컨테이너 구동 중)
+        #    - 대상: 현재 개발 중인 소스 코드 (.py, .toml 등)
+        #    - 목적: 코드 수정 시 빌드 과정 없이 컨테이너에 즉시 반영
+      # 이로 인해 코드 수정 즉시 컨테이너에 반영되며, 매번 이미지를 다시 빌드할 필요 없이 원활한 개발이 가능해집니다.
+      - ./:/app
+      - ./data/raw:/app/data/raw
+      # [중요: 볼륨 샤도잉 방지 보호막]
+      # 호스트의 `./`를 `/app`에 마운트하면 이미지 빌드 시 생성된 `/app/.venv` 폴더가 내 PC의 폴더 내용으로 덮어씌워집니다.
+      # 아래와 같이 익명 볼륨(`/app/.venv`)을 명시하면, 컨테이너 내부의 `.venv`는 호스트의 영향을 받지 않고 이미지에 설치된 상태 그대로 유지됩니다.
+      - /app/.venv
+    depends_on:
+      - database
+    restart: unless-stopped
+    # [양방향 터미널 인터랙션 활성화 (테스트 최적화)]
+    # stdin_open(표준 입력 개방 = docker run -i) 및 tty(가상 터미널 할당 = docker run -t) 옵션을 true로 설정합니다.
+      # 이 설정이 없으면 코드가 멈췄을 때 아무것도 입력할 수 없어 컨테이너가 먹통이 된 것처럼 보일 수 있습니다.
+    # 이를 통해 컨테이너가 켜져있는 동안 docker exec으로 접속했을 때 python debugger를 이용한 디버깅이나
+    # pytest 실행 중 발생하는 인터랙션을 전혀 끊김이나 멈춤 없이 쾌적하게 수행할 수 있습니다.
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:
