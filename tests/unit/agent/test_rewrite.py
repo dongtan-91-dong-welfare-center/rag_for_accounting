@@ -32,7 +32,7 @@ def _mock_raw_resp(raw: str) -> MagicMock:
 # ── GraphState 기본값 ──────────────────────────────────────────────────────────
 
 def test_state_default_fields():
-    state = GraphState(query="영업권 손상차손 인식 기준은?")
+    state = GraphState(original_query="영업권 손상차손 인식 기준은?")
     assert state.is_accounting_query is True
     assert state.crag_count == 0
     assert state.rewritten_query is None
@@ -248,7 +248,7 @@ class TestRewriteQuery:
     PATCH = "src.agent.nodes.rewrite.client"
 
     def _make_state(self, query: str) -> GraphState:
-        return GraphState(query=query)
+        return GraphState(original_query=query)
 
     def test_non_accounting_sets_bypass(self):
         with patch(self.PATCH) as mock_client:
@@ -323,7 +323,7 @@ class TestRewriteQuery:
                 _mock_resp({"is_accounting": True, "strategy": "hyde"}),
                 _mock_resp({"hypothetical_answer": "리스부채는 현재가치로 측정합니다."}),
             ]
-            state = rewrite_query(GraphState(query=query))
+            state = rewrite_query(GraphState(original_query=query))
         assert state.rewritten_query.search_queries[0] == query
 
     def test_rewritten_query_original_matches_state_query(self):
@@ -333,5 +333,5 @@ class TestRewriteQuery:
                 _mock_resp({"is_accounting": True, "strategy": "hyde"}),
                 _mock_resp({"hypothetical_answer": "수익은 5단계로 인식합니다."}),
             ]
-            state = rewrite_query(GraphState(query=query))
-        assert state.rewritten_query.original == query
+            state = rewrite_query(GraphState(original_query=query))
+        assert state.rewritten_query.original_query == query

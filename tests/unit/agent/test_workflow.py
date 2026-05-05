@@ -9,7 +9,7 @@ from src.models.schemas import EvaluationResult
 @pytest.fixture
 def initial_state():
     """기본 GraphState 객체 생성 피처"""
-    return GraphState(query="영업권 손상차손 인식 기준은?")
+    return GraphState(original_query="영업권 손상차손 인식 기준은?")
 
 @pytest.fixture
 def workflow_app():
@@ -47,7 +47,7 @@ class TestWorkflowConstruction:
 
     def test_workflow_initial_state_structure(self, initial_state):
         """초기 GraphState 구조 및 기본값 검증"""
-        assert initial_state.query == "영업권 손상차손 인식 기준은?"
+        assert initial_state.original_query == "영업권 손상차손 인식 기준은?"
         assert initial_state.rewrite_count == 0
         assert initial_state.error_logs == []
         assert initial_state.retrieved_chunks == []
@@ -111,7 +111,7 @@ class TestCRAGLoopPath:
     def test_route_after_evaluate_to_rewrite(self):
         """needs_external=True이고 카운트 미달일 때 rewrite 반환 검증"""
         state = GraphState(
-            query="영업권 손상차손 인식 기준은?",
+            original_query="영업권 손상차손 인식 기준은?",
             evaluation=EvaluationResult(
                 is_relevant=True, 
                 needs_external=True, 
@@ -125,7 +125,7 @@ class TestCRAGLoopPath:
     def test_route_after_evaluate_to_generate_on_max_count(self):
         """MAX_REWRITE_COUNT 도달 시 needs_external=True라도 generate 반환 검증"""
         state = GraphState(
-            query="영업권 손상차손 인식 기준은?",
+            original_query="영업권 손상차손 인식 기준은?",
             evaluation=EvaluationResult(
                 is_relevant=True, 
                 needs_external=True, 
@@ -139,7 +139,7 @@ class TestCRAGLoopPath:
     def test_route_after_evaluate_to_generate_on_needs_external_false(self):
         """needs_external=False일 때 generate 반환 검증"""
         state = GraphState(
-            query="영업권 손상차손 인식 기준은?",
+            original_query="영업권 손상차손 인식 기준은?",
             evaluation=EvaluationResult(
                 is_relevant=True, 
                 needs_external=False, 
@@ -175,7 +175,7 @@ class TestStateTransition:
         """전체 실행 완료 후 모든 중간 상태 데이터가 보존되는지 확인"""
         final_state = workflow_app.invoke(initial_state)
         
-        assert final_state["query"] is not None
+        assert final_state["original_query"] is not None
         assert final_state["rewrite_count"] >= 1
         assert len(final_state["retrieved_chunks"]) > 0
         assert len(final_state["reranked_chunks"]) > 0

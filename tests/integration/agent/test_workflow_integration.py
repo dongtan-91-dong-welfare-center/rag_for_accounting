@@ -16,7 +16,7 @@ from src.utils.exception import (
 @pytest.fixture
 def initial_state():
     """기본 GraphState 객체 생성 피처"""
-    return GraphState(query="영업권 손상차손 인식 기준은?")
+    return GraphState(original_query="영업권 손상차손 인식 기준은?")
 
 class TestWorkflowIntegration:
     """LangGraph 워크플로우 통합 테스트. 노드 간의 상태 전이 및 조건부 루프 동작 검증"""

@@ -85,7 +85,7 @@ def test_rewrite_all_queries():
     results = []
 
     for num, query in QUERIES:
-        state = rewrite_query(GraphState(query=query))
+        state = rewrite_query(GraphState(original_query=query))
         rq = state.rewritten_query
         results.append({
             "num": num,
@@ -93,7 +93,7 @@ def test_rewrite_all_queries():
             "is_accounting": state.is_accounting_query,
             "strategy": rq.strategy,
             "search_queries": rq.search_queries,
-            "original": rq.original,
+            "original_query": rq.original_query,
         })
 
     _write_md(results)
@@ -102,4 +102,4 @@ def test_rewrite_all_queries():
         assert r["is_accounting"] is True, f"Q{r['num']}: 회계 질의로 분류되지 않음"
         assert r["strategy"] in VALID_STRATEGIES, f"Q{r['num']}: 유효하지 않은 전략 '{r['strategy']}'"
         assert r["search_queries"][0] == r["query"], f"Q{r['num']}: search_queries[0]이 원문과 다름"
-        assert r["original"] == r["query"], f"Q{r['num']}: rewritten_query.original이 원문과 다름"
+        assert r["original_query"] == r["query"], f"Q{r['num']}: rewritten_query.original_query이 원문과 다름"
