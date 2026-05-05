@@ -12,13 +12,13 @@ def generate_response(state: GraphState) -> GraphState:
     # try:
     #   [답변 가능 여부 판단]
     #   if not state.evaluation.is_relevant or len(state.reranked_chunks) == 0:
-    #       state.final_response = build_unanswerable_response(state.query)
+    #       state.final_response = build_unanswerable_response(state.original_query)
     #       return state
     #
     #   [LLM 답변 생성]
     #   citations = extract_citations(state.reranked_chunks)
     #   prompt    = GENERATION_PROMPT.format(
-    #                   query=state.query,
+    #                   query=state.original_query,
     #                   context=[c.chunk.content for c in state.reranked_chunks],
     #                   citations=citations)
     #   response  = llm.invoke(prompt)   # JSON: {answer, is_answerable}

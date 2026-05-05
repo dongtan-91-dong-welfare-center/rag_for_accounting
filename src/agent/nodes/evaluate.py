@@ -13,11 +13,11 @@ def evaluate_context(state: GraphState) -> GraphState:
     # try:
     #   [각 청크 관련도 판단]
     #   relevant_chunks = [r for r in state.reranked_chunks
-    #                       if check_relevance(r, state.query)]
+    #                       if check_relevance(r, state.original_query)]
     #
     #   [LLM 기반 종합 평가]
     #   prompt   = EVALUATION_PROMPT.format(
-    #                  query=state.query,
+    #                  query=state.original_query,
     #                  chunks=[r.chunk.content for r in relevant_chunks])
     #   response = llm.invoke(prompt)   # JSON: {is_relevant, needs_external, confidence, reasoning}
     #   eval_result = EvaluationResult(**response)
