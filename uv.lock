@@ -1959,7 +1959,7 @@ dependencies = [
     { name = "streamlit" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1970,12 +1970,15 @@ requires-dist = [
     { name = "docling", specifier = ">=2.85.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.25.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "streamlit", specifier = ">=1.56.0" },
 ]
-provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.25.0" },
+]
 
 [[package]]
 name = "rapidocr"
