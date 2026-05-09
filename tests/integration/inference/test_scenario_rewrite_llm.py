@@ -62,7 +62,7 @@ QUERIES = [
 ]
 
 VALID_STRATEGIES = {"hyde", "decompose", "stepback"}
-OUTPUT_PATH = Path(__file__).parents[2] / "docs" / "superpowers" / "plans" / "llm_rewrite.md"
+OUTPUT_PATH = Path(__file__).parents[3] / "docs" / "superpowers" / "plans" / "llm_rewrite.md"
 
 
 def _write_md(results: list[dict]) -> None:
