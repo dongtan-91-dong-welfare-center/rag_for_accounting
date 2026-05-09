@@ -2,13 +2,12 @@ import os
 import pytest
 from dotenv import load_dotenv
 from src.agent.workflow import build_workflow
-from src.models.state import GraphState
 
 load_dotenv()
 
 @pytest.fixture(scope="session", autouse=True)
-def check_env_vars():
-    """통합 테스트 실행 전 필수 환경 변수 존재 여부 확인"""
+def check_integration_env():
+    """통합/품질 테스트 진입 전 필수 환경 변수 검증 (Fast-Fail)"""
     required_vars = [
         "OPENAI_API_KEY",
         "POSTGRES_USER",
@@ -16,19 +15,11 @@ def check_env_vars():
         "POSTGRES_DB",
         "POSTGRES_HOST"
     ]
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
-    if missing_vars:
-        pytest.skip(f"필수 환경 변수 누락으로 통합 테스트 건너뜀: {', '.join(missing_vars)}")
+    missing = [v for v in required_vars if not os.getenv(v)]
+    if missing:
+        pytest.fail(f"통합 테스트 환경 변수가 누락되었습니다: {', '.join(missing)}")
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def workflow_app():
-    """컴파일된 LangGraph StateGraph 객체 반환"""
+    """실제 노드가 연결된 LangGraph 애플리케이션 (세션당 1회 생성)"""
     return build_workflow()
-
-@pytest.fixture
-def initial_state():
-    """기본 GraphState 초기화 객체 생성"""
-    return GraphState(
-        original_query="영업권 손상차손 인식 기준은?",
-        standard_filter="ALL"
-    )
