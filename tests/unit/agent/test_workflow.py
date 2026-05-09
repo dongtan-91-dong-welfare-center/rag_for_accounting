@@ -16,6 +16,7 @@ def workflow_app():
     """컴파일된 LangGraph 워크플로우 앱 피처"""
     return build_workflow()
 
+@pytest.mark.unit
 class TestWorkflowConstruction:
     """
     파이프라인 구축 검증. build_workflow()가 StateGraph를 정상적으로 구성했는지 확인
@@ -55,6 +56,7 @@ class TestWorkflowConstruction:
         assert initial_state.evaluation is None
         assert initial_state.final_response is None
 
+@pytest.mark.unit
 class TestNormalFlowPath:
     """정상적인 상황에서 파이프라인이 의도된 순서대로 실행되는지 확인"""
 
@@ -105,6 +107,7 @@ class TestNormalFlowPath:
         # Mock 답변 내용 포함 여부 확인
         assert "채권형 매도가능증권" in final_state["final_response"].answer
 
+@pytest.mark.unit
 class TestCRAGLoopPath:
     """조건부 라우팅이 정확히 작동하여 재검색 루프를 형성하는지 확인"""
 
@@ -150,6 +153,7 @@ class TestCRAGLoopPath:
         )
         assert route_after_evaluate(state) == "generate"
 
+@pytest.mark.unit
 class TestStateTransition:
     """파이프라인 전 과정에서 GraphState의 정합성이 유지되는지 확인"""
 

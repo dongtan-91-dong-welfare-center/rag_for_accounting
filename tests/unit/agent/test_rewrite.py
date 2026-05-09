@@ -1,4 +1,5 @@
 import json
+import pytest
 from unittest.mock import MagicMock, patch
 
 from src.agent.nodes.rewrite import (
@@ -31,6 +32,7 @@ def _mock_raw_resp(raw: str) -> MagicMock:
 
 # ── GraphState 기본값 ──────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 def test_state_default_fields():
     state = GraphState(original_query="영업권 손상차손 인식 기준은?")
     assert state.is_accounting_query is True
@@ -40,6 +42,7 @@ def test_state_default_fields():
 
 # ── classify_and_select ────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestClassifyAndSelect:
     # [단위 테스트 범위]
     # LLM이 반환한 JSON을 올바르게 파싱·처리하는지만 검증
@@ -128,6 +131,7 @@ class TestClassifyAndSelect:
 
 # ── apply_hyde ─────────────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestApplyHyde:
     PATCH = "src.agent.nodes.rewrite.client"
     QUERY = "리스부채 최초 인식 방법은?"
@@ -166,6 +170,7 @@ class TestApplyHyde:
 
 # ── apply_decompose ────────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestApplyDecompose:
     PATCH = "src.agent.nodes.rewrite.client"
     QUERY = "유형자산과 무형자산의 감가상각 방법 차이는?"
@@ -206,6 +211,7 @@ class TestApplyDecompose:
 
 # ── apply_stepback ─────────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestApplyStepback:
     PATCH = "src.agent.nodes.rewrite.client"
     QUERY = "삼성전자 2023년 영업권 500억 손상 처리 기준은?"
@@ -244,6 +250,7 @@ class TestApplyStepback:
 
 # ── rewrite_query ──────────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestRewriteQuery:
     PATCH = "src.agent.nodes.rewrite.client"
 
