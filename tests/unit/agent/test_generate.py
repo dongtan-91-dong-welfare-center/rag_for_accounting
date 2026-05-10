@@ -1,13 +1,13 @@
 """
-[FUNC-008] 답변 생성 단위 테스트 Stub
+[FUNC-008] 답변 생성 단위 테스트
 
 대상 모듈: src/agent/nodes/generate.py
 검증 범위:
-    - generate_response(): reranked_chunks → FinalResponse 생성
-    - extract_citations(): 청크 → Citation 리스트 추출
-    - build_unanswerable_response(): 답변 불가 시 안전 응답 생성
+    - generate_response(): PydanticAI 연동 및 최종 응답 생성
+    - extract_citations_from_text(): 정규식을 통한 인용 마크업 파싱 및 Citation 조립
+    - build_unanswerable_response(): 안전 응답 생성
 
-TODO: generate.py 구현 완료 후 @pytest.mark.skip을 제거
+TODO: generate_response()의 PydanticAI Mocking 테스트 보완
 """
 import pytest
 from src.models.schemas import (
@@ -16,81 +16,89 @@ from src.models.schemas import (
     EvaluationResult,
     Citation,
     FinalResponse,
+    LLMInternalResponse
 )
+from src.models.state import GraphState
 from src.utils.config import RERANK_THRESHOLD
+from src.agent.nodes.generate import extract_citations_from_text, build_unanswerable_response, generate_response
 
 
 @pytest.mark.unit
-class TestExtractCitations:
-    """extract_citations() 함수 인터페이스 검증"""
+class TestExtractCitationsFromText:
+    """extract_citations_from_text() 함수 단위 테스트"""
 
-    @pytest.mark.skip(reason="FUNC-008 generate 노드 구현 후 활성화 예정")
-    def test_extract_citations_from_chunks(self):
-        """
-        입력: chunks (list[RerankingResult])
-        출력: list[Citation] — RERANK_THRESHOLD 이상인 청크만 포함
-        """
-        from src.agent.nodes.generate import extract_citations
+    def test_extract_citations_success(self):
+        """[n] 마크업에서 정상적으로 Citation을 추출하는지 검증"""
+        text = "영업권 손상차손은 매년 검사합니다 [1]. 또한 징후가 있을 때도 합니다 [2]."
+        chunk_map = {
+            1: RerankingResult(
+                chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="매년 검사", score=0.9, metadata={}),
+                rerank_score=0.95
+            ),
+            2: RerankingResult(
+                chunk=RetrievedChunk(chunk_id="c2", document_id="D1", content="징후 시 검사", score=0.8, metadata={}),
+                rerank_score=0.90
+            )
+        }
+        
+        citations, result_text = extract_citations_from_text(text, chunk_map)
+        
+        assert len(citations) == 2  # 응답 문서 근거 개수 검증
+        assert citations[0].chunk_id == "c1"    # 응답 문서 근거 ID 검증
+        assert citations[1].chunk_id == "c2"    # 응답 문서 근거 ID 검증
+        assert "[1]" in result_text             # 원본 텍스트는 보존되어야 함
 
-        chunks = [
-            RerankingResult(
-                chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="영업권 정의", score=0.9, metadata={}),
-                rerank_score=0.95,
-            ),
-            RerankingResult(
-                chunk=RetrievedChunk(chunk_id="c2", document_id="D1", content="관계없는 내용", score=0.2, metadata={}),
-                rerank_score=RERANK_THRESHOLD - 0.1,
-            ),
-        ]
-        citations = extract_citations(chunks)
-        assert isinstance(citations, list)
-        assert all(isinstance(c, Citation) for c in citations)
-        # threshold 미만 청크는 제외
+    def test_extract_citations_missing_index(self):
+        """chunk_map에 없는 인덱스는 무시되는지 검증"""
+        text = "존재하지 않는 문헌 [99] 참조."
+        chunk_map = {
+            1: RerankingResult(
+                chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="정상", score=0.9, metadata={}),
+                rerank_score=0.95
+            )
+        }
+        
+        citations, _ = extract_citations_from_text(text, chunk_map)
+        assert len(citations) == 0
+
+    def test_extract_citations_duplicate_index(self):
+        """동일한 인덱스를 여러 번 참조할 경우 중복 제거 여부 검증"""
+        text = "이것은 중요합니다 [1]. 다시 말해 매우 중요하죠 [1]."
+        chunk_map = {
+            1: RerankingResult(
+                chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="중요", score=0.9, metadata={}),
+                rerank_score=0.95
+            )
+        }
+        
+        citations, _ = extract_citations_from_text(text, chunk_map)
         assert len(citations) == 1
-        assert citations[0].chunk_id == "c1"
-
-    @pytest.mark.skip(reason="FUNC-008 generate 노드 구현 후 활성화 예정")
-    def test_extract_citations_empty_chunks(self):
-        """빈 청크 리스트 → 빈 Citation 리스트"""
-        from src.agent.nodes.generate import extract_citations
-
-        citations = extract_citations([])
-        assert citations == []
 
 
 @pytest.mark.unit
 class TestBuildUnanswerableResponse:
-    """build_unanswerable_response() 함수 인터페이스 검증"""
+    """build_unanswerable_response() 함수 단위 테스트"""
 
-    @pytest.mark.skip(reason="FUNC-008 generate 노드 구현 후 활성화 예정")
     def test_unanswerable_response_structure(self):
-        """
-        입력: query (str)
-        출력: FinalResponse (is_answerable=False, citations=[], confidence_score=0.0)
-        """
-        from src.agent.nodes.generate import build_unanswerable_response
-
+        """답변 불가능한 경우의 안전 응답 구조를 검증"""
         response = build_unanswerable_response("영업권 손상차손 인식 기준은?")
-        assert isinstance(response, FinalResponse)
-        assert response.is_answerable is False
-        assert response.citations == []
-        assert response.confidence_score == 0.0
-        assert len(response.answer) > 0
+        assert isinstance(response, FinalResponse)                        # 최종 응답 구조체를 반환하는지?
+        assert response.is_answerable is False                        # 답변 불가능 플래그가 설정되었는지?
+        assert response.citations == []                               # 인용 근거가 비어있는지?
+        assert response.confidence_score == 0.0                         # 신뢰도 점수가 0인지?
+        assert "충분한 근거를 찾지 못했습니다" in response.answer       # 안전 응답 메시지를 포함하는지?
 
 
 @pytest.mark.unit
 class TestGenerateResponse:
     """generate_response() 노드 함수 인터페이스 검증"""
 
-    @pytest.mark.skip(reason="FUNC-008 generate 노드 구현 후 활성화 예정 — LLM 연동 필요")
+    @pytest.mark.skip(reason="FUNC-008 PydanticAI Mocking 추가 후 활성화 예정")
     def test_generate_returns_final_response(self):
         """
         입력: GraphState (evaluation + reranked_chunks 포함)
-        출력: GraphState (final_response: FinalResponse 필드 설정)
+        출력: dict (final_response, retrieval_score, generation_score)
         """
-        from src.agent.nodes.generate import generate_response
-        from src.models.state import GraphState
-
         state = GraphState(
             original_query="영업권 손상차손 인식 기준은?",
             evaluation=EvaluationResult(
@@ -104,6 +112,9 @@ class TestGenerateResponse:
             ],
         )
         result = generate_response(state)
-        assert result.final_response is not None
-        assert isinstance(result.final_response, FinalResponse)
-        assert result.final_response.is_answerable is True
+        
+        assert "final_response" in result                           # 최종 결과물을 반환했는지?
+        assert isinstance(result["final_response"], FinalResponse)   # 최종 결과물이 FinalResponse인지?
+        assert result["final_response"].is_answerable is True         # 답변이 가능한지?
+        assert "retrieval_score" in result                        # 검색 점수를 반환했는지?
+        assert "generation_score" in result                         # 생성 점수를 반환했는지?
