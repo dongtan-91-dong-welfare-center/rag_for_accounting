@@ -14,6 +14,12 @@ class Citation(BaseModel):
     #     assert 0.0 <= v <= 1.0, "relevance_score must be in [0, 1]"
     #     return v
 
+class LLMInternalResponse(BaseModel):
+    """LLM 내부 응답 — PydanticAI에서 생성하는 원시 응답"""
+    answer: str
+    is_answerable: bool
+    llm_self_score: float
+
 class FinalResponse(BaseModel):
     """최종 답변 — 사용자에게 반환되는 응답 구조체"""
     answer: str

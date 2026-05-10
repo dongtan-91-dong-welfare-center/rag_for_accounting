@@ -40,6 +40,8 @@ class GraphState(BaseModel):
     # 평가 및 답변 생성 관련
     evaluation:           EvaluationResult | None = None  # [evaluate 노드] 검색된 컨텍스트가 질의에 답하기 충분한지에 대한 LLM 판단
     final_response:       FinalResponse | None   = None   # [generate 노드] 최종 사용자 답변 및 참조 문서 메타데이터
+    retrieval_score:      float                  = 0.0    # [generate 노드] 검색 연관성 가중 평균 점수
+    generation_score:     float                  = 0.0    # [generate 노드] LLM 생성 자가 검증 점수
 
     # 에러 추적 및 부가 정보
     # 참고: error_logs를 노드가 실행될 때마다 기존 로그에 누적 추가하기 위해 데코레이터에서 직접 list.append()를 수행하거나,
