@@ -14,13 +14,13 @@ def check_integration_env():
     ]
     missing = [v for v in required_vars if not os.getenv(v)]
     if missing:
-        pytest.fail(f"통합 테스트 환경 변수가 누락되었습니다: {', '.join(missing)}")
+        pytest.skip(f"통합 테스트 환경 변수가 누락되어 LLM을 의존하는 테스트를 건너뜁니다: {', '.join(missing)}")
         
     # 인프라 동작 검증
     from tests.utils.infra_check import check_docker_infrastructure
     infra_error = check_docker_infrastructure()
     if infra_error:
-        pytest.fail(f"인프라 준비 상태에 문제가 있습니다: {infra_error}")
+        pytest.skip(f"인프라 준비 상태에 문제가 있어 테스트를 건너뜁니다: {infra_error}")
 
 @pytest.fixture(scope="session")
 def workflow_app():

@@ -117,7 +117,7 @@ def generate_response(state: GraphState) -> dict:
     if not state.reranked_chunks:
         return {
             "final_response": FinalResponse(
-                answer="죄송합니다. 제공된 자료에서 관련 정보를 찾지 못했습니다.",
+                answer="검색 결과가 존재하지 않습니다.",
                 citations=[],
                 is_answerable=False,
                 confidence_score=0.0
