@@ -7,15 +7,16 @@ from src.models.schemas import RerankingResult, Citation, FinalResponse, LLMInte
 from src.agent.prompts import GENERATION_PROMPT
 from src.utils.config import RERANK_THRESHOLD
 
-# PydanticAI 에이전트 초기화
-# 프로젝트 설정에 따라 모델을 변경할 수 있습니다.
-generator_agent = Agent("openai:gpt-4o-mini", result_type=LLMInternalResponse)
 
 def generate_response(state: GraphState) -> dict:
     """
     reranked_chunks와 GENERATION_PROMPT를 이용해 최종 답변을 생성한다.
     - 인용 근거를 포함한 FinalResponse를 state.final_response에 저장
     """
+    # PydanticAI 에이전트 초기화
+    # 프로젝트 설정에 따라 모델을 변경할 수 있습니다.
+    generator_agent = Agent("openai:gpt-4o-mini", output_type=LLMInternalResponse)
+
     # 검색 결과가 없으면 답변 불가능 처리
     if not state.reranked_chunks:
         return {"final_response": build_unanswerable_response(state.original_query)}
@@ -38,7 +39,7 @@ def generate_response(state: GraphState) -> dict:
     try:
         # PydanticAI 실행
         result = generator_agent.run_sync(prompt)
-        llm_response: LLMInternalResponse = result.data
+        llm_response: LLMInternalResponse = result.output
 
         # 인용구 추출 및 citations 리스트 구성
         extracted_citations, final_answer = extract_citations_from_text(llm_response.answer, chunk_map)
