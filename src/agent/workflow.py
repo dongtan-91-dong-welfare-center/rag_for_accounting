@@ -3,6 +3,7 @@
 from datetime import datetime
 from functools import wraps
 from langgraph.graph import StateGraph, START, END
+from src.agent.nodes.generate import generate_response
 from src.utils.config import MAX_REWRITE_COUNT, KST
 from src.utils.exception import AccountingRAGError
 from src.models.state import GraphState
@@ -104,42 +105,6 @@ def evaluate_context(state: GraphState) -> dict:
             needs_external=False,
             confidence=0.9,
             reasoning="더미 평가: 검색된 컨텍스트가 충분히 관련성 있음"
-        )
-    }
-
-@handle_node_errors("generate")
-def generate_response(state: GraphState) -> dict:
-    """
-    TODO: FUNC-008 (답변 생성 노드) - Mock 구현
-    실제 구현 대기 (src/agent/nodes/generate.py)
-    """
-    # Fail-Fast 회피: 청크가 없더라도 이곳에서 기본 메시지 처리
-    if not state.reranked_chunks:
-        return {
-            "final_response": FinalResponse(
-                answer="검색 결과가 존재하지 않습니다.",
-                citations=[],
-                is_answerable=False,
-                confidence_score=0.0
-            )
-        }
-
-    # Citation 객체 생성
-    citations = [
-        Citation(
-            document_id=r.chunk.document_id,
-            chunk_id=r.chunk.chunk_id,
-            content=r.chunk.content,
-            relevance_score=r.rerank_score
-        ) for r in state.reranked_chunks
-    ]
-
-    return {
-        "final_response": FinalResponse(
-            answer="채권형 매도가능증권은 유효이자율법에 따라...",
-            citations=citations,
-            is_answerable=True,
-            confidence_score=0.95
         )
     }
 
