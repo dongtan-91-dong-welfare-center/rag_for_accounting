@@ -14,7 +14,7 @@ class OntologyNode(BaseModel):
 
     하나의 클래스에 세 타입의 필드가 섞여 있는데,
     타입별로 실제로 사용하는 필드가 다르다:
-      - Standard : name, standard_type, chapter, effective_date
+      - Standard : name, standard_type, chapter
       - Section  : title, order
       - Subsection: title, order, content, paragraphs, unresolved_refs
     """
@@ -26,18 +26,15 @@ class OntologyNode(BaseModel):
     name: str = ""                  # 기준서 전체 이름. 예: "제6장 금융자산·금융부채"
     standard_type: str = ""         # "GAAP" 또는 "KIFRS"
     chapter: str = ""               # 장 번호. 마크다운 헤딩에서 자동 추출됨. 예: "6"
-    effective_date: str = ""        # 시행일
-
     # ── Section / Subsection 공통 ──────────────────────────────
     title: str = ""                 # 절·소절 제목. 예: "제1절 공통사항"
     order: int = 0                  # 부모 노드 안에서의 순서 (1-based)
+    content: str = ""               # 전체 텍스트. Section은 직속 문단만, Subsection은 소절 전체
+    paragraphs: list[str] = Field(default_factory=list)
+    # paragraphs: 포함된 문단 번호 목록. 예: ["6.4", "6.4의2"]
+    # Section의 경우 직속 문단(예: 6.3)만 포함된다.
 
     # ── Subsection 전용 ────────────────────────────────────────
-    content: str = ""               # 소절의 전체 텍스트 (문단 번호·예시 포함)
-    paragraphs: list[str] = Field(default_factory=list)
-    # paragraphs: 이 소절에 포함된 문단 번호 목록. 예: ["6.4", "6.4의2"]
-    # 참조 해소(resolver)와 룩업 테이블 구성에 사용된다.
-
     unresolved_refs: list[str] = Field(default_factory=list)
     # unresolved_refs: 그래프 안에서 대응 노드를 찾지 못한 참조 원문 목록.
     # 예: ["제8장 문단 8.2"]  → 아직 이 장의 노드가 없어서 연결 못 함.
@@ -69,6 +66,11 @@ class OntologyEdge(BaseModel):
     # 예: ["리스채권의 제거와 손상", "금융리스부채의 제거"]
 
     condition_text: str = ""    # HAS_CONDITION 전용: 조건 원문
+
+    to_paragraph: str = ""
+    # to_paragraph: REFERENCES·EXCLUDES·HAS_CONDITION 전용.
+    # resolver가 target_ref에서 추출한 구체적 문단 번호. 예: "6.4", "6.A13", "실6.142"
+    # to_id Subsection 안에서 어느 문단을 가리키는지 기록해 RAG 시 정밀 추출에 활용한다.
 
     unresolved_target: str = ""
     # unresolved_target: to_id가 빈 경우 LLM이 반환한 원문 참조 텍스트.

@@ -30,7 +30,6 @@ def build_graph(
     md_path: str | Path,
     standard_id: str,    # 예: "gaap-ch6"
     standard_type: str,  # "GAAP" 또는 "KIFRS"
-    effective_date: str = "",
 ) -> OntologyGraph:
     """마크다운 파일 하나를 받아 완성된 OntologyGraph를 반환한다.
 
@@ -40,7 +39,7 @@ def build_graph(
     text = Path(md_path).read_text(encoding="utf-8")
 
     # 1단계: 마크다운 파싱 → 노드·CONTAINS 엣지 생성
-    graph = parse_markdown(text, standard_id, standard_type, effective_date)
+    graph = parse_markdown(text, standard_id, standard_type)
 
     # 2·3단계: Subsection마다 후보 탐지 → LLM 엣지 추출
     for node in graph.nodes:
@@ -79,7 +78,6 @@ def main() -> None:
     parser.add_argument("--output", required=True, help="출력 JSON 파일 경로")
     parser.add_argument("--standard-id", required=True, help="예: gaap-ch6")
     parser.add_argument("--standard-type", required=True, choices=["GAAP", "KIFRS"])
-    parser.add_argument("--effective-date", default="")
     args = parser.parse_args()
 
     # args.output 예: "data/ontology/gaap-ch6.json"
@@ -88,8 +86,7 @@ def main() -> None:
     # mkdir(exist_ok=True) : 이미 존재하면 에러 없이 넘어감
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     print(f"파싱 중: {args.input}")
-    graph = build_graph(args.input, args.standard_id, args.standard_type,
-                        args.effective_date)
+    graph = build_graph(args.input, args.standard_id, args.standard_type)
     save_graph(graph, args.output)
 
     nodes = len(graph.nodes)

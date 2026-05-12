@@ -14,7 +14,7 @@ from src.db.ontology.models import OntologyGraph
 
 _CHAPTER_RE = re.compile(r'제\s*(\d+)\s*장')
 _SECTION_RE = re.compile(r'제\s*(\d+)\s*절')
-_PARA_RE = re.compile(r'(\d+\.\d+(?:의\d+)?)')  # "6.4", "6.4의2" 등
+_PARA_RE = re.compile(r'((?:실|결)?\d+\.(?:[A-Z]\d+|\d+)(?:의\d+)?)')  # "6.4", "6.4의2", "실6.142", "6.A13" 등
 
 
 def build_lookup(graph: OntologyGraph) -> dict[str, str]:
@@ -81,6 +81,10 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
         norm = ref.replace(' ', '')
         target_id = lookup.get(norm)
 
+        # 시도 1.5: "문단 XXXX" → "XXXX" 직접 룩업 ("문단 6.A13" → 공백 제거 후 "문단6.A13" → "6.A13")
+        if not target_id and norm.startswith('문단'):
+            target_id = lookup.get(norm[2:])
+
         # 시도 2: 문단 번호 패턴("X.X")만 뽑아서 재시도 (장+문단이 함께 올 때 문단 우선)
         if not target_id:
             m = _PARA_RE.search(ref)
@@ -100,8 +104,16 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
                 target_id = lookup.get(f'제{m.group(1)}장')  # 공백 제거 버전으로 등록되어 있음
 
         if target_id:
-            # 성공: to_id 채우고 unresolved_target 비우기
-            resolved.append(edge.model_copy(update={"to_id": target_id, "unresolved_target": ""}))
+            # 성공: to_id 채우고 unresolved_target 비우기.
+            # ref에서 문단 번호를 추출해 to_paragraph에 저장한다.
+            # 절·장으로만 해소된 경우 _PARA_RE가 매칭되지 않으므로 to_paragraph는 빈 문자열이 된다.
+            m = _PARA_RE.search(ref)
+            to_para = m.group(1).replace(' ', '') if m else ""
+            resolved.append(edge.model_copy(update={
+                "to_id": target_id,
+                "unresolved_target": "",
+                "to_paragraph": to_para,
+            }))
         else:
             # 실패: 엣지는 그대로 두고, 출발 노드에 미해소 참조 기록
             resolved.append(edge)
