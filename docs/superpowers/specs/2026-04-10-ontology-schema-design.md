@@ -58,7 +58,6 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 | `name` | string | 기준서 이름. 예: "제6장 금융자산·금융부채" |
 | `type` | enum | `GAAP` \| `KIFRS` |
 | `chapter` | string | 장 번호 또는 기준서 번호. 예: `6`, `1116`. 마크다운 헤딩(`## 제N장`)에서 자동 추출 |
-| `effective_date` | string | 시행일 |
 
 ### Section
 
@@ -69,6 +68,8 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 | `id` | string | 고유 식별자. 예: `gaap-ch6-s1` |
 | `title` | string | 절 제목. 예: "제1절 공통사항" |
 | `order` | int | 절 순서 |
+| `content` | string | Section 직속 문단 텍스트. 절 전체를 아우르는 서론 문단(예: 6.3)이 `###` Subsection 없이 `##` 바로 아래에 등장하는 경우 여기에 저장 |
+| `paragraphs` | string[] | Section 직속 문단 번호 목록. 예: `["6.3"]` |
 
 ### Subsection
 
@@ -102,11 +103,13 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 
 | 항목 | 내용 |
 |------|------|
-| From → To | Subsection → Standard \| Section \| Subsection |
+| From → To | Subsection \| Section → Standard \| Section \| Subsection |
 | 속성 | `paragraph` (string): 참조 출처 하위 항목 번호. 예: `"6.14⑵㈏"` |
 | 속성 | `source_text` (string): 참조가 등장한 원문 문장 |
 
-하나의 Subsection에서 여러 엣지가 나올 수 있으며, `paragraph` 속성으로 어느 하위 항목(⑴⑵㈎㈏ 등)에서 발생한 참조인지 구분한다.
+하나의 노드에서 여러 엣지가 나올 수 있으며, `paragraph` 속성으로 어느 하위 항목(⑴⑵㈎㈏ 등)에서 발생한 참조인지 구분한다.
+
+**Section이 출발 노드가 되는 경우:** Section 직속 문단(예: 6.3)이 다른 절을 참조할 때 Section 노드가 REFERENCES 엣지의 출발점이 된다. 예: `(제1절 공통사항 Section) -[REFERENCES]→ (제2절 Section)`
 
 **예시 — 6.14 "금융자산과 금융부채의 후속 측정":**
 ```

@@ -1078,7 +1078,7 @@ REWRITE_PROMPT = """당신은 K-IFRS 회계기준서 검색을 위한 쿼리 변
 
 
 class QueryRewriter:
-    def __init__(self, model: str = "gpt-4o-mini"):
+    def __init__(self, model: str = "gpt-5.4-mini"):
         self.client = AsyncOpenAI()
         self.model = model
 
@@ -1288,7 +1288,7 @@ class CRAGResult(Enum):
 
 
 class CRAGGate:
-    def __init__(self, model: str = "gpt-4o-mini"):
+    def __init__(self, model: str = "gpt-5.4-mini"):
         self.client = AsyncOpenAI()
         self.model = model
 

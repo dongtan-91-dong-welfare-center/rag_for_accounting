@@ -4,20 +4,96 @@
 
 **Goal:** 파싱된 회계기준서 마크다운 파일에서 Standard/Section/Subsection 노드와 CONTAINS/REFERENCES/EXCLUDES/HAS_CONDITION 엣지를 추출하여 프레임워크 독립적인 JSON 그래프로 저장한다.
 
-**Architecture:** 마크다운 파서가 `##` 헤딩 계층으로 Standard→Section→Subsection 노드를 구성하고, 정규식 탐지기가 엣지 후보 문장을 필터링한다. LLM(GPT-4o-mini)이 후보 문장에서 엣지 타입·대상·속성을 자유 판별하며, 리졸버가 텍스트 참조를 노드 ID로 변환한다. 미연결 참조는 `unresolved_refs`/`unresolved_target`에 기록한다. 빌더가 파이프라인 조율 + CLI를 모두 담당한다.
+**Architecture:** 마크다운 파서가 헤딩 계층(`#`/`##`/`###`)으로 Standard→Section→Subsection 노드를 구성하고, 정규식 탐지기가 엣지 후보 문장을 필터링한다. LLM(gpt-5.4-mini)이 후보 문장에서 엣지 타입·대상·속성을 자유 판별하며, 리졸버가 텍스트 참조를 노드 ID로 변환한다. 미연결 참조는 `unresolved_refs`/`unresolved_target`에 기록한다. 빌더가 파이프라인 조율 + CLI를 모두 담당한다.
 
 **Tech Stack:** Python 3.12, uv, Pydantic v2, openai, re, json, pytest
 
 **Spec:** `docs/superpowers/specs/2026-04-10-ontology-schema-design.md`
 
-**입력 형식 (`data/회계_sample.md` 기준):**
+**실제 MD 헤딩 구조 (실측):**
 ```
-## 제 6 장 금융자산 · 금융부채   ← Standard 헤딩
-## 제 1 절 공통사항              ← Section 헤딩 (제N절 패턴)
-## 금융상품의 최초인식            ← Subsection 헤딩
-- 6.4 ...내용...               ← 문단
-- ⑴ ...                       ← 하위 항목
+# 제6장 금융자산·금융부채        ← Standard (H1, 제N장 패턴)
+## 제1절 공통사항               ← Section  (H2, 제N절 패턴)
+#### 6.3 ...                  ← Section 직속 문단 (H4, ### 없이 ## 바로 아래)
+### 금융상품의 최초인식           ← Subsection (H3)
+#### 6.4 ...                  ← 문단 번호 헤딩 (H4, list item 아님)
+##### (1) ...                  ← 하위 항목 (H5, Subsection content에 포함)
+###### (가) ...                ← 하위하위 항목 (H6, Subsection content에 포함)
 ```
+
+**파서 엣지 케이스:**
+
+| 케이스 | 처리 |
+|--------|------|
+| 파일 앞부분 겉표지/목차 | 파싱 전 수동으로 제거하고 입력 (파서에서 처리 안 함) |
+| Section 직속 문단 | `##` 이후 `###` 없이 `####`이 나오면 → `Section.content` / `Section.paragraphs`에 추가 |
+| Standard 직속 Subsection | `##` 등장 전의 `###` → Standard에 직접 CONTAINS |
+| 절 없는 장 (예: 제10장) | `##` 없이 `###`만 이어짐 → Standard → Subsection 직접 연결 (자동 처리됨) |
+| 빈 Subsection | `###` 헤딩 뒤 content/paragraphs 모두 없으면 노드 생성 skip |
+
+---
+
+## 부록(Appendix) 처리 설계
+
+### 부록 유형 분류
+
+부록이 **절(Section)에 소속**되는지 **장(Standard)에 소속**되는지에 따라 두 가지로 구분한다.
+
+| 유형 | 판별 기준 | 예시 |
+|------|----------|------|
+| **Section-level appendix** | 부록 내에 `## 제N절` 헤딩 존재 | 제6장 (부록A 내 `## 제1절 공통사항` 재등장) |
+| **Chapter-level appendix** | 부록 내에 `## 제N절` 없음, 결N.x / 실N.x 직접 나열 | 제9장, 제10장 |
+
+### 노드 소속
+
+- **Section-level**: 각 Subsection은 대응하는 Section 노드에 소속 (`CONTAINS: Section → Subsection`)
+- **Chapter-level**: Subsection은 Standard 노드에 직접 소속 (`CONTAINS: Standard → Subsection`)
+
+두 경우 모두 Subsection에 `is_appendix: bool` 속성을 추가한다. (`models.py` 반영 필요)
+
+### Chapter-level appendix 청킹 전략
+
+개별 paragraph(결N.x, 실N.x)는 단독으로 너무 짧으므로 **참조 범위 Union 기준으로 그룹화**하여 하나의 Subsection을 구성한다.
+
+**그룹화 알고리즘 (문서 순서 유지):**
+
+```
+현재 그룹의 참조 범위 union을 유지하면서 다음 항목을 검사:
+  - 다음 항목의 참조 범위가 union과 겹치거나 인접 → 같은 그룹 편입, union 확장
+  - 공백(gap) 발생 또는 토큰 상한 초과 → 새 그룹 시작
+```
+
+**예시:**
+```
+결10.A  참조: 10.18           → 그룹1 범위 = 10.18
+결10.B  참조: 10.18~10.20    → 겹침 → 그룹1, 범위 = 10.18~10.20
+결10.C  참조: 10.20           → 범위 내 → 그룹1
+결10.D  참조: 10.24~10.31    → gap → 그룹2 시작
+```
+
+**분리 조건:**
+
+| 조건 | 처리 |
+|------|------|
+| 참조 범위에 gap 발생 | 새 그룹 시작 |
+| 단일 항목이 토큰 상한 초과 | 통째로 유지 (oversized 허용, 로그 기록) |
+
+### 임베딩 단위 확정
+
+**Subsection 전체를 임베딩 단위로 한다. 크기 제한 없음.**
+
+- 사례(사례10 등 4,000 tokens급)도 단일 주제를 다루므로 Subsection 하나로 그대로 임베딩
+- 분개 블록·테이블은 Subsection 내부에 포함되어 있으므로 자동으로 보존됨 — 분개 원자성을 별도로 관리할 필요 없음
+- 파싱된 MD에 LLM이 테이블 요약문을 이미 자동 삽입해두었으므로 테이블 임베딩 품질 보완도 기처리된 상태
+
+OpenAI 임베딩 모델 최대 컨텍스트(8,191 tokens) 내에서 처리 가능하며, 사례처럼 단일 주제로 구성된 청크는 전체 임베딩 시에도 벡터가 주제를 충분히 표현한다.
+
+### REFERENCES 엣지 추출 위치
+
+| 유형 | 참조 위치 | 추출 방법 |
+|------|----------|----------|
+| Section-level | `###` 소제목 텍스트 | 소제목 파싱 단계에서 `(문단 N.NN~N.NN)` 패턴 추출 |
+| Chapter-level | paragraph 콘텐츠 내 | `(문단 N.NN∼N.NN)` 패턴 → `edge_detector` → LLM 분류 |
 
 ---
 
@@ -200,13 +276,13 @@ class OntologyNode(BaseModel):
     name: str = ""
     standard_type: str = ""   # "GAAP" | "KIFRS"
     chapter: str = ""
-    effective_date: str = ""
     # Section / Subsection
     title: str = ""
     order: int = 0
-    # Subsection
+    # Section / Subsection 공통 (Section은 직속 문단만, Subsection은 소절 전체)
     content: str = ""
     paragraphs: list[str] = Field(default_factory=list)
+    # Subsection 전용
     unresolved_refs: list[str] = Field(default_factory=list)
 
 
@@ -248,10 +324,11 @@ git commit -m "feat: 온톨로지 Pydantic 모델 정의"
 - Test: `tests/unit/ontology/test_md_parser.py`
 
 파싱 규칙:
-- `## 제\s*\d+\s*장` → Standard 노드 이름 확정
-- `## 제\s*\d+\s*절` → Section 노드
-- 그 외 `##` (문서 제목 제외) → Subsection 노드
-- `- 6.X`, `- 실6.X` 등 마커 → 현재 Subsection의 `paragraphs` + `content`
+- `# 제\s*\d+\s*장` (H1) → Standard 노드 이름·chapter 확정
+- `## 제\s*\d+\s*절` (H2) → Section 노드
+- `###` (H3) → Subsection 노드. content/paragraphs 둘 다 비면 노드 생성 skip
+- `####`/`#####`/`######` (H4+) → 현재 Subsection의 content에 누적. `###` 없이 `##` 바로 아래에 등장하면 Section.content에 누적 (Section 직속 문단)
+- `####` 헤딩 텍스트가 `6.X`, `실6.X`, `결6.X` 형태이면 현재 노드의 `paragraphs`에 추가
 
 - [ ] **Step 1: 실패 테스트 작성**
 
@@ -260,28 +337,28 @@ git commit -m "feat: 온톨로지 Pydantic 모델 정의"
 from src.db.ontology.md_parser import parse_markdown
 from src.db.ontology.models import OntologyGraph
 
-SAMPLE_MD = """## 일반기업회계기준
+SAMPLE_MD = """# 제6장 금융자산·금융부채
 
-제 6 장 금융자산 · 금융부채
+### 적용범위
 
-한국회계기준원 회계기준위원회 의결 2017. 9. 22.
+#### 6.2
+이 장은 다음을 제외한 모든 유형의 금융상품에 적용한다.
+##### (1)
+종속기업, 관계기업 및 조인트벤처 투자지분
+##### (2)
+리스에 따른 권리와 의무. 다만, ㈎ 리스채권의 제거와 손상에 대하여는 이 장을 적용한다.
 
-## 제 6 장 금융자산 · 금융부채
+## 제1절 공통사항
 
-## 적용범위
+#### 6.3
+제2절~제4절에서 정하지 않은 사항은 이 절에서 제시하는 원칙을 적용한다.
 
-- 6.2 이 장은 다음을 제외한 모든 유형의 금융상품에 적용한다 .
-- ⑴ 종속기업 , 관계기업 및 조인트벤처 투자지분
-- ⑵ 리스에 따른 권리와 의무 . 다만 , ㈎ 리스채권의 제거와 손상에 대하여는 이 장을 적용한다 .
+### 금융상품의 최초인식
 
-## 제 1 절 공통사항
-
-- 6.3 제 2 절 ~ 제 4 절 에서 정하지 않은 사항은 이 절에서 제시하는 원칙을 적용한다 .
-
-## 금융상품의 최초인식
-
-- 6.4 금융자산이나 금융부채는 계약당사자가 되는 때에만 재무상태표에 인식한다 .
-- 6.4 의 2 정형화된 거래의 경우 매매일에 해당 거래를 인식한다 .
+#### 6.4
+금융자산이나 금융부채는 계약당사자가 되는 때에만 재무상태표에 인식한다.
+#### 6.4의2
+정형화된 거래의 경우 매매일에 해당 거래를 인식한다.
 """
 
 
@@ -311,6 +388,14 @@ def test_section_node_created():
     assert "공통사항" in sections[0].title
 
 
+def test_section_direct_paragraph():
+    """Section 직속 문단(6.3)이 Section.content와 Section.paragraphs에 저장된다."""
+    graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
+    section = next(n for n in graph.nodes if n.node_type == "Section")
+    assert "6.3" in section.paragraphs
+    assert "6.3" in section.content
+
+
 def test_subsection_nodes_created():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     subsections = [n for n in graph.nodes if n.node_type == "Subsection"]
@@ -331,6 +416,15 @@ def test_subsection_content_not_empty():
     assert "6.4" in sub.content
 
 
+def test_empty_subsection_skipped():
+    """content도 paragraphs도 없는 빈 Subsection은 노드로 생성되지 않는다."""
+    md = "# 제6장 금융자산·금융부채\n\n### 빈소제목\n\n### 내용있는소제목\n\n#### 6.1\n내용\n"
+    graph = parse_markdown(md, standard_id="gaap-ch6", standard_type="GAAP")
+    titles = [n.title for n in graph.nodes if n.node_type == "Subsection"]
+    assert "빈소제목" not in titles
+    assert "내용있는소제목" in titles
+
+
 def test_contains_edges_exist():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     contains = [e for e in graph.edges if e.edge_type == "CONTAINS"]
@@ -349,38 +443,32 @@ Expected: `ImportError`
 ```python
 import re
 from src.db.ontology.models import OntologyGraph, OntologyNode, OntologyEdge
-from src.parse.parser_dtos import _MARKER_RE
 
 _CHAPTER_RE = re.compile(r'제\s*(\d+)\s*장')
 _SECTION_RE = re.compile(r'제\s*(\d+)\s*절')
+_PARA_RE = re.compile(r'^(실|결)?(\d+\.\d+(?:의\d+)?)')
 
 
 def _slugify(text: str) -> str:
     return re.sub(r'\s+', '_', text.strip())[:40]
 
 
-def _extract_paragraph_id(line: str) -> str | None:
-    """'- 6.4 ...' 또는 '- 실6.1 ...' 형태에서 문단 번호를 추출한다."""
-    content = re.sub(r'^-\s+', '', line).strip()
-    tokens = content.split()
-    first_token = tokens[0] if tokens else ''
-    if _MARKER_RE.match(first_token) and re.search(r'\d+\.\d+', first_token):
-        return first_token
-    return None
+def _extract_para_id(heading_text: str) -> str | None:
+    """'6.4', '6.4의2', '실6.1', '결6.1' 형태의 문단 번호를 헤딩 텍스트에서 추출한다."""
+    first_token = heading_text.strip().split()[0] if heading_text.strip() else ''
+    return first_token if _PARA_RE.match(first_token) else None
 
 
 def parse_markdown(
     text: str,
     standard_id: str,
     standard_type: str,
-    effective_date: str = "",
 ) -> OntologyGraph:
     graph = OntologyGraph()
     standard = OntologyNode(
         id=standard_id,
         node_type="Standard",
         standard_type=standard_type,
-        effective_date=effective_date,
     )
     graph.nodes.append(standard)
 
@@ -389,83 +477,112 @@ def parse_markdown(
     section_order = 0
     subsection_order = 0
     content_lines: list[str] = []
+    section_content_lines: list[str] = []
 
     def flush_subsection() -> None:
         nonlocal current_subsection, content_lines
         if current_subsection is None:
             return
-        current_subsection.content = '\n'.join(content_lines).strip()
-        graph.nodes.append(current_subsection)
-        parent_id = current_section.id if current_section else standard_id
-        graph.edges.append(OntologyEdge(
-            from_id=parent_id,
-            to_id=current_subsection.id,
-            edge_type="CONTAINS",
-            order=current_subsection.order,
-        ))
+        content = '\n'.join(content_lines).strip()
+        # content도 paragraphs도 없으면 빈 Subsection → skip
+        if content or current_subsection.paragraphs:
+            current_subsection.content = content
+            graph.nodes.append(current_subsection)
+            parent_id = current_section.id if current_section else standard_id
+            graph.edges.append(OntologyEdge(
+                from_id=parent_id,
+                to_id=current_subsection.id,
+                edge_type="CONTAINS",
+                order=current_subsection.order,
+            ))
+        current_subsection = None
         content_lines.clear()
+
+    def flush_section_content() -> None:
+        if current_section and section_content_lines:
+            current_section.content = '\n'.join(section_content_lines).strip()
+        section_content_lines.clear()
 
     for line in text.split('\n'):
         stripped = line.strip()
 
-        if not stripped.startswith('## '):
-            if current_subsection is not None:
-                content_lines.append(line)
-                para_id = _extract_paragraph_id(stripped)
-                if para_id and para_id not in current_subsection.paragraphs:
-                    current_subsection.paragraphs.append(para_id)
+        # H1: Standard (# 제N장)
+        if stripped.startswith('# ') and not stripped.startswith('## '):
+            heading = stripped[2:].strip()
+            m = _CHAPTER_RE.search(heading)
+            if m:
+                standard.name = heading
+                standard.chapter = m.group(1)
             continue
 
-        heading = stripped[3:].strip()
-        chapter_match = _CHAPTER_RE.search(heading)
-        section_match = _SECTION_RE.search(heading)
-
-        if chapter_match:
-            standard.name = heading
-            standard.chapter = chapter_match.group(1)
-            continue
-
-        if section_match:
+        # H2: Section (## 제N절)
+        if stripped.startswith('## ') and not stripped.startswith('### '):
+            heading = stripped[3:].strip()
+            m = _SECTION_RE.search(heading)
+            if not m:
+                continue
             flush_subsection()
-            current_subsection = None
+            flush_section_content()
             section_order += 1
             subsection_order = 0
-            sec_id = f"{standard_id}-s{section_match.group(1)}"
+            sec_id = f"{standard_id}-s{m.group(1)}"
             current_section = OntologyNode(
-                id=sec_id,
-                node_type="Section",
-                title=heading,
-                order=section_order,
+                id=sec_id, node_type="Section",
+                title=heading, order=section_order,
             )
+            current_subsection = None
             graph.nodes.append(current_section)
             graph.edges.append(OntologyEdge(
-                from_id=standard_id,
-                to_id=sec_id,
-                edge_type="CONTAINS",
-                order=section_order,
+                from_id=standard_id, to_id=sec_id,
+                edge_type="CONTAINS", order=section_order,
             ))
             continue
 
-        # Subsection
-        flush_subsection()
-        subsection_order += 1
-        parent_id = current_section.id if current_section else standard_id
-        sub_id = f"{parent_id}-{_slugify(heading)}"
-        current_subsection = OntologyNode(
-            id=sub_id,
-            node_type="Subsection",
-            title=heading,
-            order=subsection_order,
-        )
+        # H3: Subsection (###)
+        if stripped.startswith('### ') and not stripped.startswith('#### '):
+            flush_subsection()
+            flush_section_content()
+            heading = stripped[4:].strip()
+            subsection_order += 1
+            parent_id = current_section.id if current_section else standard_id
+            current_subsection = OntologyNode(
+                id=f"{parent_id}-{_slugify(heading)}",
+                node_type="Subsection",
+                title=heading,
+                order=subsection_order,
+            )
+            continue
+
+        # H4+: 문단 번호 헤딩 또는 하위 항목
+        if stripped.startswith('####'):
+            heading_text = re.sub(r'^#{4,6}\s*', '', stripped)
+            para_id = _extract_para_id(heading_text)
+            if current_subsection is not None:
+                content_lines.append(line)
+                if para_id and para_id not in current_subsection.paragraphs:
+                    current_subsection.paragraphs.append(para_id)
+            elif current_section is not None:
+                # Section 직속 문단
+                section_content_lines.append(line)
+                if para_id and para_id not in current_section.paragraphs:
+                    current_section.paragraphs.append(para_id)
+            continue
+
+        # 일반 텍스트
+        if current_subsection is not None:
+            content_lines.append(line)
+        elif current_section is not None and stripped:
+            section_content_lines.append(line)
 
     flush_subsection()
+    flush_section_content()
     return graph
 ```
 
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run: `uv run pytest tests/unit/ontology/test_md_parser.py -v`
-Expected: 8 passed
+Expected: 9 passed
 
 - [ ] **Step 5: 커밋**
 
@@ -695,7 +812,7 @@ def extract_edges(
     )
 
     response = _client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5.4-mini",
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -967,10 +1084,9 @@ def build_graph(
     md_path: str | Path,
     standard_id: str,
     standard_type: str,
-    effective_date: str = "",
 ) -> OntologyGraph:
     text = Path(md_path).read_text(encoding="utf-8")
-    graph = parse_markdown(text, standard_id, standard_type, effective_date)
+    graph = parse_markdown(text, standard_id, standard_type)
 
     for node in graph.nodes:
         if node.node_type != "Subsection" or not node.content:
@@ -1004,13 +1120,11 @@ def main() -> None:
     parser.add_argument("--output", required=True, help="출력 JSON 파일 경로")
     parser.add_argument("--standard-id", required=True, help="예: gaap-ch6")
     parser.add_argument("--standard-type", required=True, choices=["GAAP", "KIFRS"])
-    parser.add_argument("--effective-date", default="")
     args = parser.parse_args()
 
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     print(f"파싱 중: {args.input}")
-    graph = build_graph(args.input, args.standard_id, args.standard_type,
-                        args.effective_date)
+    graph = build_graph(args.input, args.standard_id, args.standard_type)
     save_graph(graph, args.output)
 
     nodes = len(graph.nodes)
