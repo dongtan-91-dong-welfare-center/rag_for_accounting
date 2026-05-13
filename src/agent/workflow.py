@@ -4,11 +4,12 @@ from datetime import datetime
 from functools import wraps
 from langgraph.graph import StateGraph, START, END
 from src.agent.nodes.generate import generate_response
+from src.agent.nodes.evaluate import evaluate_context
 from src.utils.config import MAX_REWRITE_COUNT, KST
 from src.utils.exception import AccountingRAGError
 from src.models.state import GraphState
 from src.models.schemas import (
-    RetrievedChunk, FinalResponse, EvaluationResult, 
+    RetrievedChunk, FinalResponse, EvaluationResult,
     RerankingResult, Citation
 )
 
@@ -92,22 +93,6 @@ def rerank(state: GraphState) -> dict:
     ]
     return {"reranked_chunks": reranked}
 
-@handle_node_errors("evaluate")
-def evaluate_context(state: GraphState) -> dict:
-    """
-    TODO: FUNC-007 (컨텍스트 평가 노드) - Mock 구현
-    실제 구현 대기 (src/agent/nodes/evaluate.py)
-    """
-    # 더미 구현: 항상 추가 검색이 필요 없는 것으로 평가
-    return {
-        "evaluation": EvaluationResult(
-            is_relevant=True,
-            needs_external=False,
-            confidence=0.9,
-            reasoning="더미 평가: 검색된 컨텍스트가 충분히 관련성 있음"
-        )
-    }
-
 def route_after_evaluate(state: GraphState) -> str:
     """
     TODO: FUNC-009 (평가 후 라우팅 결정)
@@ -115,6 +100,9 @@ def route_after_evaluate(state: GraphState) -> str:
     """
     # 예외 발생 시의 안전 장치
     # evaluate 노드 자체에서 에러가 발생했다면, 무한 루프를 방지하기 위해 강제로 generate 단계로 우회합니다.
+    # 다만, EV-301 발생 시 우리의 폴백(needs_external=True)이 의도한 CRAG 루프 재진입은 실제로는 발동되지 않습니다.
+    # 만약, route_after_evaluate의 안전 장치가 너무 공격적이며, FUNC-007 의도(파싱 실패 시 한 번 더 시도)와 충돌한다면
+    # TODO: route_after_evaluate를 손봐야 함 (예: rewrite_count 체크와 결합)
     if state.error_logs and state.error_logs[-1]["node"] == "evaluate":
         return "generate"
 
