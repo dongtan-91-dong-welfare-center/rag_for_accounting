@@ -1,7 +1,56 @@
 # FUNC-006: Cross-Encoder 기반 재정렬 모듈
 
 from src.models.schemas import RetrievedChunk, RerankingResult
-from src.utils.exception import RerankFailureError
+from src.models.state import GraphState
+from src.utils.config import RERANK_THRESHOLD
+from src.utils.exception import AccountingRAGError, RerankFailureError, ScoreThresholdError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def rerank_chunks(state: GraphState) -> dict:
+    """
+    워크플로우 노드: retrieved_chunks를 재정렬하고 임계치 필터링을 수행한다.
+
+    동작:
+        - rerank() 헬퍼 호출 → 내림차순 정렬된 RerankingResult 리스트 수신
+        - 결과가 비었거나 최고 점수가 RERANK_THRESHOLD 미만이면 ScoreThresholdError
+        - AccountingRAGError 계열(ScoreThresholdError, RerankFailureError 등)은
+          error_logs에 누적 기록 후 reranked_chunks 갱신 없이 반환
+          → 후속 evaluate/generate 노드가 빈 컨텍스트 폴백 경로로 처리
+    """
+    logger.info(
+        f"재정렬 수행: {len(state.retrieved_chunks)}개 청크, "
+        f"질의: {state.original_query[:50]}..."
+    )
+
+    try:
+        results = rerank(state.original_query, state.retrieved_chunks)
+
+        if not results:
+            logger.warning("재정렬 후 유효한 청크가 없습니다.")
+            raise ScoreThresholdError("재정렬 후 유효한 청크가 없습니다.")
+
+        # rerank()가 내림차순 정렬을 보장하므로 0번째가 최고 점수
+        max_score = results[0].rerank_score
+        if max_score < RERANK_THRESHOLD:
+            logger.warning(
+                f"재정렬 점수 임계값 미달: 최고점={max_score}, "
+                f"임계값={RERANK_THRESHOLD}"
+            )
+            raise ScoreThresholdError(
+                f"최고 관련도({max_score})가 임계값({RERANK_THRESHOLD})에 미달합니다."
+            )
+
+        logger.info(f"재정렬 완료: {len(results)}개 청크 반환")
+        return {"reranked_chunks": results}
+
+    except AccountingRAGError as e:
+        # ScoreThresholdError / RerankFailureError → error_logs에 누적 기록 후 진행
+        new_logs = state.error_logs + [e.to_error_log()]
+        return {"error_logs": new_logs}
+
 
 def rerank(original_query: str, chunks: list[RetrievedChunk]) -> list[RerankingResult]:
     """

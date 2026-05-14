@@ -5,12 +5,13 @@ from functools import wraps
 from langgraph.graph import StateGraph, START, END
 from src.agent.nodes.generate import generate_response
 from src.agent.nodes.evaluate import evaluate_context
+from src.retrieval.reranker import rerank_chunks
 from src.utils.config import MAX_REWRITE_COUNT, KST
 from src.utils.exception import AccountingRAGError
 from src.models.state import GraphState
 from src.models.schemas import (
     RetrievedChunk, FinalResponse, EvaluationResult,
-    RerankingResult, Citation
+    Citation
 )
 
 def handle_node_errors(node_name: str):
@@ -78,21 +79,6 @@ def hybrid_search(state: GraphState) -> dict:
         ]
     }
 
-@handle_node_errors("rerank")
-def rerank(state: GraphState) -> dict:
-    """
-    TODO: FUNC-006 (재정렬 노드) - Mock 구현
-    실제 구현 대기 (src/retrieval/reranker.py)
-    """
-    # 더미 구현: 검색된 청크 수만큼 재정렬 결과 생성
-    reranked = [
-        RerankingResult(
-            chunk=chunk,
-            rerank_score=0.95
-        ) for chunk in state.retrieved_chunks
-    ]
-    return {"reranked_chunks": reranked}
-
 def route_after_evaluate(state: GraphState) -> str:
     """
     TODO: FUNC-009 (평가 후 라우팅 결정)
@@ -133,7 +119,7 @@ def build_workflow() -> StateGraph:
     # 노드 추가
     workflow.add_node("rewrite", rewrite_query)
     workflow.add_node("search", hybrid_search)
-    workflow.add_node("rerank", rerank)
+    workflow.add_node("rerank", rerank_chunks)
     workflow.add_node("evaluate", evaluate_context)
     workflow.add_node("generate", generate_response)
 
