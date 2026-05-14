@@ -1,64 +1,76 @@
-"""
-[FUNC-006] 리랭킹 단위 테스트 Stub
-
-대상 모듈: src/retrieval/reranker.py
-검증 범위:
-    - rerank(): Cross-Encoder 재정렬 및 threshold 필터링
-    - compute_relevance_score(): 단일 쌍의 관련도 점수 계산
-
-TODO: reranker.py 구현 완료 후 @pytest.mark.skip을 제거
-"""
 import pytest
+from unittest.mock import patch
+from src.retrieval.reranker import rerank
 from src.models.schemas import RetrievedChunk, RerankingResult
-from src.utils.config import RERANK_THRESHOLD
 
+@pytest.fixture
+# 추후 더미데이터를 위한 별도 json 파일 만들어서 관리하는 것을 고려해봐야 함
+def sample_chunks():
+    return [
+        RetrievedChunk(chunk_id="1", document_id="doc1", content="First content", score=0.5, metadata={}),
+        RetrievedChunk(chunk_id="2", document_id="doc2", content="Second content", score=0.6, metadata={}),
+        RetrievedChunk(chunk_id="3", document_id="doc3", content="Third content", score=0.7, metadata={})
+    ]
 
-@pytest.mark.unit
-class TestRerank:
-    """rerank() 함수 인터페이스 검증"""
+@patch('src.retrieval.reranker.compute_relevance_score')
+def test_rerank_normal_behavior(mock_compute, sample_chunks):
+    """정상 동작 테스트: 다중 후보군을 입력받아 정상적으로 연관성 점수에 따라 정렬되는지 검증"""
+    # 점수 모킹: 3번 청크가 가장 높고, 1번 청크가 가장 낮음
+    mock_compute.side_effect = [0.2, 0.5, 0.9]
+    
+    results = rerank("test query", sample_chunks)
+    
+    assert len(results) == 3
+    # 정렬 확인 (내림차순)
+    assert results[0].chunk.chunk_id == "3"
+    assert results[0].rerank_score == 0.9
+    assert results[1].chunk.chunk_id == "2"
+    assert results[1].rerank_score == 0.5
+    assert results[2].chunk.chunk_id == "1"
+    assert results[2].rerank_score == 0.2
 
-    @pytest.mark.skip(reason="FUNC-006 reranker 구현 후 활성화 예정 — Cross-Encoder 모델 필요")
-    def test_rerank_returns_reranking_results(self):
-        """
-        입력: query (str), chunks (list[RetrievedChunk])
-        출력: list[RerankingResult] — rerank_score 내림차순, threshold 이상만 포함
-        """
-        from src.retrieval.reranker import rerank
+def test_rerank_empty_list():
+    """빈 리스트 입력 테스트: 빈 리스트가 전달되었을 때 ranked_chunks == [] 확인"""
+    results = rerank("test query", [])
+    assert results == []
 
-        chunks = [
-            RetrievedChunk(chunk_id="c1", document_id="D1", content="영업권 정의", score=0.8, metadata={}),
-            RetrievedChunk(chunk_id="c2", document_id="D1", content="오늘 날씨", score=0.3, metadata={}),
-        ]
-        results = rerank("영업권 손상차손 인식 기준은?", chunks)
-        assert isinstance(results, list)
-        if results:
-            assert isinstance(results[0], RerankingResult)
-            # 내림차순 정렬 검증
-            scores = [r.rerank_score for r in results]
-            assert scores == sorted(scores, reverse=True)
-            # threshold 이상만 포함
-            assert all(r.rerank_score >= RERANK_THRESHOLD for r in results)
+@patch('src.retrieval.reranker.compute_relevance_score')
+def test_rerank_single_chunk(mock_compute):
+    """단일 청크 입력 테스트: 후보가 1개일 때 모델 추론 없이 즉시 반환하는지 검증"""
+    single_chunk = [RetrievedChunk(chunk_id="1", document_id="doc1", content="content", score=0.5, metadata={})]
+    results = rerank("test query", single_chunk)
+    
+    assert len(results) == 1
+    assert results[0].rerank_score == 1.0
+    mock_compute.assert_not_called()
 
-    @pytest.mark.skip(reason="FUNC-006 reranker 구현 후 활성화 예정")
-    def test_rerank_empty_chunks(self):
-        """빈 청크 리스트 → 빈 리스트 반환"""
-        from src.retrieval.reranker import rerank
+@patch('src.retrieval.reranker.compute_relevance_score')
+def test_rerank_below_threshold(mock_compute, sample_chunks):
+    """임계치 미달 테스트: 점수가 0.5 미만인 경우에도 리스트를 정상적으로 반환하는지 확인"""
+    # 모든 점수를 0.5 미만으로 설정
+    mock_compute.side_effect = [0.1, 0.2, 0.3]
+    
+    results = rerank("test query", sample_chunks)
+    
+    assert len(results) == 3
+    # 정렬 확인 (내림차순)
+    assert results[0].chunk.chunk_id == "3"
+    assert results[0].rerank_score == 0.3
+    assert results[2].chunk.chunk_id == "1"
+    assert results[2].rerank_score == 0.1
 
-        results = rerank("영업권", [])
-        assert results == []
+@patch('src.retrieval.reranker.compute_relevance_score')
+def test_rerank_exception_handling(mock_compute, sample_chunks):
+    """예외 처리 테스트: 모델 장애 발생 시 RerankFailureError 예외가 상위 노드로 전파되는지 확인
 
+    NOTE: 단위 테스트 수준에서는 예외 발생 검증만 수행합니다.
+    예외가 전파된 후 error_logs 기록 및 Fallback 처리는 workflow 레벨의
+    handle_node_errors 데코레이터와 route_after_evaluate에서 담당합니다.
+    """
+    from src.utils.exception import RerankFailureError
 
-@pytest.mark.unit
-class TestComputeRelevanceScore:
-    """compute_relevance_score() 함수 인터페이스 검증"""
+    mock_compute.side_effect = Exception("예상치 못한 에러 발생")
 
-    @pytest.mark.skip(reason="FUNC-006 reranker 구현 후 활성화 예정 — Cross-Encoder 모델 필요")
-    def test_score_in_zero_one_range(self):
-        """
-        입력: query (str), content (str)
-        출력: float ∈ [0, 1]
-        """
-        from src.retrieval.reranker import compute_relevance_score
-
-        score = compute_relevance_score("영업권 손상차손", "영업권은 사업결합에서 발생하는 자산입니다.")
-        assert 0.0 <= score <= 1.0
+    # 예외가 발생하고 RerankFailureError로 래핑되어 전파됨
+    with pytest.raises(RerankFailureError, match="리랭킹 과정 중 예상치 못한 오류 발생"):
+        rerank("test query", sample_chunks)
