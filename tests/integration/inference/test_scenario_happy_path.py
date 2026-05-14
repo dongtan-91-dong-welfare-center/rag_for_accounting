@@ -113,7 +113,7 @@ class TestScenarioHappyPath:
         # 노드 함수는 실제 코드를 실행하되, 외부 I/O만 Mock
         with (
             patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": reranked}),
+            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": reranked}),
             patch("src.agent.workflow.evaluate_context", return_value={
                 "evaluation": EvaluationResult(
                     is_relevant=True, needs_external=False,
@@ -166,7 +166,7 @@ class TestScenarioHappyPath:
 
         with (
             patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": reranked}),
+            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": reranked}),
             patch("src.agent.workflow.evaluate_context", return_value={
                 "evaluation": EvaluationResult(
                     is_relevant=True, needs_external=False,

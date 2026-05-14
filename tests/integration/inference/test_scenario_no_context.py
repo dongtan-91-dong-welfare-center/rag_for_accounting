@@ -99,7 +99,7 @@ class TestScenarioNoContext:
 
         with (
             patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": mock_reranked}),
+            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": mock_reranked}),
             patch("src.agent.workflow.evaluate_context", return_value={
                 "evaluation": EvaluationResult(
                     is_relevant=bool(mock_reranked), needs_external=False,
@@ -153,7 +153,7 @@ class TestScenarioNoContext:
         # 해당 노드만 에러 버전으로 교체
         patch_target = {
             "search": "src.agent.workflow.hybrid_search",
-            "rerank": "src.agent.workflow.rerank",
+            "rerank": "src.agent.workflow.rerank_chunks",
         }[expected_node]
 
         with patch(patch_target, side_effect=decorated):

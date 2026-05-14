@@ -113,7 +113,7 @@ class TestScenarioHallucinationRisk:
         # Mock 데이터 생성
         with (
             patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": reranked}),
+            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": reranked}),
             patch("src.agent.workflow.evaluate_context", side_effect=eval_sequence),
         ):
             state = GraphState(original_query="영업권 손상차손 인식 기준은?", standard_filter="ALL")
@@ -137,7 +137,7 @@ class TestScenarioHallucinationRisk:
 
         with (
             patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": reranked}),
+            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": reranked}),
             patch("src.agent.workflow.evaluate_context", return_value=eval_always_retry),
         ):
             state = GraphState(original_query="무한 루프 테스트", standard_filter="ALL")
