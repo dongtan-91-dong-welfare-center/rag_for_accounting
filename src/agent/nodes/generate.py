@@ -6,6 +6,7 @@ from src.models.state import GraphState
 from src.models.schemas import RerankingResult, Citation, FinalResponse, LLMInternalResponse
 from src.agent.prompts import GENERATION_PROMPT
 from src.utils.config import RERANK_THRESHOLD
+from src.utils.exception import LLMResponseFormatError
 
 
 def generate_response(state: GraphState) -> dict:
@@ -70,8 +71,12 @@ def generate_response(state: GraphState) -> dict:
         }
 
     except Exception as e:
-        # 오류 발생 시 error_logs는 workflow의 데코레이터에서 처리됨을 가정
-        raise e
+        format_error = LLMResponseFormatError(message=f"답변 생성 중 오류 발생: {e}")
+        new_logs = state.error_logs + [format_error.to_error_log()]
+        return {
+            "final_response": build_unanswerable_response(state.original_query),
+            "error_logs": new_logs,
+        }
 
 def extract_citations_from_text(text: str, chunk_map: dict[int, RerankingResult]) -> tuple[list[Citation], str]:
     """
