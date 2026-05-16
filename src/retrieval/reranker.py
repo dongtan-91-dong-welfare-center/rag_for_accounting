@@ -25,6 +25,14 @@ def rerank_chunks(state: GraphState) -> dict:
         f"질의: {state.original_query[:50]}..."
     )
 
+    # TODO: search 노드 구현 후 search-rerank 간 관계 재정의 후에 처리 방식을 명확하게 결정해야 함
+    # 현재는 retrieved_chunks가 비어있을 때 조기 반환하여 ScoreThresholdError를 발생시키지 않는다.
+    # 이는 search 노드 실패(빈 결과)와 리랭킹 자체 실패를 구분하기 위함이다.
+    # search 노드가 구현되면 빈 retrieved_chunks의 원인(정상적 검색 결과 없음 vs 노드 오류)에 따라
+    # rerank_chunks의 대응 방식(조기 반환 vs ScoreThresholdError)을 결정해야 한다.
+    if not state.retrieved_chunks:
+        return {"reranked_chunks": []}
+
     try:
         results = rerank(state.original_query, state.retrieved_chunks)
 
