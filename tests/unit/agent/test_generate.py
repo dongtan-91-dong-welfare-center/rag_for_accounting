@@ -6,10 +6,9 @@
     - generate_response(): PydanticAI 연동 및 최종 응답 생성
     - extract_citations_from_text(): 정규식을 통한 인용 마크업 파싱 및 Citation 조립
     - build_unanswerable_response(): 안전 응답 생성
-
-TODO: generate_response()의 PydanticAI Mocking 테스트 보완
 """
 import pytest
+from unittest.mock import MagicMock, patch
 from src.models.schemas import (
     RetrievedChunk,
     RerankingResult,
@@ -20,7 +19,23 @@ from src.models.schemas import (
 )
 from src.models.state import GraphState
 from src.utils.config import RERANK_THRESHOLD
+from src.utils.exception import LLMResponseFormatError, LLMAPIConnectionError
 from src.agent.nodes.generate import extract_citations_from_text, build_unanswerable_response, generate_response
+
+
+def _mock_generator_agent(response: LLMInternalResponse | None = None, error: Exception | None = None):
+    """
+    src.agent.nodes.generate.Agent를 패치하여 run_sync가 지정한 결과(또는 예외)를 반환하도록 한다.
+    conftest의 autouse mock_llm_agent는 generate.Agent를 전역 패치하므로 특정 동작(에러 유발 등)이 필요한 테스트에서는 이 헬퍼로 재패치한다.
+    """
+    mock_instance = MagicMock()
+    if error is not None:
+        mock_instance.run_sync.side_effect = error
+    else:
+        mock_result = MagicMock()
+        mock_result.output = response
+        mock_instance.run_sync.return_value = mock_result
+    return patch("src.agent.nodes.generate.Agent", return_value=mock_instance)
 
 
 @pytest.mark.unit
@@ -93,10 +108,10 @@ class TestBuildUnanswerableResponse:
 class TestGenerateResponse:
     """generate_response() 노드 함수 인터페이스 검증"""
 
-    @pytest.mark.skip(reason="FUNC-008 PydanticAI Mocking 추가 후 활성화 예정")
     def test_generate_returns_final_response(self):
-        """
-        입력: GraphState (evaluation + reranked_chunks 포함)
+        """정상 경로: GraphState(evaluation + reranked_chunks)로 FinalResponse가 반환되는지 검증
+
+        conftest의 mock_llm_agent가 전역으로 generate.Agent를 패치하므로 별도 패치 불필요.
         출력: dict (final_response, retrieval_score, generation_score)
         """
         state = GraphState(
@@ -112,9 +127,53 @@ class TestGenerateResponse:
             ],
         )
         result = generate_response(state)
-        
+
         assert "final_response" in result                           # 최종 결과물을 반환했는지?
-        assert isinstance(result["final_response"], FinalResponse)   # 최종 결과물이 FinalResponse인지?
-        assert result["final_response"].is_answerable is True         # 답변이 가능한지?
-        assert "retrieval_score" in result                        # 검색 점수를 반환했는지?
+        assert isinstance(result["final_response"], FinalResponse)  # 최종 결과물이 FinalResponse인지?
+        assert result["final_response"].is_answerable is True       # 답변이 가능한지?
+        assert "retrieval_score" in result                          # 검색 점수를 반환했는지?
         assert "generation_score" in result                         # 생성 점수를 반환했는지?
+
+    def test_llm_response_format_error_records_error_log(self):
+        """LLMResponseFormatError 발생 시 error_logs에 기록되고 폴백 응답이 반환되는지 검증
+
+        [GN-401] LLMResponseFormatError는 AccountingRAGError 계열이므로 to_error_log()를 통해 구조화된 로그로 변환되어 error_logs에 누적된다.
+        터미널 노드이므로 예외를 상위로 전파하지 않고 build_unanswerable_response 폴백을 반환한다.
+        """
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="영업권 정의", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_generator_agent(error=LLMResponseFormatError("응답 포맷 오류")):
+            result = generate_response(state)
+
+        assert "error_logs" in result   # error_logs가 존재하는지 확인
+        assert result["error_logs"][0]["error_type"] == "GN-401"    # 에러 타입이 GN-401인지 확인
+        assert result["final_response"].is_answerable is False       # 폴백 응답이 반환되는지 확인
+
+    def test_llm_api_connection_error_records_error_log(self):
+        """LLMAPIConnectionError 발생 시 error_logs에 기록되고 폴백 응답이 반환되는지 검증
+
+        [CM-002] LLMAPIConnectionError는 AccountingRAGError 계열이므로 to_error_log()를 통해 구조화된 로그로 변환되어 error_logs에 누적된다.
+        터미널 노드이므로 예외를 상위로 전파하지 않고 build_unanswerable_response 폴백을 반환한다.
+        """
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="영업권 정의", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_generator_agent(error=LLMAPIConnectionError("API 연결 실패", node="generate")):
+            result = generate_response(state)
+
+        assert "error_logs" in result   # error_logs가 존재하는지 확인
+        assert result["error_logs"][0]["error_type"] == "CM-002"    # 에러 타입이 CM-002인지 확인
+        assert result["final_response"].is_answerable is False       # 폴백 응답이 반환되는지 확인
