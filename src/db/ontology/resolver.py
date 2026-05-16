@@ -3,10 +3,7 @@
 LLM은 "제2절", "문단 6.4" 같은 원문 텍스트를 target_ref로 반환한다.
 이 모듈은 그 텍스트를 그래프 안의 노드 ID로 매핑한다.
 
-변환 실패 시:
-  - 엣지의 to_id는 빈 문자열로 남는다.
-  - 출발 노드의 unresolved_refs에 원문이 기록된다.
-  - 전체 인제스트 완료 후 일괄 재처리를 상정한 구조다.
+변환 실패 시 엣지의 to_id는 빈 문자열로 남고, unresolved_target에 원문이 유지된다.
 """
 
 import re
@@ -58,15 +55,8 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
       2. 실패 시 문단 번호(X.X) 패턴만 추출해서 재시도 (장+문단 혼합 시 문단 우선)
       3. 실패 시 절 번호(제N절) 패턴만 추출해서 재시도
       4. 실패 시 장 번호(제N장) 패턴만 추출해서 재시도 (최후 수단)
-      5. 최종 실패 시 출발 노드의 unresolved_refs에 원문 기록
     """
     lookup = build_lookup(graph)
-    # node_map: "노드 ID → 노드 객체" 딕셔너리. unresolved_refs를 기록할 때 사용한다.
-    # {n.id: n for n in graph.nodes} 에서 n은 graph.nodes 리스트의 원소를 순서대로 가리킨다.
-    # Python 리스트 원소는 객체의 참조(주소)이므로 n을 값으로 저장하면 복사가 아닌
-    # 원본 객체를 그대로 가리킨다.
-    # 따라서 node_map.get(id)로 꺼낸 src를 수정하면 graph.nodes 안의 원본 노드가 바뀐다.
-    node_map = {n.id: n for n in graph.nodes}
     resolved = []
 
     for edge in graph.edges:
@@ -87,39 +77,37 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
 
         # 시도 2: 문단 번호 패턴("X.X")만 뽑아서 재시도 (장+문단이 함께 올 때 문단 우선)
         if not target_id:
-            m = _PARA_RE.search(ref)
+            m = _PARA_RE.search(norm)
             if m:
-                target_id = lookup.get(m.group(1).replace(' ', ''))
+                target_id = lookup.get(m.group(1))
 
         # 시도 3: 절 번호 패턴("제N절")만 뽑아서 재시도
         if not target_id:
-            m = _SECTION_RE.search(ref)
+            m = _SECTION_RE.search(norm)
             if m:
-                target_id = lookup.get(f'제{m.group(1)}절')  # 공백 제거 버전으로 등록되어 있음
+                target_id = lookup.get(f'제{m.group(1)}절')
 
         # 시도 4: 장 번호 패턴("제N장")만 뽑아서 재시도 (문단·절 없을 때 최후 수단)
         if not target_id:
-            m = _CHAPTER_RE.search(ref)
+            m = _CHAPTER_RE.search(norm)
             if m:
-                target_id = lookup.get(f'제{m.group(1)}장')  # 공백 제거 버전으로 등록되어 있음
+                target_id = lookup.get(f'제{m.group(1)}장')
 
         if target_id:
             # 성공: to_id 채우고 unresolved_target 비우기.
-            # ref에서 문단 번호를 추출해 to_paragraph에 저장한다.
+            # norm에서 문단 번호를 추출해 to_paragraph에 저장한다.
             # 절·장으로만 해소된 경우 _PARA_RE가 매칭되지 않으므로 to_paragraph는 빈 문자열이 된다.
-            m = _PARA_RE.search(ref)
-            to_para = m.group(1).replace(' ', '') if m else ""
+            m = _PARA_RE.search(norm)
+            to_para = m.group(1) if m else ""
             resolved.append(edge.model_copy(update={
                 "to_id": target_id,
                 "unresolved_target": "",
                 "to_paragraph": to_para,
             }))
         else:
-            # 실패: 엣지는 그대로 두고, 출발 노드에 미해소 참조 기록
             resolved.append(edge)
-            src = node_map.get(edge.from_id)
-            if src and ref not in src.unresolved_refs:
-                src.unresolved_refs.append(ref)
 
-    graph.edges = resolved
+    # to_id가 확정된 후 from_id == to_id인 자기참조 엣지를 제거한다.
+    # 같은 노드 내 문단 간 참조는 content에 이미 포함되어 있어 검색·생성 단계에서 노이즈가 된다.
+    graph.edges = [e for e in resolved if not e.to_id or e.from_id != e.to_id]
     return graph

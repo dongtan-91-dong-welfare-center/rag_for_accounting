@@ -16,7 +16,7 @@ class OntologyNode(BaseModel):
     타입별로 실제로 사용하는 필드가 다르다:
       - Standard : name, standard_type, chapter
       - Section  : title, order
-      - Subsection: title, order, content, paragraphs, unresolved_refs
+      - Subsection: title, order, content, paragraphs
     """
 
     id: str                                              # 노드 고유 식별자. 예: "gaap-ch6-s1-최초인식"
@@ -34,11 +34,6 @@ class OntologyNode(BaseModel):
     # paragraphs: 포함된 문단 번호 목록. 예: ["6.4", "6.4의2"]
     # Section의 경우 직속 문단(예: 6.3)만 포함된다.
 
-    # ── Subsection 전용 ────────────────────────────────────────
-    unresolved_refs: list[str] = Field(default_factory=list)
-    # unresolved_refs: 그래프 안에서 대응 노드를 찾지 못한 참조 원문 목록.
-    # 예: ["제8장 문단 8.2"]  → 아직 이 장의 노드가 없어서 연결 못 함.
-    # 전체 인제스트 완료 후 일괄 재처리로 해소 예정.
 
 
 class OntologyEdge(BaseModel):
