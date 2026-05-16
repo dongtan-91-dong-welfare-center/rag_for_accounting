@@ -1,6 +1,6 @@
 import pytest
 from langgraph.graph.state import CompiledStateGraph
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from src.agent.workflow import build_workflow, route_after_evaluate
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
@@ -144,14 +144,37 @@ class TestCRAGLoopPath:
         state = GraphState(
             original_query="영업권 손상차손 인식 기준은?",
             evaluation=EvaluationResult(
-                is_relevant=True, 
-                needs_external=False, 
-                confidence=0.8, 
+                is_relevant=True,
+                needs_external=False,
+                confidence=0.8,
                 reasoning="검색 충분함"
             ),
             rewrite_count=1
         )
         assert route_after_evaluate(state) == "generate"
+
+    def test_recursion_limit_fallback(self, workflow_app, initial_state):
+        """rewrite-retrieve 루프가 MAX_REWRITE_COUNT에 도달했을 때 루프를 종료하고 최선의 답변을 반환하는지 검증
+
+        evaluate 노드가 항상 needs_external=True를 반환하도록 패치하여 루프를 강제 유도한다.
+        MAX_REWRITE_COUNT 도달 시 route_after_evaluate가 generate로 라우팅하여 파이프라인이 종료된다.
+        """
+        mock_evaluator_instance = MagicMock()
+        mock_evaluator_result = MagicMock()
+        mock_evaluator_result.output = EvaluationResult(
+            is_relevant=False,
+            needs_external=True,
+            confidence=0.3,
+            reasoning="항상 외부 데이터 필요"
+        )
+        mock_evaluator_instance.run_sync.return_value = mock_evaluator_result
+
+        with patch("src.agent.nodes.evaluate.Agent", return_value=mock_evaluator_instance):
+            final_state = workflow_app.invoke(initial_state)
+
+        assert final_state["rewrite_count"] == MAX_REWRITE_COUNT    # 최대 재시도 횟수에 도달했는지 확인
+        assert final_state["final_response"] is not None            # 루프 종료 후 최선의 답변이 반환됐는지 확인
+        assert final_state["evaluation"].needs_external is True     # 루프 종료 사유가 max count임을 간접 검증
 
 @pytest.mark.unit
 class TestStateTransition:
