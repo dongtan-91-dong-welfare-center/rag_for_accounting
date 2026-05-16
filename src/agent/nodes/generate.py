@@ -5,8 +5,11 @@ from pydantic_ai import Agent
 from src.models.state import GraphState
 from src.models.schemas import RerankingResult, Citation, FinalResponse, LLMInternalResponse
 from src.agent.prompts import GENERATION_PROMPT
-from src.utils.config import RERANK_THRESHOLD
-from src.utils.exception import LLMResponseFormatError
+from src.utils.config import RERANK_THRESHOLD, KST
+from src.utils.exception import AccountingRAGError, LLMResponseFormatError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def generate_response(state: GraphState) -> dict:
@@ -70,9 +73,23 @@ def generate_response(state: GraphState) -> dict:
             "generation_score": generation_score
         }
 
+    except AccountingRAGError as e:
+        # 도메인 에러: error_logs 기록 + 폴백 반환 (터미널 노드이므로 파이프라인 유지)
+        new_logs = state.error_logs + [e.to_error_log()]
+        return {
+            "final_response": build_unanswerable_response(state.original_query),
+            "error_logs": new_logs,
+        }
     except Exception as e:
-        format_error = LLMResponseFormatError(message=f"답변 생성 중 오류 발생: {e}")
-        new_logs = state.error_logs + [format_error.to_error_log()]
+        # 시스템 에러: 터미널 노드이므로 re-raise 없이 UNKNOWN 로그 적재 + 폴백 반환
+        # TODO: generate -> evaluate, evaluate -> generate 노드 결정 여부에 따라서 해당 설계는 바뀔 가능성 존재
+        logger.error(f"[{type(e).__name__}] generate_response 노드 시스템 에러: {e}", exc_info=True)
+        error_log = {
+            "node": "generate",
+            "error_type": "UNKNOWN",
+            "message": f"[{type(e).__name__}] {str(e)}",
+        }
+        new_logs = state.error_logs + [error_log]
         return {
             "final_response": build_unanswerable_response(state.original_query),
             "error_logs": new_logs,
