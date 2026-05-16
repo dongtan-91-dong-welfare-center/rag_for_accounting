@@ -1,4 +1,14 @@
 import logging
+from datetime import datetime
+from src.utils.config import KST
+
+
+class _KSTFormatter(logging.Formatter):
+    """%(asctime)s를 한국 표준시(KST, UTC+9)로 출력하는 포매터"""
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=KST)
+        return dt.strftime(datefmt) if datefmt else dt.isoformat(timespec="seconds")
+
 
 def get_logger(name: str) -> logging.Logger:
     """표준 로거 반환. 핸들러가 없으면 StreamHandler를 자동 추가"""
@@ -7,7 +17,7 @@ def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter(
+        handler.setFormatter(_KSTFormatter(
             "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
         ))
         logger.addHandler(handler)
