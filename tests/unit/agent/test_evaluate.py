@@ -17,6 +17,7 @@ from src.models.schemas import (
 )
 from src.models.state import GraphState
 from src.utils.config import RERANK_THRESHOLD
+from src.utils.exception import EvaluationParsingError
 from src.agent.nodes.evaluate import (
     evaluate_context,
     check_relevance,
@@ -250,3 +251,26 @@ class TestEvaluateContext:
         assert eval_result.needs_external is False  # 추론 불필요, ALL 필터 적용
         assert eval_result.confidence == 0.85   # LLM 응답 유지
         assert "error_logs" not in result   # 에러 없음
+
+    def test_llm_parsing_failure_returns_conservative_fallback(self):
+        """EvaluationParsingError 발생 시 보수적 폴백이 반환되고 error_logs에 기록되는지 검증
+
+        [EV-301] EvaluationParsingError는 AccountingRAGError 계열이므로 to_error_log()를 통해 구조화된 로그로 변환되어 error_logs에 누적된다.
+        폴백은 is_relevant=False, needs_external=True로 설정되어 CRAG 루프 재진입을 유도한다.
+        """
+        state = GraphState(
+            original_query="리스 회계처리는?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="리스 회계처리...", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_evaluator_agent(error=EvaluationParsingError("JSON 파싱 실패")):
+            result = evaluate_context(state)
+
+        assert result["evaluation"].is_relevant is False    # 보수적 폴백
+        assert result["evaluation"].needs_external is True  # CRAG 루프 재진입 유도
+        assert "error_logs" in result   # error_logs가 존재하는지 확인
+        assert result["error_logs"][0]["error_type"] == "EV-301"    # 에러 타입이 EV-301인지 확인
