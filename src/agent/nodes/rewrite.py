@@ -4,7 +4,7 @@ from src.models.state import GraphState
 
 def rewrite_query(state: GraphState) -> GraphState:
     """
-    GraphState.query를 REWRITE_PROMPT + GPT-4o-mini로 재작성한다.
+    GraphState.query를 REWRITE_PROMPT + GPT-5.4-mini로 재작성한다.
     - rewrite_count가 MAX_REWRITE_COUNT 초과 시 원본 질의 그대로 반환
     - 결과를 state.rewritten_query에 저장
     """

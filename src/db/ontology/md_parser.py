@@ -81,13 +81,14 @@ def parse_markdown(
     subsection_occurrence: dict[str, int] = {}  # base_id → 등장 횟수. 재등장 시 suffix(-2, -3)로 id 구분.
     heading_ref_targets: list[str] = []  # 현재 H3 헤딩 어노테이션에서 추출한 참조 원문
     heading_ref_source: str = ""         # 어노테이션이 포함된 원래 H3 헤딩 텍스트 (source_text 용)
+    current_para_id: str = ""            # H4에서 추출된 현재 문단 번호. 본문 어노테이션 엣지의 paragraph 필드에 사용.
 
     def flush_subsection() -> None:
         # 새 H2·H3 헤딩이 등장할 때마다 호출된다.
         # 루프를 돌면서 content_lines에 쌓아둔 줄들을 current_subsection.content로 확정하고
         # graph에 노드·엣지를 추가한 뒤, 두 변수를 초기화해 다음 소절을 받을 준비를 한다.
         # content도 paragraphs도 없는 빈 소절은 graph에 추가하지 않고 버린다.
-        nonlocal current_subsection  # = None 재할당이 바깥 변수에 반영되려면 nonlocal 필요 (.clear()는 뮤테이션이라 불필요)
+        nonlocal current_subsection, current_para_id  # = None/'' 재할당이 바깥 변수에 반영되려면 nonlocal 필요
         if current_subsection is None:              # H3 없이 H2가 연속으로 나오는 경우 등 flush할 소절이 없을 때 가드
             return
         content = '\n'.join(content_lines).strip()
@@ -111,6 +112,7 @@ def parse_markdown(
                     unresolved_target=ref,
                 ))
         current_subsection = None
+        current_para_id = ""
         content_lines.clear()
         heading_ref_targets.clear()
 
@@ -203,6 +205,8 @@ def parse_markdown(
         if stripped.startswith('####'):
             heading_text = re.sub(r'^#{4,6}\s*', '', stripped)
             para_id = _extract_para_id(heading_text)
+            if para_id:
+                current_para_id = para_id
             # 헤딩 끝의 "(문단 X.X)" 어노테이션 추출 → 즉시 REFERENCES 엣지 생성
             m_annot = _PARA_ANNOT_RE.search(heading_text)
             if m_annot:
@@ -216,6 +220,7 @@ def parse_markdown(
                             edge_type="REFERENCES",
                             source_text=heading_text,
                             unresolved_target=f"문단 {r}",
+                            paragraph=para_id or "",
                         ))
                 line = re.sub(r'\s*\(문단\s*[^)]+\)', '', line)
             if current_subsection is not None:
@@ -240,6 +245,7 @@ def parse_markdown(
                         edge_type="REFERENCES",
                         source_text=stripped,
                         unresolved_target=f"문단 {r}",
+                        paragraph=current_para_id,
                     ))
                 line = re.sub(r'\s*\(문단\s*[^)]+\)', '', line)
             content_lines.append(line)
