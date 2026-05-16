@@ -18,7 +18,7 @@ def test_rerank_normal_behavior(mock_compute, sample_chunks):
     # 점수 모킹: 3번 청크가 가장 높고, 1번 청크가 가장 낮음
     mock_compute.side_effect = [0.2, 0.5, 0.9]
     
-    results = rerank("test query", sample_chunks)
+    results = rerank("영업권 손상차손 인식 기준은?", sample_chunks)
     
     assert len(results) == 3
     # 정렬 확인 (내림차순)
@@ -31,14 +31,14 @@ def test_rerank_normal_behavior(mock_compute, sample_chunks):
 
 def test_rerank_empty_list():
     """빈 리스트 입력 테스트: 빈 리스트가 전달되었을 때 ranked_chunks == [] 확인"""
-    results = rerank("test query", [])
+    results = rerank("영업권 손상차손 인식 기준은?", [])
     assert results == []
 
 @patch('src.retrieval.reranker.compute_relevance_score')
 def test_rerank_single_chunk(mock_compute):
     """단일 청크 입력 테스트: 후보가 1개일 때 모델 추론 없이 즉시 반환하는지 검증"""
     single_chunk = [RetrievedChunk(chunk_id="1", document_id="doc1", content="content", score=0.5, metadata={})]
-    results = rerank("test query", single_chunk)
+    results = rerank("영업권 손상차손 인식 기준은?", single_chunk)
     
     assert len(results) == 1
     assert results[0].rerank_score == 1.0
@@ -50,7 +50,7 @@ def test_rerank_below_threshold(mock_compute, sample_chunks):
     # 모든 점수를 0.5 미만으로 설정
     mock_compute.side_effect = [0.1, 0.2, 0.3]
     
-    results = rerank("test query", sample_chunks)
+    results = rerank("영업권 손상차손 인식 기준은?", sample_chunks)
     
     assert len(results) == 3
     # 정렬 확인 (내림차순)
@@ -61,16 +61,12 @@ def test_rerank_below_threshold(mock_compute, sample_chunks):
 
 @patch('src.retrieval.reranker.compute_relevance_score')
 def test_rerank_exception_handling(mock_compute, sample_chunks):
-    """예외 처리 테스트: 모델 장애 발생 시 RerankFailureError 예외가 상위 노드로 전파되는지 확인
+    """예외 처리 테스트: 모델 장애 발생 시 원본 시스템 예외가 그대로 전파되는지 확인
 
-    NOTE: 단위 테스트 수준에서는 예외 발생 검증만 수행합니다.
-    예외가 전파된 후 error_logs 기록 및 Fallback 처리는 workflow 레벨의
-    handle_node_errors 데코레이터와 route_after_evaluate에서 담당합니다.
+    NOTE: 시스템 예외는 AccountingRAGError로 래핑하지 않고 원본 타입 그대로 전파한다.
+    rerank_chunks() 노드의 except Exception 블록에서 logger.critical 기록 후 파이프라인 중단.
     """
-    from src.utils.exception import RerankFailureError
-
     mock_compute.side_effect = Exception("예상치 못한 에러 발생")
 
-    # 예외가 발생하고 RerankFailureError로 래핑되어 전파됨
-    with pytest.raises(RerankFailureError, match="리랭킹 과정 중 예상치 못한 오류 발생"):
-        rerank("test query", sample_chunks)
+    with pytest.raises(Exception, match="예상치 못한 에러 발생"):
+        rerank("영업권 손상차손 인식 기준은?", sample_chunks)

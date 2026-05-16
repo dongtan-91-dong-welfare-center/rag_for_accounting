@@ -50,6 +50,11 @@ def rerank_chunks(state: GraphState) -> dict:
         # ScoreThresholdError / RerankFailureError → error_logs에 누적 기록 후 진행
         new_logs = state.error_logs + [e.to_error_log()]
         return {"error_logs": new_logs}
+    except Exception as e:
+        # 시스템 예외는 AccountingRAGError로 래핑하지 않고 원본 타입 그대로 전파한다.
+        # rerank_chunks() 노드의 except Exception 블록에서 logger.critical 기록 후 파이프라인 중단
+        logger.critical(f"[{type(e).__name__}] rerank_chunks 노드 치명적 오류: {e}", exc_info=True)
+        raise
 
 
 def rerank(original_query: str, chunks: list[RetrievedChunk]) -> list[RerankingResult]:
@@ -88,13 +93,15 @@ def rerank(original_query: str, chunks: list[RetrievedChunk]) -> list[RerankingR
         # RerankingResult 반환
         return scored_results
 
+    except RerankFailureError:
+        # 상위 노드에서는 RerankFailureError: 리랭킹 과정 중 예상치 못한 오류 발생 : {오류 내용}으로 표시
+        raise
     except Exception as e:
-        # 재실행을 위해 상위 노드로 예외 전파
         # 만약 재시도 후에도 실패하여 Fallback 처리가 필요하다면 호출부에서 담당한다.
-        if isinstance(e, RerankFailureError):
-            # 상위 노드에서는 RerankFailureError: 리랭킹 과정 중 예상치 못한 오류 발생 : {오류 내용}으로 표시
-            raise e
-        raise RerankFailureError(f"리랭킹 과정 중 예상치 못한 오류 발생: {str(e)}")
+        # 시스템 예외는 AccountingRAGError로 래핑하지 않고 원본 타입 그대로 전파한다.
+        # rerank_chunks() 노드의 except Exception 블록에서 logger.critical 기록 후 파이프라인 중단
+        logger.error(f"[{type(e).__name__}] 리랭킹 모델 호출 중 시스템 에러: {e}", exc_info=True)
+        raise
 
 def compute_relevance_score(query: str, content: str) -> float:
     """단일 질의-문서 쌍의 Cross-Encoder 관련도 점수를 반환한다."""
