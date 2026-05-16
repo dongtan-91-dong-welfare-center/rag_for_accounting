@@ -205,11 +205,11 @@ class TestEvaluateContext:
         assert eval_result.needs_external is False  # 추론 불필요, ALL 필터 적용
         assert eval_result.is_relevant is True  # LLM 응답 유지
 
-    def test_llm_parsing_failure_returns_conservative_fallback(self):
+    def test_llm_exception_propagates(self):
         """
-        [Case 3] LLM 응답 파싱 실패 시 보수적 폴백을 반환하고 error_logs에 EV-301을 기록한다.
-        - is_relevant=False, needs_external=True
-        - error_logs에 node="evaluate", error_type="EV-301" 기록
+        [Case 3] Unknown Exception 발생 시 원본 예외가 그대로 전파된다.
+        - 시스템 에러는 AccountingRAGError로 래핑하지 않고 파이프라인을 중단시킨다.
+        - needs_external 의미 정합성 유지: 네트워크 오류 ≠ 외부 참조 필요
         """
         state = GraphState(
             original_query="리스 회계처리는?",
@@ -221,19 +221,8 @@ class TestEvaluateContext:
             ],
         )
         with _mock_evaluator_agent(error=ValueError("올바르지 않은 JSON 응답")):
-            result = evaluate_context(state)
-
-        eval_result = result["evaluation"]
-        assert isinstance(eval_result, EvaluationResult)    # EvaluationResult 타입
-        assert eval_result.is_relevant is False # 보수적 판단
-        assert eval_result.needs_external is True # 외부 참조 필요
-        assert eval_result.confidence == 0.0 # 0으로 설정
-
-        assert "error_logs" in result   # error_logs 키 확인
-        assert len(result["error_logs"]) == 1   # error_logs 개수 확인
-        log = result["error_logs"][0]   # error_logs 내용 확인
-        assert log["node"] == "evaluate"    # 노드 이름 확인
-        assert log["error_type"] == "EV-301"    # 에러 타입 확인
+            with pytest.raises(ValueError):
+                evaluate_context(state)
 
     def test_normal_path_returns_llm_evaluation(self):
         """정상 케이스: LLM이 반환한 EvaluationResult가 그대로 evaluation 필드로 반환된다."""

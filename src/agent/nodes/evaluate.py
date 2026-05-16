@@ -5,7 +5,10 @@ from src.models.state import GraphState
 from src.models.schemas import RerankingResult, EvaluationResult
 from src.agent.prompts import EVALUATION_PROMPT
 from src.utils.config import RERANK_THRESHOLD
-from src.utils.exception import EvaluationParsingError
+from src.utils.exception import AccountingRAGError, EvaluationParsingError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 외부 기준서 참조 지시를 나타내는 신호 문구.
 # reasoning에 다음 중 하나라도 포함되면 standard_filter 값과 무관하게 외부 참조로 판단한다.
@@ -68,12 +71,11 @@ def evaluate_context(state: GraphState) -> dict:
     try:
         result = evaluator_agent.run_sync(prompt)
         eval_result: EvaluationResult = result.output
-    except Exception as e:
-        # EV-301: LLM 응답 파싱 실패 → error_logs 기록 + 보수적 폴백 반환
-        # 데코레이터에 전파하지 않음으로써 evaluation 필드를 보존하고
-        # needs_external=True로 CRAG 루프 재진입 경로를 유지한다.
-        parsing_error = EvaluationParsingError(message=f"LLM 응답 파싱 실패: {e}")
-        new_logs = state.error_logs + [parsing_error.to_error_log()]
+    except AccountingRAGError as e:
+        # 도메인 에러: error_logs 기록 + CRAG 루프 유지용 폴백 반환
+        # TODO: pydantic_ai 파싱 실패(Exception)와 네트워크 오류(CM-002)를 구분하여
+        # 네트워크 오류 시에는 needs_external=True 대신 재시도 횟수 기반 판단 필요
+        new_logs = state.error_logs + [e.to_error_log()]
         fallback = EvaluationResult(
             is_relevant=False,
             needs_external=True,
@@ -81,6 +83,10 @@ def evaluate_context(state: GraphState) -> dict:
             reasoning="EV-301: LLM 응답 파싱 실패로 보수적 폴백 반환"
         )
         return {"evaluation": fallback, "error_logs": new_logs}
+    except Exception as e:
+        # 시스템 에러: 원본 예외 그대로 전파 → LangGraph 파이프라인 중단
+        logger.error(f"[{type(e).__name__}] evaluate_context 노드 시스템 에러: {e}", exc_info=True)
+        raise
 
     # reasoning 후처리: 외부 참조 지시가 감지되면 needs_external을 True로 오버라이드
     if check_external_reference(eval_result, state.standard_filter):
