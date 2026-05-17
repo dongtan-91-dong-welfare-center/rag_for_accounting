@@ -36,6 +36,7 @@ class GraphState(BaseModel):
     # 문서 검색 및 재정렬 관련
     retrieved_chunks:     list[RetrievedChunk]   = []     # [search 노드] DB/벡터 검색된 원본 문서 청크 리스트
     reranked_chunks:      list[RerankingResult]  = []     # [rerank 노드] 쿼리와의 유사도를 기준으로 재정렬 및 필터링된 결과
+    needs_reretrieval:    bool                   = False  # [rerank/search/evaluate 노드] 검색 품질 부족으로 재검색이 필요함을 알리는 범용 신호. True면 route_after_evaluate가 최우선으로 rewrite로 라우팅한다.
 
     # 평가 및 답변 생성 관련
     evaluation:           EvaluationResult | None = None  # [evaluate 노드] 검색된 컨텍스트가 질의에 답하기 충분한지에 대한 LLM 판단
