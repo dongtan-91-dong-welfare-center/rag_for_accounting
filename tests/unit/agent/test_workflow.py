@@ -153,6 +153,44 @@ class TestCRAGLoopPath:
         )
         assert route_after_evaluate(state) == "generate"
 
+    def test_route_after_evaluate_needs_reretrieval_true(self):
+        """rerank가 needs_reretrieval=True를 세팅했고 횟수 미달이면 rewrite로 라우팅"""
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            needs_reretrieval=True,
+            rewrite_count=1,
+        )
+        assert route_after_evaluate(state) == "rewrite" # 라우팅이 rewrite인지 확인
+
+    def test_route_after_evaluate_needs_reretrieval_max_exceeded(self):
+        """needs_reretrieval=True이라도 MAX_REWRITE_COUNT 도달 시 generate로 강제 진입"""
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            needs_reretrieval=True,
+            rewrite_count=MAX_REWRITE_COUNT,
+        )
+        assert route_after_evaluate(state) == "generate" # 라우팅이 generate인지 확인
+
+    def test_route_after_evaluate_prioritizes_needs_reretrieval_over_error(self):
+        """needs_reretrieval=True와 evaluate 에러가 동시에 존재할 때 rewrite로 라우팅
+
+        rerank가 빈 컨텍스트를 evaluate에 넘겨 evaluate 노드 자체 에러를 유발한 시나리오
+        evaluate 안전장치보다 needs_reretrieval(rewrite)이 우선해야 한다.
+        이 테스트가 깨지면 CRAG 루프가 잘못된 답변 생성으로 직행하는 버그가 재발한 것이다.
+        """
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            needs_reretrieval=True,
+            rewrite_count=1,
+            error_logs=[{
+                "timestamp": "2026-05-17T10:00:00+09:00",
+                "node": "evaluate",
+                "error_type": "EV-301",
+                "message": "빈 컨텍스트로 인한 평가 실패",
+            }],
+        )
+        assert route_after_evaluate(state) == "rewrite" # 라우팅이 rewrite인지 확인
+
     def test_recursion_limit_fallback(self, workflow_app, initial_state):
         """rewrite-retrieve 루프가 MAX_REWRITE_COUNT에 도달했을 때 루프를 종료하고 최선의 답변을 반환하는지 검증
 
