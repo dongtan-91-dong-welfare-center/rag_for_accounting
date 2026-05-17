@@ -52,12 +52,27 @@ def rerank_chunks(state: GraphState) -> dict:
             )
 
         logger.info(f"재정렬 완료: {len(results)}개 청크 반환")
-        return {"reranked_chunks": results}
+        return {"reranked_chunks": results, "needs_reretrieval": False}
 
     except AccountingRAGError as e:
-        # ScoreThresholdError / RerankFailureError → error_logs에 누적 기록 후 진행
         new_logs = state.error_logs + [e.to_error_log()]
-        return {"error_logs": new_logs}
+        if isinstance(e, RerankFailureError):
+            # 모델 실패 → 1차 검색 결과 순서 유지하여 fallback 반환, 재검색 신호 없음
+            fallback = [
+                RerankingResult(chunk=c, rerank_score=c.score)
+                for c in state.retrieved_chunks
+            ]
+            return {
+                "reranked_chunks": fallback,
+                "needs_reretrieval": False,
+                "error_logs": new_logs,
+            }
+        # ScoreThresholdError 등: 점수 임계치 미달 → 재검색 신호
+        return {
+            "reranked_chunks": [],
+            "needs_reretrieval": True,
+            "error_logs": new_logs,
+        }
     except Exception as e:
         # 시스템 예외는 AccountingRAGError로 래핑하지 않고 원본 타입 그대로 전파한다.
         # rerank_chunks() 노드의 except Exception 블록에서 logger.critical 기록 후 파이프라인 중단
