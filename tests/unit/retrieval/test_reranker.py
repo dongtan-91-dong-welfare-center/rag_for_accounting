@@ -84,10 +84,12 @@ class TestReranksChunksNode:
 
     @patch('src.retrieval.reranker.rerank')
     def test_rerank_model_failure_records_error_log(self, mock_rerank):
-        """rerank() 함수에서 RerankFailureError 발생 시 error_logs에 기록되는지 검증
+        """RerankFailureError 발생 시: fallback chunks 반환 + needs_reretrieval=False + error_logs 기록
 
         [RR-201] RerankFailureError는 AccountingRAGError 계열이므로 to_error_log()를 통해
-        구조화된 로그로 변환되어 error_logs에 누적된다.
+        구조화된 로그로 변환되어 error_logs에 누적된다. 동시에 1차 검색 결과의 score와 순서를 그대로
+        유지한 fallback RerankingResult 리스트를 반환하여 후속 노드가 빈 컨텍스트로 강등되지 않도록
+        견고성을 확보한다.
         """
         mock_rerank.side_effect = RerankFailureError("Rerank API 실패")
         state = GraphState(
@@ -98,16 +100,26 @@ class TestReranksChunksNode:
 
         result = rerank_chunks(state)
 
+        # error_logs 검증
         assert "error_logs" in result   # error_logs가 존재하는지 확인
         assert len(result["error_logs"]) > 0   # error_logs가 비어있지 않은지 확인
-        assert result["error_logs"][0]["error_type"] == "RR-201"   # 에러 타입이 RR-201인지 확인
+        assert result["error_logs"][-1]["error_type"] == "RR-201"   # 에러 타입이 RR-201인지 확인
+
+        # fallback chunks 검증: 1차 검색 결과 개수/순서/점수 유지
+        assert "reranked_chunks" in result  # reranked_chunks가 존재하는지 확인
+        assert len(result["reranked_chunks"]) == len(state.retrieved_chunks)  # reranked_chunks의 길이가 1차 검색 결과와 같은지 확인
+        assert result["reranked_chunks"][0].chunk.chunk_id == "1"  # 1번 청크가 가장 높음
+        assert result["reranked_chunks"][0].rerank_score == 0.5     # retrieved score 유지
+
+        # needs_reretrieval 검증: fallback이 존재하므로 재검색은 불필요
+        assert result["needs_reretrieval"] is False
 
     @patch('src.retrieval.reranker.rerank')
     def test_empty_results_after_rerank_records_error_log(self, mock_rerank):
-        """rerank() 함수가 빈 결과를 반환할 때 ScoreThresholdError가 error_logs에 기록되는지 검증
+        """rerank가 빈 결과를 반환 시: reranked_chunks=[] + needs_reretrieval=True + RR-202 기록
 
-        [RR-202] 빈 결과는 ScoreThresholdError로 처리되어 error_logs에 누적된다.
-        reranked_chunks는 갱신되지 않고 후속 노드가 빈 컨텍스트 폴백 경로로 처리한다.
+        빈 결과는 ScoreThresholdError로 처리되어 error_logs에 누적되고, needs_reretrieval=True 신호가
+        발신되어 후속 라우팅(route_after_evaluate)이 CRAG 루프(rewrite)로 진입하도록 한다.
         """
         mock_rerank.return_value = []
         state = GraphState(
@@ -120,14 +132,19 @@ class TestReranksChunksNode:
 
         assert "error_logs" in result   # error_logs가 존재하는지 확인
         assert len(result["error_logs"]) > 0   # error_logs가 비어있지 않은지 확인
-        assert result["error_logs"][0]["error_type"] == "RR-202"   # 에러 타입이 RR-202인지 확인
+        assert result["error_logs"][-1]["error_type"] == "RR-202"   # 에러 타입이 RR-202인지 확인
+
+        # reranked_chunks는 빈 리스트, 재검색 신호 활성화
+        assert result["reranked_chunks"] == []   # reranked_chunks가 빈 리스트인지 확인
+        assert result["needs_reretrieval"] is True   # needs_reretrieval이 True인지 확인
 
     @patch('src.retrieval.reranker.compute_relevance_score')
     def test_rerank_all_scores_below_threshold(self, mock_compute):
-        """모든 rerank 점수가 임계값 미만일 때 ScoreThresholdError가 error_logs에 기록되는지 검증
+        """모든 rerank 점수가 임계값 미만: needs_reretrieval=True + reranked_chunks=[] + RR-202
 
-        [RR-202] max_score < RERANK_THRESHOLD 조건 충족 시 ScoreThresholdError를 발생시키고
-        to_error_log()를 통해 error_logs에 누적한다.
+        max_score < RERANK_THRESHOLD 조건 충족 시 ScoreThresholdError를 발생시키고
+        to_error_log()를 통해 error_logs에 누적한다. 동시에 needs_reretrieval=True 신호를 발신하여
+        라우팅이 rewrite 노드로 재진입하도록 한다.
 
         NOTE: rerank()는 청크가 1개면 compute_relevance_score를 호출하지 않고 1.0을 반환한다.
         2개 이상의 청크가 있어야 compute_relevance_score가 실제로 호출된다.
@@ -144,6 +161,30 @@ class TestReranksChunksNode:
 
         result = rerank_chunks(state)
 
-        assert "error_logs" in result   # error_logs가 존재하는지 확인
+        assert "error_logs" in result   # error_logs가 존재하는지 확안
         assert len(result["error_logs"]) > 0   # error_logs가 비어있지 않은지 확인
-        assert result["error_logs"][0]["error_type"] == "RR-202"   # 에러 타입이 RR-202인지 확인
+        assert result["error_logs"][-1]["error_type"] == "RR-202"   # 에러 타입이 RR-202인지 확인
+
+        # 저점수 케이스 → 재검색 신호 활성화
+        assert result["reranked_chunks"] == []   # reranked_chunks가 빈 리스트인지 확인
+        assert result["needs_reretrieval"] is True   # needs_reretrieval이 True인지 확인
+
+    @patch('src.retrieval.reranker.compute_relevance_score')
+    def test_success_path_sets_needs_reretrieval_false(self, mock_compute, sample_chunks):
+        """정상 경로: 임계치 통과 시 needs_reretrieval=False가 반환 dict에 명시되는지 검증
+
+        rerank_chunks의 모든 반환 경로에서 needs_reretrieval이 명시되도록 한 설계를 고정한다.
+        """
+        mock_compute.return_value = 0.9   # RERANK_THRESHOLD(0.5) 이상
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            retrieved_chunks=sample_chunks,
+            error_logs=[]
+        )
+
+        result = rerank_chunks(state)
+
+        assert "reranked_chunks" in result  # reranked_chunks가 존재하는지 확안
+        assert len(result["reranked_chunks"]) == len(sample_chunks)  # reranked_chunks의 길이가 1차 검색 결과와 같은지 확인
+        assert "needs_reretrieval" in result  # needs_reretrieval이 존재하는지 확안
+        assert result["needs_reretrieval"] is False  # needs_reretrieval이 False인지 확안
