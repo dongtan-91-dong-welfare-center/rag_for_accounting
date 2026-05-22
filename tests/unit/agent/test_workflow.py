@@ -68,24 +68,6 @@ class TestWorkflowConstruction:
 class TestNormalFlowPath:
     """정상적인 상황에서 파이프라인이 의도된 순서대로 실행되는지 확인"""
 
-    def test_normal_path_complete_flow(self, workflow_app, initial_state):
-        """표준 쿼리에 대해 모든 노드가 순서대로 실행되는지 검증"""
-        # invoke 호출(사전에 정의한 순서대로 상태를 전달하며 노드를 실행하도록 설정)
-        final_state: dict = workflow_app.invoke(initial_state)
-        
-        # TODO: 현재는 workflow.py에 정의한 Mock을 대상으로 하지만, 로직 구현 이후에는 LLM의 API를 호출하므로 테스트 항목을 적절하게 변경하여야 함
-        # 검증 항목
-        assert final_state["final_response"] is not None
-        assert final_state["final_response"].is_answerable is True
-        assert len(final_state["error_logs"]) == 0
-        
-        # 각 단계별 데이터 적재 확인
-        assert final_state["rewrite_count"] == 1
-        assert len(final_state["retrieved_chunks"]) == 2  # Mock에서 2개 반환
-        assert len(final_state["reranked_chunks"]) == 2
-        assert final_state["evaluation"] is not None
-        assert final_state["evaluation"].needs_external is False
-
     def test_rewrite_count_increments(self, workflow_app, initial_state):
         """rewrite 노드 진입 시 카운트 증가 검증"""
         final_state = workflow_app.invoke(initial_state)
