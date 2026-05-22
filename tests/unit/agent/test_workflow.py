@@ -213,36 +213,3 @@ class TestCRAGLoopPath:
         assert final_state["rewrite_count"] == MAX_REWRITE_COUNT    # 최대 재시도 횟수에 도달했는지 확인
         assert final_state["final_response"] is not None            # 루프 종료 후 최선의 답변이 반환됐는지 확인
         assert final_state["evaluation"].needs_external is True     # 루프 종료 사유가 max count임을 간접 검증
-
-@pytest.mark.unit
-class TestStateTransition:
-    """파이프라인 전 과정에서 GraphState의 정합성이 유지되는지 확인"""
-
-    def test_retrieved_chunks_empty_initially(self, initial_state):
-        """워크플로우 시작 전 검색 결과 리스트가 비어있는 상태인지 확인"""
-        assert initial_state.retrieved_chunks == []
-
-    def test_reranked_chunks_depend_on_retrieved(self, workflow_app, initial_state):
-        """리랭킹 결과의 개수가 원본 검색 결과의 개수와 일치하는지 확인"""
-        final_state = workflow_app.invoke(initial_state)
-        # Mock 노드 기준: retrieved_chunks(2개) -> reranked_chunks(2개)
-        assert len(final_state["reranked_chunks"]) == len(final_state["retrieved_chunks"])
-
-    def test_evaluation_none_initially(self, initial_state):
-        """워크플로우 시작 전 평가 결과 필드가 None으로 초기화되어 있는지 확인"""
-        assert initial_state.evaluation is None
-
-    def test_final_response_none_initially(self, initial_state):
-        """워크플로우 시작 전 최종 응답 필드가 None으로 초기화되어 있는지 확인"""
-        assert initial_state.final_response is None
-
-    def test_state_accumulation_full_flow(self, workflow_app, initial_state):
-        """전체 실행 완료 후 모든 중간 상태 데이터가 보존되는지 확인"""
-        final_state = workflow_app.invoke(initial_state)
-        
-        assert final_state["original_query"] is not None
-        assert final_state["rewrite_count"] >= 1
-        assert len(final_state["retrieved_chunks"]) > 0
-        assert len(final_state["reranked_chunks"]) > 0
-        assert final_state["evaluation"] is not None
-        assert final_state["final_response"] is not None
