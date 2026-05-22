@@ -181,6 +181,16 @@ class TestCRAGLoopPath:
         )
         assert route_after_evaluate(state) == "rewrite" # 라우팅이 rewrite인지 확인
 
+    def test_route_after_evaluate_with_none_evaluation(self):
+        """evaluation=None 엣지 케이스에서 에러 없이 generate를 반환하는지 검증
+        (needs_reretrieval=False, error_logs=[], evaluation=None 조합)"""
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            evaluation=None,
+            rewrite_count=1,
+        )
+        assert route_after_evaluate(state) == "generate"    # generate로 라우팅되어야 함
+
     def test_recursion_limit_fallback(self, workflow_app, initial_state):
         """rewrite-retrieve 루프가 MAX_REWRITE_COUNT에 도달했을 때 루프를 종료하고 최선의 답변을 반환하는지 검증
 
