@@ -36,15 +36,23 @@ class TestWorkflowConstruction:
             assert node in nodes
 
     def test_workflow_has_edges(self, workflow_app):
-        """START 및 END 엣지의 존재 및 연결 검증"""
+        """직렬 엣지 및 조건부 라우팅 엣지 존재 및 연결 검증"""
         graph = workflow_app.get_graph()
         edges = [(edge.source, edge.target) for edge in graph.edges]
-        
-        # 현재 node와 edge를 확실하게 정의하지 않았으므로 시작과 종료에 대해서만 검증합니다.
-        # START 엣지 확인 (__start__ -> rewrite)
-        assert any(src == "__start__" and tgt == "rewrite" for src, tgt in edges)
-        # END 엣지 확인 (generate -> __end__)
-        assert any(src == "generate" and tgt == "__end__" for src, tgt in edges)
+        conditional_edges = [(edge.source, edge.target) for edge in graph.edges if edge.conditional]
+
+        # START/END 엣지 확인
+        assert ("__start__", "rewrite") in edges
+        assert ("generate", "__end__") in edges
+
+        # 직렬 엣지 확인
+        assert ("rewrite", "search") in edges
+        assert ("search", "rerank") in edges
+        assert ("rerank", "evaluate") in edges
+
+        # 조건부 라우팅 엣지 확인 (evaluate → rewrite, evaluate → generate)
+        assert ("evaluate", "rewrite") in conditional_edges
+        assert ("evaluate", "generate") in conditional_edges
 
     def test_workflow_initial_state_structure(self, initial_state):
         """초기 GraphState 구조 및 기본값 검증"""
