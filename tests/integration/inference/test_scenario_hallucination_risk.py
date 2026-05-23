@@ -12,43 +12,9 @@ CRAG 루프의 라우팅과 상태 진화가 올바르게 동작하고, 무한 �
 import pytest
 from unittest.mock import patch, call
 from src.models.state import GraphState
-from src.models.schemas import (
-    RetrievedChunk, RerankingResult, EvaluationResult,
-    FinalResponse, Citation
-)
 from src.utils.exception import EvaluationParsingError, SearchTimeoutError
 from src.utils.config import MAX_REWRITE_COUNT
-
-# ── Mock 데이터 팩토리 ──
-
-def make_retrieved_chunks(n: int = 2) -> list[RetrievedChunk]:
-    """검색 결과 청크 n개 생성"""
-    return [
-        RetrievedChunk(
-            chunk_id=f"chunk-{i}", document_id=f"DOC-{i:03d}",
-            content=f"기준서 내용 {i}", score=0.9 - i * 0.05, metadata={}
-        )
-        for i in range(n)
-    ]
-
-
-def make_reranked_results(chunks: list[RetrievedChunk]) -> list[RerankingResult]:
-    """검색 청크를 리랭킹 결과로 변환"""
-    return [RerankingResult(chunk=c, rerank_score=0.95 - i * 0.05)
-            for i, c in enumerate(chunks)]
-
-
-def make_eval_result(*, needs_external: bool, confidence: float = 0.9) -> dict:
-    """evaluate 노드의 Mock 반환값 생성"""
-    return {
-        "evaluation": EvaluationResult(
-            is_relevant=not needs_external,
-            needs_external=needs_external,
-            confidence=confidence,
-            reasoning="추가 검색 필요" if needs_external else "검색 결과 충분"
-        )
-    }
-
+from tests.integration.inference.helpers import make_retrieved_chunks, make_reranked_results, make_eval_result
 
 # ── CRAG 루프 라우팅 검증 ──
 

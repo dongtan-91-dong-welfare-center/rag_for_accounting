@@ -13,27 +13,9 @@
 import pytest
 from unittest.mock import patch
 from src.models.state import GraphState
-from src.models.schemas import (
-    RetrievedChunk, RerankingResult, EvaluationResult,
-    FinalResponse
-)
+from src.models.schemas import RerankingResult, EvaluationResult
 from src.utils.exception import ScoreThresholdError, SearchTimeoutError
-
-# ── Mock 데이터 팩토리 ──
-
-def make_retrieved_chunks(scores: list[float]) -> list[RetrievedChunk]:
-    """주어진 점수 목록으로 검색 결과 청크를 생성"""
-    return [
-        RetrievedChunk(
-            chunk_id=f"chunk-{i}",
-            document_id=f"DOC-{i:03d}",
-            content=f"검색 결과 내용 {i}",
-            score=score,
-            metadata={}
-        )
-        for i, score in enumerate(scores)
-    ]
-
+from tests.integration.inference.helpers import make_retrieved_chunks
 
 # ── 검색 결과 부재/미달 시 Fail-Fast 검증 ──
 

@@ -12,34 +12,8 @@
 import pytest
 from unittest.mock import patch
 from src.models.state import GraphState
-from src.models.schemas import (
-    RetrievedChunk, RerankingResult, EvaluationResult,
-    FinalResponse, Citation
-)
-
-# ── Mock 데이터 팩토리 ──
-
-def make_retrieved_chunks(scores: list[float]) -> list[RetrievedChunk]:
-    """주어진 점수 목록으로 검색 결과 청크를 생성"""
-    return [
-        RetrievedChunk(
-            chunk_id=f"chunk-{i}",
-            document_id=f"DOC-{i:03d}",
-            content=f"K-GAAP 기준서 제{i+1}장 관련 내용입니다.",
-            score=score,
-            metadata={"standard": "K-GAAP", "chapter": f"제{i+1}장"}
-        )
-        for i, score in enumerate(scores)
-    ]
-
-
-def make_reranked_results(chunks: list[RetrievedChunk], rerank_scores: list[float]) -> list[RerankingResult]:
-    """검색 청크를 리랭킹 결과로 변환"""
-    return [
-        RerankingResult(chunk=chunk, rerank_score=score)
-        for chunk, score in zip(chunks, rerank_scores)
-    ]
-
+from src.models.schemas import EvaluationResult, FinalResponse, Citation
+from tests.integration.inference.helpers import make_reranked_results, make_retrieved_chunks
 
 # ── 전체 파이프라인 정상 흐름 ──
 
