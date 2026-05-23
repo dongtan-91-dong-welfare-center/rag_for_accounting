@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from src.models.schemas import LLMInternalResponse, EvaluationResult
+from src.models.schemas import LLMInternalResponse, EvaluationResult, RetrievedChunk
 
 # 단위 테스트 전용 환경 및 Mock 설정
 # DB 연결, 외부 API(OpenAI 등) 호출 없이 빠르고 독립적으로 실행되도록 구성
@@ -55,3 +55,12 @@ def mock_llm_agent():
     with patch("src.agent.nodes.generate.Agent", return_value=generate_mock_instance), \
          patch("src.agent.nodes.evaluate.Agent", return_value=evaluate_mock_instance):
         yield   # 패치가 적용된 mock 객체를 yield 하여 다른 테스트에서 사용할 수 있도록 한다.
+
+
+@pytest.fixture
+def sample_chunks():
+    return [
+        RetrievedChunk(chunk_id="1", document_id="doc1", content="First content", score=0.5, metadata={}),
+        RetrievedChunk(chunk_id="2", document_id="doc2", content="Second content", score=0.6, metadata={}),
+        RetrievedChunk(chunk_id="3", document_id="doc3", content="Third content", score=0.7, metadata={})
+    ]
