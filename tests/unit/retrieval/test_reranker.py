@@ -6,16 +6,6 @@ from src.models.state import GraphState
 from src.utils.exception import RerankFailureError, ScoreThresholdError
 
 
-# 추후 더미데이터를 위한 별도 json 파일 만들어서 관리하는 것을 고려해봐야 함
-@pytest.fixture
-def sample_chunks():
-    return [
-        RetrievedChunk(chunk_id="1", document_id="doc1", content="First content", score=0.5, metadata={}),
-        RetrievedChunk(chunk_id="2", document_id="doc2", content="Second content", score=0.6, metadata={}),
-        RetrievedChunk(chunk_id="3", document_id="doc3", content="Third content", score=0.7, metadata={})
-    ]
-
-
 @pytest.mark.unit
 class TestRerank:
     """rerank() 헬퍼 함수 단위 테스트"""
