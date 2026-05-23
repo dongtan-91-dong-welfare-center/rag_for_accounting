@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import patch
 from src.models.state import GraphState
 from src.models.schemas import RerankingResult, EvaluationResult
-from src.utils.exception import ScoreThresholdError, SearchTimeoutError
+from src.utils.exception import RerankFailureError, ScoreThresholdError, SearchTimeoutError
 from tests.integration.inference.helpers import make_retrieved_chunks
 
 # ── 검색 결과 부재/미달 시 Fail-Fast 검증 ──
@@ -138,3 +138,46 @@ class TestScenarioNoContext:
         response = final_state["final_response"]
         assert response is not None
         assert response.is_answerable is False
+
+    def test_rerank_failure_fallback_preserves_retrieved_chunks(self, mocked_app):
+        """
+        RerankFailureError(RR-201) 발생 시 retrieved_chunks 순서·점수 유지 fallback으로
+        evaluate·generate가 정상 진행되고 retrieval_score가 fallback 점수의 평균으로 계산되는지 검증.
+
+        RR-201(fallback → 정상 답변)과 RR-202(빈 컨텍스트 → 답변 불가)의 경로 구분 검증.
+        """
+        search_scores = [0.9, 0.85]
+        chunks = make_retrieved_chunks(search_scores)
+
+        with (
+            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
+            patch("src.retrieval.reranker.rerank", side_effect=RerankFailureError("리랭킹 모델 호출 실패")),
+            patch("src.agent.workflow.evaluate_context", return_value={
+                "evaluation": EvaluationResult(
+                    is_relevant=True, needs_external=False,
+                    confidence=0.9, reasoning="폴백 청크 기반 평가 충분"
+                )
+            }),
+        ):
+            state = GraphState(original_query="RR-201 fallback 경로 통합 검증", standard_filter="ALL")
+            final_state = mocked_app.invoke(state)
+
+        # RR-201 에러 로그 기록
+        assert any(
+            log["node"] == "rerank" and log["error_type"] == "RR-201"
+            for log in final_state["error_logs"]
+        )
+
+        # fallback: retrieved_chunks 순서 및 원본 점수 유지
+        assert len(final_state["reranked_chunks"]) == len(chunks)
+        for original_chunk, fallback_result in zip(chunks, final_state["reranked_chunks"]):
+            assert fallback_result.chunk.chunk_id == original_chunk.chunk_id    # chunk_id 비교
+            assert fallback_result.rerank_score == pytest.approx(original_chunk.score)
+
+        # RR-201은 RR-202(빈 컨텍스트)와 달리 정상 답변 생성
+        assert final_state["final_response"] is not None    # 정상적으로 답변이 생성됨
+        assert final_state["final_response"].is_answerable is True  # 답변 가능함
+
+        # retrieval_score = fallback rerank_score(= 원본 chunk.score)의 산술 평균
+        expected_retrieval_score = sum(search_scores) / len(search_scores)
+        assert final_state["retrieval_score"] == pytest.approx(expected_retrieval_score)    # approx: 부동 소수점 오차 허용
