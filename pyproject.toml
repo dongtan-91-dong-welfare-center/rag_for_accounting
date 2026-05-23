@@ -30,3 +30,9 @@ markers = [
     "system: 시스템 통합 테스트 — 가짜 데이터 기반 예외 경로/데이터 규격 검증 (Phase 1: Fast Fail)",
     "benchmark: 비즈니스 통합 테스트 — Benchmark 정답셋 기반 답변 품질 검증 (Phase 2: Quality)",
 ]
+
+[tool.pyright]
+include = ["src"]
+executionEnvironments = [
+  { root = "src" }
+]
