@@ -12,7 +12,7 @@ CRAG 루프의 라우팅과 상태 진화가 올바르게 동작하고, 무한 �
 import pytest
 from unittest.mock import patch, call
 from src.models.state import GraphState
-from src.utils.exception import EvaluationParsingError, SearchTimeoutError
+from src.utils.exception import EvaluationParsingError, SearchTimeoutError, ScoreThresholdError
 from src.utils.config import MAX_REWRITE_COUNT
 from tests.integration.inference.helpers import make_retrieved_chunks, make_reranked_results, make_eval_result
 
@@ -146,3 +146,55 @@ class TestScenarioHallucinationRisk:
 
         # 에러에도 불구하고 최종 답변이 생성
         assert final_state["final_response"] is not None
+
+    def test_needs_reretrieval_priority_over_evaluate_error(self, mocked_app):
+        """
+        needs_reretrieval=True가 evaluate 에러보다 우선하여
+        rewrite 루프를 MAX_REWRITE_COUNT까지 반복한 후 build_unanswerable_response를 반환하는지 검증
+
+        시나리오:
+          - rerank: ScoreThresholdError 동작 모사 → needs_reretrieval=True, reranked_chunks=[]
+          - evaluate: 빈 컨텍스트 전달로 EvaluationParsingError 발생
+
+        needs_reretrieval이 적절하지 않은 경우: 첫 번째 evaluate 에러에서 즉시 generate → rewrite_count=1
+        needs_reretrieval이 적절한 경우: MAX_REWRITE_COUNT까지 rewrite 반복 → rewrite_count=MAX
+        """
+        from src.agent.workflow import handle_node_errors
+
+        chunks = make_retrieved_chunks()
+
+        def mock_rerank_score_error(state):
+            e = ScoreThresholdError("리랭킹 임계값 미달")
+            new_logs = state.error_logs + [e.to_error_log()]
+            return {"reranked_chunks": [], "needs_reretrieval": True, "error_logs": new_logs}
+
+        def raise_eval_error(state):
+            raise EvaluationParsingError("빈 컨텍스트로 평가 불가")
+
+        decorated_evaluate = handle_node_errors("evaluate")(raise_eval_error)
+
+        with (
+            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
+            patch("src.agent.workflow.rerank_chunks", side_effect=mock_rerank_score_error),
+            patch("src.agent.workflow.evaluate_context", side_effect=decorated_evaluate),
+        ):
+            state = GraphState(original_query="needs_reretrieval 우선순위 통합 검증", standard_filter="ALL")
+            final_state = mocked_app.invoke(state)
+
+        # needs_reretrieval이 evaluate 에러보다 우선하므로 MAX까지 rewrite 반복
+        assert final_state["rewrite_count"] == MAX_REWRITE_COUNT, (
+            f"needs_reretrieval이 evaluate 에러보다 우선되어 "
+            f"rewrite_count={MAX_REWRITE_COUNT}에 도달해야 합니다. "
+            f"실제={final_state['rewrite_count']}"
+        )
+
+        # MAX 도달 후 빈 reranked_chunks로 generate 진입 → build_unanswerable_response 호출
+        assert final_state["final_response"] is not None
+        assert final_state["final_response"].is_answerable is False
+        assert "제공된 회계기준 문서에서" in final_state["final_response"].answer   # generate.py에 정의된 fallback 메시지
+
+        # evaluate 에러(EV-301)가 error_logs에 기록됨
+        assert any(
+            log["node"] == "evaluate" and log["error_type"] == "EV-301"
+            for log in final_state["error_logs"]
+        )
