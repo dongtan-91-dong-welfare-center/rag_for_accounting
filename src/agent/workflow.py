@@ -3,16 +3,22 @@
 from datetime import datetime
 from functools import wraps
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.state import CompiledStateGraph
 from src.agent.nodes.generate import generate_response
 from src.agent.nodes.evaluate import evaluate_context
-from src.retrieval.reranker import rerank_chunks
-from src.utils.config import MAX_REWRITE_COUNT, KST
-from src.utils.exception import AccountingRAGError
+from src.retrieval.reranker import rerank
+from src.utils import config
+from src.utils.config import MAX_REWRITE_COUNT, KST, RERANK_THRESHOLD
+from src.utils.exception import AccountingRAGError, RerankFailureError, ScoreThresholdError
+from src.utils.logger import get_logger
 from src.models.state import GraphState
 from src.models.schemas import (
     RetrievedChunk, FinalResponse, EvaluationResult,
-    Citation
+    Citation, RerankingResult
 )
+
+logger = get_logger(__name__)
+
 
 def handle_node_errors(node_name: str):
     """
@@ -47,7 +53,7 @@ def rewrite_query(state: GraphState) -> dict:
     """
     TODO: FUNC-004 (질의 재작성 노드) - Mock 구현
     실제 구현 대기 (src/agent/nodes/rewrite.py)
-    
+
     [반환 패턴 설명]
     LangGraph는 노드가 반환한 dict의 키를 State의 필드명과 매칭하여 해당 필드만 증분 업데이트합니다.
     따라서 GraphState 전체를 반환할 필요 없이, 이 노드가 업데이트할 필드(여기서는 rewrite_count)만 반환하면 됩니다.
@@ -63,21 +69,101 @@ def hybrid_search(state: GraphState) -> dict:
     return {
         "retrieved_chunks": [
             RetrievedChunk(
-                chunk_id="1", 
-                document_id="DOC-001", 
-                content="유형자산의 감가상각은...", 
-                score=0.9, 
+                chunk_id="1",
+                document_id="DOC-001",
+                content="유형자산의 감가상각은...",
+                score=0.9,
                 metadata={}
             ),
             RetrievedChunk(
-                chunk_id="2", 
-                document_id="DOC-002", 
-                content="전환사채를 투자목적으로...", 
-                score=0.8, 
+                chunk_id="2",
+                document_id="DOC-002",
+                content="전환사채를 투자목적으로...",
+                score=0.8,
                 metadata={}
             ),
         ]
     }
+
+
+def rerank_chunks(state: GraphState) -> dict:
+    """
+    워크플로우 노드: USE_RERANKER 활성화 여부에 따라 재정렬 모델 호출 여부를 결정한다.
+
+    동작:
+        - USE_RERANKER=false: 모델 호출 없이 retrieved_chunks를 score=1.0으로 래핑하여 반환
+        - USE_RERANKER=true: rerank() 유틸리티 호출 → 임계값 필터링 → 예외 처리
+          - ScoreThresholdError: needs_reretrieval=True + reranked_chunks=[]
+          - RerankFailureError: needs_reretrieval=False + fallback(1차 검색 결과 순서 유지)
+    """
+    # 활성화 여부 확인 (조기 반환 - 모델 호출 없음)
+    if not config.USE_RERANKER:
+        logger.info("USE_RERANKER=false: 모델 호출 스킵, 1차 검색 결과 반환")
+        fallback = [RerankingResult(chunk=c, rerank_score=1.0)
+                    for c in state.retrieved_chunks]
+        return {
+            "reranked_chunks": fallback,
+            "needs_reretrieval": False,
+            "error_logs": state.error_logs,
+        }
+
+    logger.info(
+        f"재정렬 수행: {len(state.retrieved_chunks)}개 청크, "
+        f"질의: {state.original_query[:50]}..."
+    )
+
+    # TODO: search 노드 구현 후 search-rerank 간 관계 재정의 후에 처리 방식을 명확하게 결정해야 함
+    # 현재는 retrieved_chunks가 비어있을 때 조기 반환하여 ScoreThresholdError를 발생시키지 않는다.
+    # 이는 search 노드 실패(빈 결과)와 리랭킹 자체 실패를 구분하기 위함이다.
+    if not state.retrieved_chunks:
+        return {"reranked_chunks": []}
+
+    # rerank() 유틸리티 함수 호출 (실제 모델 추론)
+    try:
+        results = rerank(state.original_query, state.retrieved_chunks)
+
+        if not results:
+            logger.warning("재정렬 후 유효한 청크가 없습니다.")
+            raise ScoreThresholdError("재정렬 후 유효한 청크가 없습니다.")
+
+        # rerank()가 내림차순 정렬을 보장하므로 0번째가 최고 점수
+        max_score = results[0].rerank_score
+        if max_score < RERANK_THRESHOLD:
+            logger.warning(
+                f"재정렬 점수 임계값 미달: 최고점={max_score}, "
+                f"임계값={RERANK_THRESHOLD}"
+            )
+            raise ScoreThresholdError(
+                f"최고 관련도({max_score})가 임계값({RERANK_THRESHOLD})에 미달합니다."
+            )
+
+        logger.info(f"재정렬 완료: {len(results)}개 청크 반환")
+        return {"reranked_chunks": results, "needs_reretrieval": False}
+
+    except AccountingRAGError as e:
+        new_logs = state.error_logs + [e.to_error_log()]
+        if isinstance(e, RerankFailureError):
+            # 모델 실패 → 1차 검색 결과 순서 유지하여 fallback 반환, 재검색 신호 없음
+            fallback = [
+                RerankingResult(chunk=c, rerank_score=c.score)
+                for c in state.retrieved_chunks
+            ]
+            return {
+                "reranked_chunks": fallback,
+                "needs_reretrieval": False,
+                "error_logs": new_logs,
+            }
+        # ScoreThresholdError 등: 점수 임계치 미달 → 재검색 신호
+        return {
+            "reranked_chunks": [],
+            "needs_reretrieval": True,
+            "error_logs": new_logs,
+        }
+    except Exception as e:
+        # 시스템 예외는 AccountingRAGError로 래핑하지 않고 원본 타입 그대로 전파한다.
+        logger.critical(f"[{type(e).__name__}] rerank_chunks 노드 치명적 오류: {e}", exc_info=True)
+        raise
+
 
 def route_after_evaluate(state: GraphState) -> str:
     """
@@ -116,13 +202,18 @@ def route_after_evaluate(state: GraphState) -> str:
     # 검색된 컨텍스트가 충분히 유효하거나(needs_external=False), 이미 최대 재시도 횟수를 소진했다면 답변을 생성합니다.
     return "generate"
 
-def build_workflow() -> StateGraph:
+def build_workflow() -> CompiledStateGraph:
     """
     LangGraph StateGraph를 구성하고 컴파일하여 반환합니다.
 
     노드 등록 및 조건부 엣지를 정의하여 StateGraph를 반환한다.
     실행 순서: rewrite_query → hybrid_search → rerank → evaluate_context → generate_response
     evaluate_context 이후 route_after_evaluate로 분기 처리.
+
+    return CompiledStateGraph : LangGraph로 빌드된 상태 그래프
+    왜 CompiledGraph를 사용하는가? -> StateGraph보다 성능이 좋다. (동작 방식은 동일하지만 내부적으로 최적화됨)
+    동작 방식이 어떠한데? -> LangGraph의 build_workflow를 통해 StateGraph를 컴파일하면 CompiledStateGraph 객체가 반환된다.
+    이 객체는 내부적으로 최적화되어 StateGraph보다 빠른 실행 속도를 제공한다. 
     """
     workflow = StateGraph(GraphState)
 
