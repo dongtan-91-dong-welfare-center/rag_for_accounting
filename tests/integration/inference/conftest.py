@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from src.models.schemas import LLMInternalResponse
+from src.agent.workflow import build_workflow
 
 @pytest.fixture(autouse=True)
 def mock_llm_agent():
@@ -24,3 +25,17 @@ def mock_llm_agent():
 
     with patch("src.agent.nodes.generate.Agent", return_value=mock_instance):
         yield   # 테스트가 실행되는 동안에만 패치 상태를 유지하고 테스트가 끝나면 자동으로 원상복구
+
+
+@pytest.fixture
+def mocked_app():
+    """
+    테스트마다 새로운 그래프 객체를 생성하는 Fixture
+    각 테스트 함수의 patch가 적용된 상태에서 build_workflow가 호출되도록 보장하기 위해
+    호출 시점에 지연 빌드를 수행하는 프록시 객체를 반환합니다.
+    """
+    class LazyAppProxy:
+        def __getattr__(self, name):
+            app = build_workflow()
+            return getattr(app, name)
+    return LazyAppProxy()

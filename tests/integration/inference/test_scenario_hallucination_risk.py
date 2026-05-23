@@ -11,7 +11,6 @@ CRAG 루프의 라우팅과 상태 진화가 올바르게 동작하고, 무한 �
 """
 import pytest
 from unittest.mock import patch, call
-from src.agent.workflow import build_workflow
 from src.models.state import GraphState
 from src.models.schemas import (
     RetrievedChunk, RerankingResult, EvaluationResult,
@@ -19,20 +18,6 @@ from src.models.schemas import (
 )
 from src.utils.exception import EvaluationParsingError, SearchTimeoutError
 from src.utils.config import MAX_REWRITE_COUNT
-
-@pytest.fixture
-def mocked_app():
-    """
-    테스트마다 새로운 그래프 객체를 생성하는 Fixture
-    각 테스트 함수의 patch가 적용된 상태에서 build_workflow가 호출되도록 보장하기 위해
-    호출 시점에 지연 빌드를 수행하는 프록시 객체를 반환합니다.
-    """
-    class LazyAppProxy:
-        def __getattr__(self, name):
-            app = build_workflow()
-            return getattr(app, name)
-    return LazyAppProxy()
-
 
 # ── Mock 데이터 팩토리 ──
 
