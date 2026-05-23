@@ -33,6 +33,6 @@ markers = [
 
 [tool.pyright]
 include = ["src"]
-executionEnvironments = [
-  { root = "src" }
-]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["."]
