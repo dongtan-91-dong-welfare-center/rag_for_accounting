@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch
-from src.retrieval.reranker import rerank, rerank_chunks
+from src.retrieval.reranker import rerank
+from src.agent.workflow import rerank_chunks
 from src.models.schemas import RetrievedChunk, RerankingResult
 from src.models.state import GraphState
 from src.utils.exception import RerankFailureError, ScoreThresholdError
@@ -72,7 +73,8 @@ class TestRerank:
 class TestReranksChunksNode:
     """rerank_chunks() 워크플로우 노드 단위 테스트"""
 
-    @patch('src.retrieval.reranker.rerank')
+    @patch('src.agent.workflow.config.USE_RERANKER', True)
+    @patch('src.agent.workflow.rerank')
     def test_rerank_model_failure_records_error_log(self, mock_rerank):
         """RerankFailureError 발생 시: fallback chunks 반환 + needs_reretrieval=False + error_logs 기록
 
@@ -104,7 +106,8 @@ class TestReranksChunksNode:
         # needs_reretrieval 검증: fallback이 존재하므로 재검색은 불필요
         assert result["needs_reretrieval"] is False
 
-    @patch('src.retrieval.reranker.rerank')
+    @patch('src.agent.workflow.config.USE_RERANKER', True)
+    @patch('src.agent.workflow.rerank')
     def test_empty_results_after_rerank_records_error_log(self, mock_rerank):
         """rerank가 빈 결과를 반환 시: reranked_chunks=[] + needs_reretrieval=True + RR-202 기록
 
@@ -128,6 +131,7 @@ class TestReranksChunksNode:
         assert result["reranked_chunks"] == []   # reranked_chunks가 빈 리스트인지 확인
         assert result["needs_reretrieval"] is True   # needs_reretrieval이 True인지 확인
 
+    @patch('src.agent.workflow.config.USE_RERANKER', True)
     @patch('src.retrieval.reranker.compute_relevance_score')
     def test_rerank_all_scores_below_threshold(self, mock_compute):
         """모든 rerank 점수가 임계값 미만: needs_reretrieval=True + reranked_chunks=[] + RR-202
