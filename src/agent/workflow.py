@@ -6,9 +6,10 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from src.agent.nodes.generate import generate_response
 from src.agent.nodes.evaluate import evaluate_context
+from src.retrieval.searcher import hybrid_search as search
 from src.retrieval.reranker import rerank
 from src.utils import config
-from src.utils.config import MAX_REWRITE_COUNT, KST, RERANK_THRESHOLD
+from src.utils.config import MAX_REWRITE_COUNT, KST, RERANK_THRESHOLD, TOP_K_RETRIEVAL
 from src.utils.exception import AccountingRAGError, RerankFailureError, ScoreThresholdError
 from src.utils.logger import get_logger
 from src.models.state import GraphState
@@ -62,28 +63,30 @@ def rewrite_query(state: GraphState) -> dict:
 
 @handle_node_errors("search")
 def hybrid_search(state: GraphState) -> dict:
-    """
-    TODO: FUNC-005 (하이브리드 검색 노드) - Mock 구현
-    실제 구현 대기 (src/retrieval/searcher.py)
-    """
-    return {
-        "retrieved_chunks": [
-            RetrievedChunk(
-                chunk_id="1",
-                document_id="DOC-001",
-                content="유형자산의 감가상각은...",
-                score=0.9,
-                metadata={}
-            ),
-            RetrievedChunk(
-                chunk_id="2",
-                document_id="DOC-002",
-                content="전환사채를 투자목적으로...",
-                score=0.8,
-                metadata={}
-            ),
-        ]
-    }
+    """하이브리드 검색 노드 — searcher.hybrid_search() 호출"""
+
+    # rewrite 노드 결과에서 검색 쿼리 추출
+    search_queries = [state.original_query]
+    if state.rewritten_query and state.rewritten_query.search_queries:
+        search_queries = state.rewritten_query.search_queries
+
+    # standard_filter → metadata_filter 변환
+    metadata_filter = None
+    if state.standard_filter != "ALL":
+        metadata_filter = {"standard_type": state.standard_filter}
+
+    # 복수 쿼리에 대해 검색 후 병합·중복 제거
+    all_chunks: dict[str, RetrievedChunk] = {}
+    for q in search_queries:
+        results = search(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter)
+        for chunk in results:
+            if chunk.chunk_id not in all_chunks or chunk.score > all_chunks[chunk.chunk_id].score:
+                all_chunks[chunk.chunk_id] = chunk
+
+    # score 내림차순 정렬 후 상위 TOP_K 반환
+    merged = sorted(all_chunks.values(), key=lambda c: c.score, reverse=True)[:TOP_K_RETRIEVAL]
+
+    return {"retrieved_chunks": merged}
 
 
 def rerank_chunks(state: GraphState) -> dict:
