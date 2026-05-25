@@ -11,9 +11,21 @@ VECTOR_COLLECTION_NAME: str = "rag_for_accounting"  # FUNC-003: pgvector 컬렉�
 OPENAI_MODEL: str = "gpt-5.4-mini"   # FUNC-007, 008, 009: LLM 모델 식별자
 
 # 하이브리드 검색 가중치 및 배치 설정
-DENSE_WEIGHT: float = 0.6      # 벡터 검색 가중치
-SPARSE_WEIGHT: float = 0.4     # 그래프 검색 가중치
+# 회계 기준서는 정확한 용어·조항 번호 매칭이 중요하므로 Sparse 가중치를 높게 설정
+DENSE_WEIGHT: float = 0.4      # Dense(벡터 의미 유사도) 검색 가중치
+SPARSE_WEIGHT: float = 0.6     # Sparse(키워드 BM25 유사) 검색 가중치
 BATCH_SIZE: int = 100          # 인덱싱 배치 크기
+
+# 검색 타임아웃 (초) — pgvector 쿼리가 이 시간을 초과하면 SearchTimeoutError(SE-101) 발생
+SEARCH_TIMEOUT_SECONDS: int = 5
+
+# 임베딩 모델 설정
+# !TODO: 인덱싱(FUNC-003)에서 사용한 모델과 차원 수를 반드시 동일하게 맞출 것
+EMBEDDING_MODEL: str = "text-embedding-3-small"
+EMBEDDING_DIM: int = 1536   # OpenAI 임베딩 모델의 벡터 차원 수
+
+# 검색 대상 테이블명 — RetrievedChunk 스키마와 컬럼명을 통일
+CHUNKS_TABLE: str = "chunks"
 
 # 시간대(에러 로그 기록 시 한국 표준시(UTC+9)를 기준으로 하기 위함)
 KST = timezone(timedelta(hours=9))
