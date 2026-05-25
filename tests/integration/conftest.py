@@ -21,8 +21,3 @@ def check_integration_env():
     infra_error = check_docker_infrastructure()
     if infra_error:
         pytest.skip(f"인프라 준비 상태에 문제가 있어 테스트를 건너뜁니다: {infra_error}")
-
-@pytest.fixture(scope="session")
-def workflow_app():
-    """실제 노드가 연결된 LangGraph 애플리케이션 (세션당 1회 생성)"""
-    return build_workflow()

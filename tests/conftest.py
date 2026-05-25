@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 import pytest
 from src.models.state import GraphState
+from src.agent.workflow import build_workflow
 
 # 프로젝트 루트 경로를 sys.path에 추가 (모든 디렉토리에서 pytest 실행 시 모듈 경로 인식)
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,3 +16,8 @@ def initial_state():
         rewrite_count=0,
         error_logs=[]
     )
+
+@pytest.fixture
+def workflow_app():
+    """컴파일된 LangGraph 워크플로우 앱 피처"""
+    return build_workflow()
