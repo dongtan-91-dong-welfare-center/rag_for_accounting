@@ -151,7 +151,8 @@ class TestScenarioNoContext:
 
         with (
             patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.retrieval.reranker.rerank", side_effect=RerankFailureError("리랭킹 모델 호출 실패")),
+            patch("src.agent.workflow.config.USE_RERANKER", True),
+            patch("src.agent.workflow.rerank", side_effect=RerankFailureError("리랭킹 모델 호출 실패")),
             patch("src.agent.workflow.evaluate_context", return_value={
                 "evaluation": EvaluationResult(
                     is_relevant=True, needs_external=False,

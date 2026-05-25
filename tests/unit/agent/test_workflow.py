@@ -5,11 +5,24 @@ from src.agent.workflow import build_workflow, route_after_evaluate
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
 from src.models.schemas import EvaluationResult
+from tests.conftest import workflow_app
 
-@pytest.fixture
-def workflow_app():
-    """컴파일된 LangGraph 워크플로우 앱 피처"""
-    return build_workflow()
+@pytest.fixture(autouse=True)
+def mock_searcher():
+    """FUNC-005 반영으로 인해 외부 API 및 DB를 호출하는 searcher 모킹"""
+    with patch("src.agent.workflow.search") as mock_search:
+        from src.models.schemas import RetrievedChunk
+        mock_search.return_value = [
+            RetrievedChunk(
+                chunk_id="1", document_id="DOC-001",
+                content="유형자산의 감가상각은...", score=0.9, metadata={}
+            ),
+            RetrievedChunk(
+                chunk_id="2", document_id="DOC-002",
+                content="전환사채를 투자목적으로...", score=0.8, metadata={}
+            ),
+        ]
+        yield mock_search
 
 @pytest.mark.unit
 class TestWorkflowConstruction:
