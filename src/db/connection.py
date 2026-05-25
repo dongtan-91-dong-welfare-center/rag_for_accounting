@@ -31,7 +31,7 @@ def get_pool() -> ConnectionPool:
             f"port={os.getenv('POSTGRES_PORT', '5432')} "
             f"dbname={os.getenv('POSTGRES_DB', 'accounting_db')} "
             f"user={os.getenv('POSTGRES_USER', 'accounting_user')} "
-            f"password={os.getenv('POSTGRES_PASSWORD', '')}"
+            f"password={os.getenv('POSTGRES_PASSWORD', 'accounting_password_example')}"
         )
         _pool = ConnectionPool(conninfo, min_size=2, max_size=10)
         logger.info("PostgreSQL 커넥션 풀 생성 완료")
