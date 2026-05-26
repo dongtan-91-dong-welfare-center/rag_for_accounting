@@ -6,7 +6,10 @@
     - evaluate_context(): reranked_chunks → EvaluationResult 변환 (dict 반환)
     - check_relevance(): 단일 청크 관련성 판단
     - check_external_reference(): 외부 기준서 참조 필요 여부 판단
+    - validate_verdict(): EvaluationResult 내부 일관성 검증 (EV-302)
+    - detect_hallucination(): 컨텍스트에 없는 조항 인용 감지 (EV-303)
     - EV-301: LLM 응답 파싱 실패 시 보수적 폴백
+    - CM-002: API 연결 오류 시 rewrite_count 기반 판단
 """
 import pytest
 from unittest.mock import MagicMock, patch
@@ -16,12 +19,19 @@ from src.models.schemas import (
     EvaluationResult,
 )
 from src.models.state import GraphState
-from src.utils.config import RERANK_THRESHOLD
-from src.utils.exception import EvaluationParsingError
+from src.utils.config import RERANK_THRESHOLD, MAX_REWRITE_COUNT
+from src.utils.exception import (
+    EvaluationParsingError,
+    LLMAPIConnectionError,
+    InconsistentVerdictError,
+    HallucinationDetectedError,
+)
 from src.agent.nodes.evaluate import (
     evaluate_context,
     check_relevance,
     check_external_reference,
+    validate_verdict,
+    detect_hallucination,
 )
 
 
@@ -152,7 +162,7 @@ class TestEvaluateContext:
 
     def test_external_reference_overrides_needs_external(self):
         """
-        [Case 2] 외부 참조 키워드 포함 reasoning, standard_filter=GAAP → needs_external=True.
+        외부 참조 키워드 포함 reasoning, standard_filter=GAAP → needs_external=True.
         LLM이 needs_external=False로 답해도 check_external_reference()에서 True로 오버라이드한다.
         """
         llm_eval = EvaluationResult(
@@ -180,7 +190,7 @@ class TestEvaluateContext:
 
     def test_all_filter_does_not_override_when_keyword_alone(self):
         """
-        [Case 2-b] standard_filter=ALL에서 reasoning에 IFRS·GAAP 키워드만 단독 등장하는 경우,
+        standard_filter=ALL에서 reasoning에 IFRS·GAAP 키워드만 단독 등장하는 경우,
         check_external_reference()는 False를 반환하여 LLM의 needs_external=False가 보존된다.
         """
         llm_eval = EvaluationResult(
@@ -208,7 +218,7 @@ class TestEvaluateContext:
 
     def test_llm_exception_propagates(self):
         """
-        [Case 3] Unknown Exception 발생 시 원본 예외가 그대로 전파된다.
+        Unknown Exception 발생 시 원본 예외가 그대로 전파된다.
         - 시스템 에러는 AccountingRAGError로 래핑하지 않고 파이프라인을 중단시킨다.
         - needs_external 의미 정합성 유지: 네트워크 오류 ≠ 외부 참조 필요
         """
@@ -274,3 +284,198 @@ class TestEvaluateContext:
         assert result["evaluation"].needs_external is True  # CRAG 루프 재진입 유도
         assert "error_logs" in result   # error_logs가 존재하는지 확인
         assert result["error_logs"][0]["error_type"] == "EV-301"    # 에러 타입이 EV-301인지 확인
+
+    def test_llm_api_error_below_max_retries_triggers_reentry(self):
+        """rewrite_count < MAX_REWRITE_COUNT → needs_external=True로 CRAG 루프 재진입
+
+        네트워크 오류는 일시적일 수 있으므로, 재시도 여지가 있을 때는 루프로 재진입한다.
+        """
+        state = GraphState(
+            original_query="리스 회계처리는?",
+            rewrite_count=MAX_REWRITE_COUNT - 1,
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="리스 회계처리...", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_evaluator_agent(error=LLMAPIConnectionError("API 연결 오류", node="evaluate")):
+            result = evaluate_context(state)
+
+        assert result["evaluation"].is_relevant is False    # 폴백
+        assert result["evaluation"].needs_external is True  # 재시도 여지 있음 → CRAG 루프 재진입
+        assert result["error_logs"][-1]["error_type"] == "CM-002"   # 에러 타입이 CM-002인지 확인
+
+    def test_llm_api_error_at_max_retries_stops_loop(self):
+        """rewrite_count >= MAX_REWRITE_COUNT → needs_external=False로 루프 강제 종료
+
+        최대 재시도에 도달한 상태에서의 네트워크 오류는 루프를 지속해도 의미가 없으므로 중단한다.
+        """
+        state = GraphState(
+            original_query="리스 회계처리는?",
+            rewrite_count=MAX_REWRITE_COUNT,
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="리스 회계처리...", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_evaluator_agent(error=LLMAPIConnectionError("API 연결 오류", node="evaluate")):
+            result = evaluate_context(state)
+
+        assert result["evaluation"].is_relevant is False    # 폴백
+        assert result["evaluation"].needs_external is False # 최대 재시도 도달 → 루프 강제 종료
+        assert result["error_logs"][-1]["error_type"] == "CM-002"   # 에러 타입이 CM-002인지 확인
+
+    def test_inconsistent_verdict_returns_ev302_fallback(self):
+        """LLM이 is_relevant=True, confidence=0.2를 반환하면 일관성 위반으로 보수적 폴백
+
+        is_relevant=True이면서 confidence가 0.3 미만이면 신뢰할 수 없는 평가로 간주한다.
+        is_retryable=False이므로 needs_external=False로 CRAG 루프에 재진입하지 않는다.
+        """
+        llm_eval = EvaluationResult(
+            is_relevant=True,
+            needs_external=False,
+            confidence=0.2,
+            reasoning="충분한 근거가 포함되어 있습니다."
+        )
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            standard_filter="ALL",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="손상차손 내용", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_evaluator_agent(evaluation=llm_eval):
+            result = evaluate_context(state)
+
+        assert result["evaluation"].is_relevant is False    # 보수적 폴백
+        assert result["evaluation"].needs_external is False # is_retryable=False → 루프 재진입 없음
+        assert result["error_logs"][-1]["error_type"] == "EV-302"   # 에러 타입이 EV-302인지 확인
+
+    def test_hallucination_detected_returns_ev303_fallback(self):
+        """reasoning에 청크에 없는 조항 번호 인용 시 환각 감지로 is_relevant=False 반환
+
+        reasoning에 'K-IFRS 제1116호'가 인용되어 있지만 청크 내용에 해당 조항이 없으면 환각으로 판단.
+        is_retryable=False이므로 needs_external=False로 CRAG 루프에 재진입하지 않는다.
+        """
+        llm_eval = EvaluationResult(
+            is_relevant=True,
+            needs_external=False,
+            confidence=0.85,
+            reasoning="K-IFRS 제1116호 제15조에 따르면 리스 자산을 인식해야 합니다."
+        )
+        state = GraphState(
+            original_query="리스 회계처리는?",
+            standard_filter="ALL",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="리스 회계처리 일반론입니다.", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_evaluator_agent(evaluation=llm_eval):
+            result = evaluate_context(state)
+
+        assert result["evaluation"].is_relevant is False    # 환각 감지 → is_relevant=False
+        assert result["evaluation"].needs_external is False # is_retryable=False → 루프 재진입 없음
+        assert result["error_logs"][-1]["error_type"] == "EV-303"   # 에러 타입이 EV-303인지 확인
+
+
+@pytest.mark.unit
+class TestValidateVerdict:
+    """validate_verdict() 내부 일관성 검증 단위 테스트 (EV-302)"""
+
+    def test_consistent_verdict_no_error(self):
+        """정상 평가 결과는 예외 없이 통과한다"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.85,
+            reasoning="충분한 근거가 포함되어 있습니다."
+        )
+        validate_verdict(eval_result)   # 예외 없이 통과해야 함
+
+    def test_low_confidence_with_relevant_raises_error(self):
+        """is_relevant=True이고 confidence < 0.3이면 InconsistentVerdictError 발생"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.2,
+            reasoning="충분한 근거가 포함되어 있습니다."
+        )
+        with pytest.raises(InconsistentVerdictError):
+            validate_verdict(eval_result)
+
+    def test_needs_external_without_reference_phrase_raises_error(self):
+        """needs_external=True, is_relevant=True이고 외부 참조 근거 없으면 InconsistentVerdictError 발생"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=True, confidence=0.8,
+            reasoning="검색된 청크에 충분한 내용이 있습니다."   # 외부 참조 키워드 없음
+        )
+        with pytest.raises(InconsistentVerdictError):
+            validate_verdict(eval_result)
+
+    def test_needs_external_with_reference_phrase_no_error(self):
+        """needs_external=True, is_relevant=True이고 외부 참조 근거가 있으면 통과"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=True, confidence=0.7,
+            reasoning="해당 항목은 타 기준서 준용이 필요합니다."   # 외부 참조 키워드 있음
+        )
+        validate_verdict(eval_result)   # 예외 없이 통과해야 함
+
+    def test_not_relevant_low_confidence_no_error(self):
+        """is_relevant=False이면 confidence 낮아도 불일치가 아님"""
+        eval_result = EvaluationResult(
+            is_relevant=False, needs_external=False, confidence=0.1,
+            reasoning="관련 없는 내용입니다."
+        )
+        validate_verdict(eval_result)   # 예외 없이 통과해야 함
+
+
+@pytest.mark.unit
+class TestDetectHallucination:
+    """detect_hallucination() 환각 감지 단위 테스트 (EV-303)"""
+
+    def _make_chunk(self, content: str) -> RerankingResult:
+        return RerankingResult(
+            chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content=content, score=0.9, metadata={}),
+            rerank_score=0.9,
+        )
+
+    def test_no_citations_in_reasoning_no_error(self):
+        """reasoning에 조항 번호 패턴이 없으면 예외 없이 통과"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.9,
+            reasoning="검색된 청크에 충분한 근거가 포함되어 있습니다."
+        )
+        detect_hallucination(eval_result, [self._make_chunk("리스 관련 내용")])   # 예외 없이 통과해야 함
+
+    def test_citation_found_in_chunks_no_error(self):
+        """reasoning의 조항 번호가 청크에도 존재하면 예외 없이 통과"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.9,
+            reasoning="K-IFRS 제1116호에 따라 리스 자산을 인식합니다."
+        )
+        chunk = self._make_chunk("K-IFRS 제1116호에 따르면 사용권 자산을 인식해야 한다.")
+        detect_hallucination(eval_result, [chunk])   # 예외 없이 통과해야 함
+
+    def test_citation_not_in_chunks_raises_error(self):
+        """reasoning의 조항 번호가 청크에 없으면 HallucinationDetectedError 발생"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.9,
+            reasoning="K-IFRS 제1116호 제15조에 따르면 리스 자산을 인식해야 합니다."
+        )
+        chunk = self._make_chunk("리스 회계처리 일반론입니다.")   # 조항 번호 없음
+        with pytest.raises(HallucinationDetectedError):
+            detect_hallucination(eval_result, [chunk])
+
+    def test_empty_chunks_no_error(self):
+        """청크가 없으면 검증을 건너뛴다"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.9,
+            reasoning="K-IFRS 제1116호를 참조합니다."
+        )
+        detect_hallucination(eval_result, [])   # 예외 없이 통과해야 함
