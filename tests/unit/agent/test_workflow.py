@@ -5,8 +5,6 @@ from src.agent.workflow import build_workflow, route_after_evaluate
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
 from src.models.schemas import EvaluationResult
-from tests.conftest import workflow_app
-
 @pytest.fixture(autouse=True)
 def mock_searcher():
     """FUNC-005 반영으로 인해 외부 API 및 DB를 호출하는 searcher 모킹"""

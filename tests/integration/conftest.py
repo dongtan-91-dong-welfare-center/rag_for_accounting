@@ -1,7 +1,6 @@
 import os
 import pytest
 from dotenv import load_dotenv
-from src.agent.workflow import build_workflow
 
 load_dotenv()
 
