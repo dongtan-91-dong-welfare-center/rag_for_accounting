@@ -173,34 +173,70 @@ def normalize_scores(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
 def hybrid_search(query: str, top_k: int = 10, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
     """
     하이브리드 검색 (Dense + Sparse)
-    - metadata_filter: 회계기준(K-IFRS/K-GAAP) 필터링 포함
+    - Dense/Sparse 독립 장애 처리: 한쪽 실패 시 나머지 결과만 반환, 양쪽 실패 시 DatabaseQueryError
+    - 초기 검색 0건 시 top_k × 2로 1회 재탐색
+    - 재탐색 후에도 0건이면 NoContextFoundError 발생
     """
     logger.info(f"하이브리드 검색 시작: query='{query[:30]}...', top_k={top_k}")
-    
-    # 질의 임베딩 생성
+
     query_vector = embed_query(query)
-    
+
+    merged = _search_and_merge(query, query_vector, top_k, metadata_filter)
     # Dense 및 Sparse 검색 실행 (각각 top_k만큼 가져와서 병합 풀 확보)
-    dense_results = dense_search(query_vector, top_k, metadata_filter)
-    sparse_results = sparse_search(query, top_k, metadata_filter)
-    
-    # 스코어 정규화
+    final_results = merged[:top_k]
+
+    if not final_results:
+        retry_top_k = top_k * 2
+        logger.info(f"검색 결과 0건, top_k={retry_top_k}로 재탐색")
+        merged = _search_and_merge(query, query_vector, retry_top_k, metadata_filter)
+        final_results = merged[:top_k]
+
+    if not final_results:
+        logger.warning("재탐색 후에도 검색 결과 0건")
+        raise NoContextFoundError("질의에 대한 검색 결과가 존재하지 않습니다.")
+
+    logger.info(f"하이브리드 검색 완료: {len(final_results)}건 반환")
+    return final_results
+
+def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadata_filter: dict | None) -> list[RetrievedChunk]:
+    """Dense + Sparse 검색을 독립 실행하고 가중 병합한다. 양쪽 모두 실패 시 DatabaseQueryError를 발생시킨다."""
+    dense_results: list[RetrievedChunk] = []
+    sparse_results: list[RetrievedChunk] = []
+    dense_failed = False
+    sparse_failed = False
+
+    try:
+        dense_results = dense_search(query_vector, top_k, metadata_filter)
+    except (SearchTimeoutError, DatabaseQueryError) as e:
+        dense_failed = True
+        logger.warning(f"Dense 검색 실패, Sparse 단독 진행: {e}")
+
+    try:
+        sparse_results = sparse_search(query, top_k, metadata_filter)
+    except (SearchTimeoutError, DatabaseQueryError) as e:
+        sparse_failed = True
+        logger.warning(f"Sparse 검색 실패, Dense 단독 진행: {e}")
+
+    if dense_failed and sparse_failed:
+        raise DatabaseQueryError("Dense 및 Sparse 검색 모두 실패")
+
+    if dense_failed:
+        logger.info("검색 모드: Sparse 단독")
+    elif sparse_failed:
+        logger.info("검색 모드: Dense 단독")
+    else:
+        logger.info("검색 모드: Dense + Sparse 하이브리드")
+
     dense_results = normalize_scores(dense_results)
     sparse_results = normalize_scores(sparse_results)
-    
-    # 가중 평균 병합
-    # merged_map을 만드는 이유: Dense와 Sparse 검색 결과 중 중복되는 chunk_id를 하나의 딕셔너리로 관리
-    # key: chunk_id, value: RetrievedChunk 객체
+
     merged_map: dict[str, RetrievedChunk] = {}
-    
+
     for chunk in dense_results:
-        # 모델의 깊은 복사본을 생성하여 점수 수정
-        # model_copy(): Pydantic 모델의 깊은 복사를 수행하는 메서드
-        # 병합 시 점수를 수정하므로 원본 데이터를 유지하기 위해 깊은 복사를 사용
         merged_chunk = chunk.model_copy()
         merged_chunk.score = chunk.score * DENSE_WEIGHT
         merged_map[chunk.chunk_id] = merged_chunk
-        
+
     for chunk in sparse_results:
         if chunk.chunk_id in merged_map:
             merged_map[chunk.chunk_id].score += chunk.score * SPARSE_WEIGHT
@@ -208,13 +244,5 @@ def hybrid_search(query: str, top_k: int = 10, metadata_filter: dict | None = No
             merged_chunk = chunk.model_copy()
             merged_chunk.score = chunk.score * SPARSE_WEIGHT
             merged_map[chunk.chunk_id] = merged_chunk
-            
-    # 최종 정렬 및 top_k 추출
-    final_results = sorted(merged_map.values(), key=lambda x: x.score, reverse=True)[:top_k]
-    
-    if not final_results:
-        logger.warning("검색 결과가 0건입니다.")
-        raise NoContextFoundError("질의에 대한 검색 결과가 존재하지 않습니다.")
-        
-    logger.info(f"하이브리드 검색 완료: {len(final_results)}건 반환")
-    return final_results
+
+    return sorted(merged_map.values(), key=lambda x: x.score, reverse=True)

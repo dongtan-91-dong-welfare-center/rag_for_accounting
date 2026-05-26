@@ -204,20 +204,81 @@ class TestHybridSearchIntegration:
 class TestSearcherExceptions:
     """DB 연결 및 쿼리 수준의 예외 처리 검증 (SE-101, SE-102)"""
 
-    def test_search_timeout_raises_SE101(self, mock_db_pool, mock_embed):
+    def test_search_timeout_raises_SE101(self, mock_db_pool):
         """statement_timeout 시 SearchTimeoutError(SE-101) 발생 검증"""
         mock_db_pool.execute.side_effect = errors.QueryCanceled("canceling statement due to statement timeout")
-        
-        with pytest.raises(SearchTimeoutError) as exc_info:
-            hybrid_search("query", top_k=5)
-            
-        assert "응답 시간 초과" in str(exc_info.value)  # 타임아웃 
 
-    def test_db_error_raises_SE102(self, mock_db_pool, mock_embed):
-        """7. 기타 쿼리 실패 시 DatabaseQueryError(SE-102) 발생 검증"""
-        mock_db_pool.execute.side_effect = Exception("DB Connection Refused")
-        
+        with pytest.raises(SearchTimeoutError) as exc_info:
+            dense_search([0.1] * 1536, top_k=5)
+
+        assert "응답 시간 초과" in str(exc_info.value)  # SE-101
+
+    def test_db_error_raises_SE102(self, mock_db_pool):
+        """기타 쿼리 실패 시 DatabaseQueryError(SE-102) 발생 검증"""
+        mock_db_pool.execute.side_effect = Exception("DB 에러")
+
         with pytest.raises(DatabaseQueryError) as exc_info:
-            hybrid_search("query", top_k=5)
-            
-        assert "데이터베이스 쿼리 실행 실패" in str(exc_info.value) # DB 연결 실패
+            dense_search([0.1] * 1536, top_k=5)
+
+        assert "데이터베이스 쿼리 실행 실패" in str(exc_info.value) # SE-102
+
+
+@pytest.mark.unit
+class TestSearchResilience:
+    """하이브리드 검색 복원력 검증: top_k 재탐색 및 독립 장애 처리"""
+
+    @patch("src.retrieval.searcher.dense_search")
+    @patch("src.retrieval.searcher.sparse_search")
+    def test_retry_with_double_top_k_on_empty_results(self, mock_sparse, mock_dense, mock_embed):
+        """초기 검색 0건 시 top_k × 2로 재탐색하여 결과 반환"""
+        mock_dense.side_effect = [
+            [],
+            [RetrievedChunk(chunk_id="1", document_id="D1", content="retry content", score=0.8, metadata={})],
+        ]
+        mock_sparse.side_effect = [[], []]
+
+        results = hybrid_search("영업권 손상차손 인식 기준은?", top_k=5)
+
+        assert len(results) == 1    # 최종 반환 결과 수
+        assert mock_dense.call_count == 2   # 총 호출 수
+        assert mock_dense.call_args_list[1][0][1] == 10  # top_k * 2
+
+    @patch("src.retrieval.searcher.dense_search")
+    @patch("src.retrieval.searcher.sparse_search")
+    def test_dense_failure_returns_sparse_only(self, mock_sparse, mock_dense, mock_embed):
+        """Dense 장애 시 Sparse 결과만 반환"""
+        mock_dense.side_effect = DatabaseQueryError("Dense DB 연결 실패")
+        mock_sparse.return_value = [
+            RetrievedChunk(chunk_id="1", document_id="D1", content="sparse only", score=0.9, metadata={}),
+        ]
+
+        results = hybrid_search("영업권 손상차손 인식 기준은?", top_k=5)
+
+        assert len(results) == 1    # 최종 반환 결과 수
+        assert results[0].chunk_id == "1"   # 반환 청크 ID
+
+    @patch("src.retrieval.searcher.dense_search")
+    @patch("src.retrieval.searcher.sparse_search")
+    def test_sparse_failure_returns_dense_only(self, mock_sparse, mock_dense, mock_embed):
+        """Sparse 장애 시 Dense 결과만 반환"""
+        mock_dense.return_value = [
+            RetrievedChunk(chunk_id="1", document_id="D1", content="dense only", score=0.9, metadata={}),
+        ]
+        mock_sparse.side_effect = SearchTimeoutError("Sparse 타임아웃")
+
+        results = hybrid_search("영업권 손상차손 인식 기준은?", top_k=5)
+
+        assert len(results) == 1    # 최종 반환 결과 수
+        assert results[0].chunk_id == "1"   # 반환 청크 ID
+
+    @patch("src.retrieval.searcher.dense_search")
+    @patch("src.retrieval.searcher.sparse_search")
+    def test_both_failure_raises_SE102(self, mock_sparse, mock_dense, mock_embed):
+        """양쪽 모두 장애 시 DatabaseQueryError 발생"""
+        mock_dense.side_effect = DatabaseQueryError("Dense 실패")
+        mock_sparse.side_effect = SearchTimeoutError("Sparse 타임아웃")
+
+        with pytest.raises(DatabaseQueryError) as exc_info:
+            hybrid_search("영업권 손상차손 인식 기준은?", top_k=5)
+
+        assert "모두 실패" in str(exc_info.value)   # 에러 메시지
