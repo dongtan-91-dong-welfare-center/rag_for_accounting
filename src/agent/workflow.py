@@ -10,7 +10,14 @@ from src.retrieval.searcher import hybrid_search as search
 from src.retrieval.reranker import rerank
 from src.utils import config
 from src.utils.config import MAX_REWRITE_COUNT, KST, RERANK_THRESHOLD, TOP_K_RETRIEVAL
-from src.utils.exception import AccountingRAGError, RerankFailureError, ScoreThresholdError
+from src.utils.exception import (
+    AccountingRAGError,
+    RerankFailureError,
+    ScoreThresholdError,
+    SearchTimeoutError,
+    DatabaseQueryError,
+    NoContextFoundError,
+)
 from src.utils.logger import get_logger
 from src.models.state import GraphState
 from src.models.schemas import (
@@ -61,7 +68,6 @@ def rewrite_query(state: GraphState) -> dict:
     """
     return {"rewrite_count": state.rewrite_count + 1}
 
-@handle_node_errors("search")
 def hybrid_search(state: GraphState) -> dict:
     """하이브리드 검색 노드 — searcher.hybrid_search() 호출"""
 
@@ -75,18 +81,47 @@ def hybrid_search(state: GraphState) -> dict:
     if state.standard_filter != "ALL":
         metadata_filter = {"standard_type": state.standard_filter}
 
-    # 복수 쿼리에 대해 검색 후 병합·중복 제거
-    all_chunks: dict[str, RetrievedChunk] = {}
-    for q in search_queries:
-        results = search(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter)
-        for chunk in results:
-            if chunk.chunk_id not in all_chunks or chunk.score > all_chunks[chunk.chunk_id].score:
-                all_chunks[chunk.chunk_id] = chunk
+    try:
+        # 복수 쿼리에 대해 검색 후 병합·중복 제거
+        all_chunks: dict[str, RetrievedChunk] = {}
+        for q in search_queries:
+            results = search(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter)
+            for chunk in results:
+                if chunk.chunk_id not in all_chunks or chunk.score > all_chunks[chunk.chunk_id].score:
+                    all_chunks[chunk.chunk_id] = chunk
 
-    # score 내림차순 정렬 후 상위 TOP_K 반환
-    merged = sorted(all_chunks.values(), key=lambda c: c.score, reverse=True)[:TOP_K_RETRIEVAL]
+        # score 내림차순 정렬 후 상위 TOP_K 반환
+        merged = sorted(all_chunks.values(), key=lambda c: c.score, reverse=True)[:TOP_K_RETRIEVAL]
+        return {"retrieved_chunks": merged}
 
-    return {"retrieved_chunks": merged}
+    except (SearchTimeoutError, DatabaseQueryError) as e:
+        # SE-101/SE-102: 재시도 가능한 타임아웃·DB 오류 → CRAG 루프 재진입
+        new_logs = state.error_logs + [e.to_error_log()]
+        return {
+            "retrieved_chunks": [],
+            "needs_reretrieval": True,
+            "error_logs": new_logs,
+        }
+    except NoContextFoundError as e:
+        # SE-103: 검색 결과 없음 → 재시도 무의미, 빈 결과로 진행
+        new_logs = state.error_logs + [e.to_error_log()]
+        return {
+            "retrieved_chunks": [],
+            "needs_reretrieval": False,
+            "error_logs": new_logs,
+        }
+    except AccountingRAGError as e:
+        # 기타 도메인 에러: 보수적 처리, 재시도 없이 빈 결과
+        new_logs = state.error_logs + [e.to_error_log()]
+        return {
+            "retrieved_chunks": [],
+            "needs_reretrieval": False,
+            "error_logs": new_logs,
+        }
+    except Exception as e:
+        # 시스템 에러: 원본 예외 그대로 전파 → LangGraph 파이프라인 중단
+        logger.error(f"[{type(e).__name__}] hybrid_search 노드 시스템 에러: {e}", exc_info=True)
+        raise
 
 
 def rerank_chunks(state: GraphState) -> dict:
