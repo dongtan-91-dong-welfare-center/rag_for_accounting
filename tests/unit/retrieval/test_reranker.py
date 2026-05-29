@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch
-from src.retrieval.reranker import rerank
-from src.agent.workflow import rerank_chunks
+from src.retrieval.reranker import rerank_chunks
+from src.agent.workflow import rerank
 from src.models.schemas import RetrievedChunk, RerankingResult
 from src.models.state import GraphState
 from src.utils.exception import RerankFailureError, ScoreThresholdError
@@ -16,7 +16,7 @@ class TestRerank:
         """다중 후보군을 입력받아 연관성 점수 내림차순으로 정렬되어 반환되는지 검증"""
         mock_compute.side_effect = [0.2, 0.5, 0.9]
 
-        results = rerank("영업권 손상차손 인식 기준은?", sample_chunks)
+        results = rerank_chunks("영업권 손상차손 인식 기준은?", sample_chunks)
 
         assert len(results) == 3  # 길이가 3인지 확인
         assert results[0].chunk.chunk_id == "3" # 3번 청크가 가장 높음
@@ -28,14 +28,14 @@ class TestRerank:
 
     def test_empty_chunks_returns_empty_list(self):
         """빈 리스트가 전달되었을 때 ranked_chunks == [] 확인"""
-        results = rerank("영업권 손상차손 인식 기준은?", [])
+        results = rerank_chunks("영업권 손상차손 인식 기준은?", [])
         assert results == []    # 빈 리스트인지 확인
 
     @patch('src.retrieval.reranker.compute_relevance_score')
     def test_single_chunk_returns_max_score_without_model_call(self, mock_compute):
         """후보가 1개일 때 모델 추론 없이 즉시 1.0 점수로 반환하는지 검증"""
         single_chunk = [RetrievedChunk(chunk_id="1", document_id="doc1", content="content", score=0.5, metadata={})]
-        results = rerank("영업권 손상차손 인식 기준은?", single_chunk)
+        results = rerank_chunks("영업권 손상차손 인식 기준은?", single_chunk)
 
         assert len(results) == 1    # 길이가 1인지 확인
         assert results[0].rerank_score == 1.0   # 점수가 1.0인지 확인
@@ -49,7 +49,7 @@ class TestRerank:
         """
         mock_compute.side_effect = [0.1, 0.2, 0.3]
 
-        results = rerank("영업권 손상차손 인식 기준은?", sample_chunks)
+        results = rerank_chunks("영업권 손상차손 인식 기준은?", sample_chunks)
 
         assert len(results) == 3
         assert results[0].chunk.chunk_id == "3" # 3번 청크가 가장 높음
@@ -66,15 +66,15 @@ class TestRerank:
         mock_compute.side_effect = Exception("예상치 못한 에러 발생")
 
         with pytest.raises(Exception, match="예상치 못한 에러 발생"):
-            rerank("영업권 손상차손 인식 기준은?", sample_chunks)
+            rerank_chunks("영업권 손상차손 인식 기준은?", sample_chunks)
 
 
 @pytest.mark.unit
-class TestReranksChunksNode:
-    """rerank_chunks() 워크플로우 노드 단위 테스트"""
+class TestRerankNode:
+    """rerank() 워크플로우 노드 단위 테스트"""
 
     @patch('src.agent.workflow.config.USE_RERANKER', True)
-    @patch('src.agent.workflow.rerank')
+    @patch('src.agent.workflow._rerank_impl')
     def test_rerank_model_failure_records_error_log(self, mock_rerank):
         """RerankFailureError 발생 시: fallback chunks 반환 + needs_reretrieval=False + error_logs 기록
 
@@ -90,7 +90,7 @@ class TestReranksChunksNode:
             error_logs=[]
         )
 
-        result = rerank_chunks(state)
+        result = rerank(state)
 
         # error_logs 검증
         assert "error_logs" in result   # error_logs가 존재하는지 확인
@@ -107,7 +107,7 @@ class TestReranksChunksNode:
         assert result["needs_reretrieval"] is False
 
     @patch('src.agent.workflow.config.USE_RERANKER', True)
-    @patch('src.agent.workflow.rerank')
+    @patch('src.agent.workflow._rerank_impl')
     def test_empty_results_after_rerank_records_error_log(self, mock_rerank):
         """rerank가 빈 결과를 반환 시: reranked_chunks=[] + needs_reretrieval=True + RR-202 기록
 
@@ -121,7 +121,7 @@ class TestReranksChunksNode:
             error_logs=[]
         )
 
-        result = rerank_chunks(state)
+        result = rerank(state)
 
         assert "error_logs" in result   # error_logs가 존재하는지 확인
         assert len(result["error_logs"]) > 0   # error_logs가 비어있지 않은지 확인
@@ -153,7 +153,7 @@ class TestReranksChunksNode:
             error_logs=[]
         )
 
-        result = rerank_chunks(state)
+        result = rerank(state)
 
         assert "error_logs" in result   # error_logs가 존재하는지 확안
         assert len(result["error_logs"]) > 0   # error_logs가 비어있지 않은지 확인
@@ -176,7 +176,7 @@ class TestReranksChunksNode:
             error_logs=[]
         )
 
-        result = rerank_chunks(state)
+        result = rerank(state)
 
         assert "reranked_chunks" in result  # reranked_chunks가 존재하는지 확안
         assert len(result["reranked_chunks"]) == len(sample_chunks)  # reranked_chunks의 길이가 1차 검색 결과와 같은지 확인

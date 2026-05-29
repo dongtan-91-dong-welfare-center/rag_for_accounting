@@ -71,15 +71,15 @@ class TestScenarioHappyPath:
 
         # 노드 함수는 실제 코드를 실행하되, 외부 I/O만 Mock
         with (
-            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": reranked}),
-            patch("src.agent.workflow.evaluate_context", return_value={
+            patch("src.agent.workflow.search", return_value={"retrieved_chunks": chunks}),
+            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": reranked}),
+            patch("src.agent.workflow.evaluate", return_value={
                 "evaluation": EvaluationResult(
                     is_relevant=True, needs_external=False,
                     confidence=0.9, reasoning="검색 결과가 질의에 충분히 관련됨"
                 )
             }),
-            patch("src.agent.workflow.generate_response", return_value={
+            patch("src.agent.workflow.generate", return_value={
                 "final_response": FinalResponse(
                     answer="K-GAAP 기준에 따르면...",
                     citations=citations,
@@ -124,15 +124,15 @@ class TestScenarioHappyPath:
         reranked = make_reranked_results(chunks, [0.95])
 
         with (
-            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": reranked}),
-            patch("src.agent.workflow.evaluate_context", return_value={
+            patch("src.agent.workflow.search", return_value={"retrieved_chunks": chunks}),
+            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": reranked}),
+            patch("src.agent.workflow.evaluate", return_value={
                 "evaluation": EvaluationResult(
                     is_relevant=True, needs_external=False,
                     confidence=0.9, reasoning="충분"
                 )
             }),
-            patch("src.agent.workflow.generate_response", return_value={
+            patch("src.agent.workflow.generate", return_value={
                 "final_response": FinalResponse(
                     answer="답변", citations=[], is_answerable=True, confidence_score=0.9
                 )

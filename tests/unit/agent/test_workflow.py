@@ -1,7 +1,7 @@
 import pytest
 from langgraph.graph.state import CompiledStateGraph
 from unittest.mock import MagicMock, patch
-from src.agent.workflow import route_after_evaluate, hybrid_search, run_workflow
+from src.agent.workflow import route_after_evaluate, search, run_workflow
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
 from src.models.schemas import EvaluationResult
@@ -10,7 +10,7 @@ from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContex
 @pytest.fixture(autouse=True)
 def mock_searcher():
     """FUNC-005 반영으로 인해 외부 API 및 DB를 호출하는 searcher 모킹"""
-    with patch("src.agent.workflow.search") as mock_search:
+    with patch("src.agent.workflow._search_impl") as mock_search:
         from src.models.schemas import RetrievedChunk
         mock_search.return_value = [
             RetrievedChunk(
@@ -224,39 +224,39 @@ class TestCRAGLoopPath:
 
 
 @pytest.mark.unit
-class TestHybridSearchNode:
-    """hybrid_search() 워크플로우 노드 예외 처리 단위 테스트
+class TestSearchNode:
+    """search() 워크플로우 노드 예외 처리 단위 테스트
 
-    searcher.hybrid_search()에서 발생하는 예외가 노드 레벨에서 올바르게
+    searcher.search_chunks()에서 발생하는 예외가 노드 레벨에서 올바르게
     분기되어 CRAG 신호(needs_reretrieval)와 error_logs에 반영되는지 검증한다.
     """
 
     def _make_state(self) -> GraphState:
         return GraphState(original_query="영업권 손상차손 인식 기준은?", error_logs=[])
 
-    @patch("src.agent.workflow.search")
+    @patch("src.agent.workflow._search_impl")
     def test_search_timeout_triggers_reretrieval(self, mock_search):
         """SE-101: SearchTimeoutError → needs_reretrieval=True, retrieved_chunks=[], error_logs 기록"""
         mock_search.side_effect = SearchTimeoutError("pgvector 쿼리 타임아웃")
 
-        result = hybrid_search(self._make_state())
+        result = search(self._make_state())
 
         assert result["retrieved_chunks"] == []         # 빈 결과 반환
         assert result["needs_reretrieval"] is True      # CRAG 루프 재진입 신호
         assert result["error_logs"][-1]["error_type"] == "SE-101"   # 에러 타입 기록
 
-    @patch("src.agent.workflow.search")
+    @patch("src.agent.workflow._search_impl")
     def test_db_error_triggers_reretrieval(self, mock_search):
         """SE-102: DatabaseQueryError → needs_reretrieval=True, retrieved_chunks=[], error_logs 기록"""
         mock_search.side_effect = DatabaseQueryError("DB 연결 실패")
 
-        result = hybrid_search(self._make_state())
+        result = search(self._make_state())
 
         assert result["retrieved_chunks"] == []         # 빈 결과 반환
         assert result["needs_reretrieval"] is True      # CRAG 루프 재진입 신호
         assert result["error_logs"][-1]["error_type"] == "SE-102"   # 에러 타입 기록
 
-    @patch("src.agent.workflow.search")
+    @patch("src.agent.workflow._search_impl")
     def test_no_context_found_no_reretrieval(self, mock_search):
         """SE-103: NoContextFoundError → needs_reretrieval=False, retrieved_chunks=[], error_logs 기록
 
@@ -265,19 +265,19 @@ class TestHybridSearchNode:
         """
         mock_search.side_effect = NoContextFoundError("검색 결과 없음")
 
-        result = hybrid_search(self._make_state())
+        result = search(self._make_state())
 
         assert result["retrieved_chunks"] == []         # 빈 결과 반환
         assert result["needs_reretrieval"] is False     # 재시도 무의미 → 루프 재진입 없음
         assert result["error_logs"][-1]["error_type"] == "SE-103"   # 에러 타입 기록
 
-    @patch("src.agent.workflow.search")
+    @patch("src.agent.workflow._search_impl")
     def test_system_exception_propagates(self, mock_search):
         """시스템 예외는 AccountingRAGError로 래핑되지 않고 원본 그대로 전파된다"""
         mock_search.side_effect = RuntimeError("예상치 못한 시스템 오류")
 
         with pytest.raises(RuntimeError, match="예상치 못한 시스템 오류"):
-            hybrid_search(self._make_state())
+            search(self._make_state())
 
 
 @pytest.mark.unit

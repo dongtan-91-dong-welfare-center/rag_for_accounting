@@ -6,7 +6,7 @@
 """
 import pytest
 from unittest.mock import patch
-from src.retrieval.searcher import hybrid_search
+from src.retrieval.searcher import search_chunks
 from src.utils.config import CHUNKS_TABLE
 from src.db.connection import get_pool
 
@@ -70,7 +70,7 @@ class TestHybridSearchIntegration:
         with patch("src.retrieval.searcher.embed_query") as mock_embed:
             mock_embed.return_value = [0.1] * 1536
             
-            results = hybrid_search(
+            results = search_chunks(
                 query="유형자산 감가상각 인식 기준",
                 top_k=5,
                 metadata_filter={"standard_type": "K-GAAP"}

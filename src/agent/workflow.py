@@ -6,10 +6,10 @@ from typing import Any, Literal
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
-from src.agent.nodes.generate import generate_response
-from src.agent.nodes.evaluate import evaluate_context
-from src.retrieval.searcher import hybrid_search as search
-from src.retrieval.reranker import rerank
+from src.agent.nodes.generate import generate_response as generate
+from src.agent.nodes.evaluate import evaluate_context as evaluate
+from src.retrieval.searcher import search_chunks as _search_impl
+from src.retrieval.reranker import rerank_chunks as _rerank_impl
 from src.utils import config
 from src.utils.config import MAX_REWRITE_COUNT, KST, RERANK_THRESHOLD, TOP_K_RETRIEVAL
 from src.utils.exception import (
@@ -60,7 +60,7 @@ def handle_node_errors(node_name: str):
 from src.agent.nodes.rewrite import rewrite_query as _rewrite_impl
 
 @handle_node_errors("rewrite")
-def rewrite_query(state: GraphState) -> dict:
+def rewrite(state: GraphState) -> dict:
     """
     질의 재작성 노드 연결
     """
@@ -80,8 +80,8 @@ def rewrite_query(state: GraphState) -> dict:
         "error_logs": updated_state.error_logs,
     }
 
-def hybrid_search(state: GraphState) -> dict:
-    """하이브리드 검색 노드 — searcher.hybrid_search() 호출"""
+def search(state: GraphState) -> dict:
+    """하이브리드 검색 노드 — searcher.search_chunks() 호출"""
 
     # rewrite 노드 결과에서 검색 쿼리 추출
     search_queries = [state.original_query]
@@ -97,7 +97,7 @@ def hybrid_search(state: GraphState) -> dict:
         # 복수 쿼리에 대해 검색 후 병합·중복 제거
         all_chunks: dict[str, RetrievedChunk] = {}
         for q in search_queries:
-            results = search(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter)
+            results = _search_impl(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter)
             for chunk in results:
                 if chunk.chunk_id not in all_chunks or chunk.score > all_chunks[chunk.chunk_id].score:
                     all_chunks[chunk.chunk_id] = chunk
@@ -132,11 +132,11 @@ def hybrid_search(state: GraphState) -> dict:
         }
     except Exception as e:
         # 시스템 에러: 원본 예외 그대로 전파 → LangGraph 파이프라인 중단
-        logger.error(f"[{type(e).__name__}] hybrid_search 노드 시스템 에러: {e}", exc_info=True)
+        logger.error(f"[{type(e).__name__}] search 노드 시스템 에러: {e}", exc_info=True)
         raise
 
 
-def rerank_chunks(state: GraphState) -> dict:
+def rerank(state: GraphState) -> dict:
     """
     워크플로우 노드: USE_RERANKER 활성화 여부에 따라 재정렬 모델 호출 여부를 결정한다.
 
@@ -170,7 +170,7 @@ def rerank_chunks(state: GraphState) -> dict:
 
     # rerank() 유틸리티 함수 호출 (실제 모델 추론)
     try:
-        results = rerank(state.original_query, state.retrieved_chunks)
+        results = _rerank_impl(state.original_query, state.retrieved_chunks)
 
         if not results:
             logger.warning("재정렬 후 유효한 청크가 없습니다.")
@@ -211,7 +211,7 @@ def rerank_chunks(state: GraphState) -> dict:
         }
     except Exception as e:
         # 시스템 예외는 AccountingRAGError로 래핑하지 않고 원본 타입 그대로 전파한다.
-        logger.critical(f"[{type(e).__name__}] rerank_chunks 노드 치명적 오류: {e}", exc_info=True)
+        logger.critical(f"[{type(e).__name__}] rerank 노드 치명적 오류: {e}", exc_info=True)
         raise
 
 
@@ -261,8 +261,8 @@ def build_workflow() -> CompiledStateGraph:
     LangGraph StateGraph를 구성하고 컴파일하여 반환합니다.
 
     노드 등록 및 조건부 엣지를 정의하여 StateGraph를 반환한다.
-    실행 순서: rewrite_query → hybrid_search → rerank → evaluate_context → generate_response
-    evaluate_context 이후 route_after_evaluate로 분기 처리.
+    실행 순서: rewrite → search → rerank → evaluate → generate
+    evaluate 이후 route_after_evaluate로 분기 처리.
 
     return CompiledStateGraph : LangGraph로 빌드된 상태 그래프
     왜 CompiledGraph를 사용하는가? -> StateGraph보다 성능이 좋다. (동작 방식은 동일하지만 내부적으로 최적화됨)
@@ -272,11 +272,11 @@ def build_workflow() -> CompiledStateGraph:
     workflow = StateGraph(GraphState)
 
     # 노드 추가
-    workflow.add_node("rewrite", rewrite_query)
-    workflow.add_node("search", hybrid_search)
-    workflow.add_node("rerank", rerank_chunks)
-    workflow.add_node("evaluate", evaluate_context)
-    workflow.add_node("generate", generate_response)
+    workflow.add_node("rewrite", rewrite)
+    workflow.add_node("search", search)
+    workflow.add_node("rerank", rerank)
+    workflow.add_node("evaluate", evaluate)
+    workflow.add_node("generate", generate)
 
     # 엣지 연결 (고정 흐름)
     workflow.add_edge(START, "rewrite")

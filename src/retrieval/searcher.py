@@ -170,9 +170,9 @@ def normalize_scores(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
     return chunks
 
 
-def hybrid_search(query: str, top_k: int = 10, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
+def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
     """
-    하이브리드 검색 (Dense + Sparse)
+    하이브리드 검색 (Dense + Sparse) 전략을 통해 청크를 검색한다.
     - Dense/Sparse 독립 장애 처리: 한쪽 실패 시 나머지 결과만 반환, 양쪽 실패 시 DatabaseQueryError
     - 초기 검색 0건 시 top_k × 2로 1회 재탐색
     - 재탐색 후에도 0건이면 NoContextFoundError 발생

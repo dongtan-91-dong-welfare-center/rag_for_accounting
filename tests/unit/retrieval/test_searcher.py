@@ -6,7 +6,7 @@
     - dense_search(): Dense 검색 DB 쿼리 및 반환 규격
     - sparse_search(): Sparse 검색 DB 쿼리 및 반환 규격
     - normalize_scores(): Min-Max 정규화 로직
-    - hybrid_search(): DENSE/SPARSE 가중 병합, 중복 처리, 필터 적용
+    - search_chunks(): DENSE/SPARSE 가중 병합, 중복 처리, 필터 적용
     - 예외 처리 (SE-101, SE-102, SE-103)
 """
 import pytest
@@ -19,7 +19,7 @@ from src.retrieval.searcher import (
     dense_search,
     sparse_search,
     normalize_scores,
-    hybrid_search
+    search_chunks
 )
 from src.utils import config
 
@@ -133,7 +133,7 @@ class TestHybridSearchIntegration:
         
         # 가중치: Dense=0.4, Sparse=0.6 가정
         with patch.object(config, "DENSE_WEIGHT", 0.4), patch.object(config, "SPARSE_WEIGHT", 0.6):
-            results = hybrid_search("query", top_k=5)
+            results = search_chunks("query", top_k=5)
             
         assert len(results) == 4    # top_k 만큼 반환
         # 정규화:
@@ -166,7 +166,7 @@ class TestHybridSearchIntegration:
         ]
         
         with patch.object(config, "DENSE_WEIGHT", 0.4), patch.object(config, "SPARSE_WEIGHT", 0.6):
-            results = hybrid_search("query", top_k=5)
+            results = search_chunks("query", top_k=5)
             
         # ID 1이 양쪽에 존재 -> 정규화 후 각각 1.0 -> 1.0*0.4 + 1.0*0.6 = 1.0
         assert len(results) == 1    # 중복 제거
@@ -181,7 +181,7 @@ class TestHybridSearchIntegration:
         mock_sparse.return_value = []
         
         metadata_filter = {"standard_type": "K-GAAP"}
-        hybrid_search("query", top_k=5, metadata_filter=metadata_filter)
+        search_chunks("query", top_k=5, metadata_filter=metadata_filter)
         
         # 호출 인자 검증
         mock_dense.assert_called_once_with(mock_embed().data[0].embedding, 5, metadata_filter)
@@ -195,7 +195,7 @@ class TestHybridSearchIntegration:
         mock_sparse.return_value = []
         
         with pytest.raises(NoContextFoundError) as exc_info:
-            hybrid_search("query", top_k=5)
+            search_chunks("query", top_k=5)
             
         assert "검색 결과가 존재하지 않습니다" in str(exc_info.value)   # 검색 결과 0건
 
@@ -237,7 +237,7 @@ class TestSearchResilience:
         ]
         mock_sparse.side_effect = [[], []]
 
-        results = hybrid_search("영업권 손상차손 인식 기준은?", top_k=5)
+        results = search_chunks("영업권 손상차손 인식 기준은?", top_k=5)
 
         assert len(results) == 1    # 최종 반환 결과 수
         assert mock_dense.call_count == 2   # 총 호출 수
@@ -252,7 +252,7 @@ class TestSearchResilience:
             RetrievedChunk(chunk_id="1", document_id="D1", content="sparse only", score=0.9, metadata={}),
         ]
 
-        results = hybrid_search("영업권 손상차손 인식 기준은?", top_k=5)
+        results = search_chunks("영업권 손상차손 인식 기준은?", top_k=5)
 
         assert len(results) == 1    # 최종 반환 결과 수
         assert results[0].chunk_id == "1"   # 반환 청크 ID
@@ -266,7 +266,7 @@ class TestSearchResilience:
         ]
         mock_sparse.side_effect = SearchTimeoutError("Sparse 타임아웃")
 
-        results = hybrid_search("영업권 손상차손 인식 기준은?", top_k=5)
+        results = search_chunks("영업권 손상차손 인식 기준은?", top_k=5)
 
         assert len(results) == 1    # 최종 반환 결과 수
         assert results[0].chunk_id == "1"   # 반환 청크 ID
@@ -279,6 +279,6 @@ class TestSearchResilience:
         mock_sparse.side_effect = SearchTimeoutError("Sparse 타임아웃")
 
         with pytest.raises(DatabaseQueryError) as exc_info:
-            hybrid_search("영업권 손상차손 인식 기준은?", top_k=5)
+            search_chunks("영업권 손상차손 인식 기준은?", top_k=5)
 
         assert "모두 실패" in str(exc_info.value)   # 에러 메시지

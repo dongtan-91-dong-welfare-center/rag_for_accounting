@@ -65,9 +65,9 @@ class TestScenarioNoContext:
             mock_reranked = reranked_chunks
 
         with (
-            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": mock_reranked}),
-            patch("src.agent.workflow.evaluate_context", return_value={
+            patch("src.agent.workflow.search", return_value={"retrieved_chunks": chunks}),
+            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": mock_reranked}),
+            patch("src.agent.workflow.evaluate", return_value={
                 "evaluation": EvaluationResult(
                     is_relevant=bool(mock_reranked), needs_external=False,
                     confidence=0.9 if mock_reranked else 0.0,
@@ -119,8 +119,8 @@ class TestScenarioNoContext:
 
         # 해당 노드만 에러 버전으로 교체
         patch_target = {
-            "search": "src.agent.workflow.hybrid_search",
-            "rerank": "src.agent.workflow.rerank_chunks",
+            "search": "src.agent.workflow.search",
+            "rerank": "src.agent.workflow.rerank",
         }[expected_node]
 
         with patch(patch_target, side_effect=decorated):
@@ -150,10 +150,10 @@ class TestScenarioNoContext:
         chunks = make_retrieved_chunks(search_scores)
 
         with (
-            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
+            patch("src.agent.workflow.search", return_value={"retrieved_chunks": chunks}),
             patch("src.agent.workflow.config.USE_RERANKER", True),
-            patch("src.agent.workflow.rerank", side_effect=RerankFailureError("리랭킹 모델 호출 실패")),
-            patch("src.agent.workflow.evaluate_context", return_value={
+            patch("src.agent.workflow._rerank_impl", side_effect=RerankFailureError("리랭킹 모델 호출 실패")),
+            patch("src.agent.workflow.evaluate", return_value={
                 "evaluation": EvaluationResult(
                     is_relevant=True, needs_external=False,
                     confidence=0.9, reasoning="폴백 청크 기반 평가 충분"

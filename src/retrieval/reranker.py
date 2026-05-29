@@ -17,11 +17,11 @@ except Exception as e:
     logger.warning(f"Cross-Encoder 모델 로드 실패 — compute_relevance_score 호출 시 RerankFailureError 발생: {e}")
 
 
-def rerank(original_query: str, chunks: list[RetrievedChunk]) -> list[RerankingResult]:
+def rerank_chunks(original_query: str, chunks: list[RetrievedChunk]) -> list[RerankingResult]:
     """
     Cross-Encoder로 질의-문서 쌍의 관련도를 재산출하여 정렬한다.
     유틸리티 수준에서는 threshold 기반 필터링을 수행하지 않는다.
-    rerank_chunks 노드애서 USE_RERANKER를 사전 확인한 뒤 호출한다.
+    rerank 노드애서 USE_RERANKER를 사전 확인한 뒤 호출한다.
 
     Args:
         original_query: 사용자 원문 또는 재작성된 쿼리

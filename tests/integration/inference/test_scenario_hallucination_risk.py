@@ -63,9 +63,9 @@ class TestScenarioHallucinationRisk:
 
         # Mock 데이터 생성
         with (
-            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": reranked}),
-            patch("src.agent.workflow.evaluate_context", side_effect=eval_sequence),
+            patch("src.agent.workflow.search", return_value={"retrieved_chunks": chunks}),
+            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": reranked}),
+            patch("src.agent.workflow.evaluate", side_effect=eval_sequence),
         ):
             state = GraphState(original_query="영업권 손상차손 인식 기준은?", standard_filter="ALL")
             final_state = mocked_app.invoke(state)
@@ -87,9 +87,9 @@ class TestScenarioHallucinationRisk:
         eval_always_retry = make_eval_result(needs_external=True, confidence=0.1)
 
         with (
-            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank_chunks", return_value={"reranked_chunks": reranked}),
-            patch("src.agent.workflow.evaluate_context", return_value=eval_always_retry),
+            patch("src.agent.workflow.search", return_value={"retrieved_chunks": chunks}),
+            patch("src.agent.workflow.rerank", return_value={"reranked_chunks": reranked}),
+            patch("src.agent.workflow.evaluate", return_value=eval_always_retry),
         ):
             state = GraphState(original_query="무한 루프 테스트", standard_filter="ALL")
             final_state = mocked_app.invoke(state)
@@ -125,8 +125,8 @@ class TestScenarioHallucinationRisk:
         decorated = handle_node_errors(error_node)(raise_error)
 
         patch_target = {
-            "evaluate": "src.agent.workflow.evaluate_context",
-            "search": "src.agent.workflow.hybrid_search",
+            "evaluate": "src.agent.workflow.evaluate",
+            "search": "src.agent.workflow.search",
         }[error_node]
 
         with patch(patch_target, side_effect=decorated):
@@ -174,9 +174,9 @@ class TestScenarioHallucinationRisk:
         decorated_evaluate = handle_node_errors("evaluate")(raise_eval_error)
 
         with (
-            patch("src.agent.workflow.hybrid_search", return_value={"retrieved_chunks": chunks}),
-            patch("src.agent.workflow.rerank_chunks", side_effect=mock_rerank_score_error),
-            patch("src.agent.workflow.evaluate_context", side_effect=decorated_evaluate),
+            patch("src.agent.workflow.search", return_value={"retrieved_chunks": chunks}),
+            patch("src.agent.workflow.rerank", side_effect=mock_rerank_score_error),
+            patch("src.agent.workflow.evaluate", side_effect=decorated_evaluate),
         ):
             state = GraphState(original_query="needs_reretrieval 우선순위 통합 검증", standard_filter="ALL")
             final_state = mocked_app.invoke(state)
