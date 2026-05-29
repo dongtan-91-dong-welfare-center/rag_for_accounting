@@ -2,6 +2,8 @@
 
 from datetime import datetime
 from functools import wraps
+from typing import Any, Literal
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from src.agent.nodes.generate import generate_response
@@ -21,8 +23,7 @@ from src.utils.exception import (
 from src.utils.logger import get_logger
 from src.models.state import GraphState
 from src.models.schemas import (
-    RetrievedChunk, FinalResponse, EvaluationResult,
-    Citation, RerankingResult
+    RetrievedChunk, FinalResponse, RerankingResult
 )
 
 logger = get_logger(__name__)
@@ -56,17 +57,28 @@ def handle_node_errors(node_name: str):
         return wrapper
     return decorator
 
+from src.agent.nodes.rewrite import rewrite_query as _rewrite_impl
+
 @handle_node_errors("rewrite")
 def rewrite_query(state: GraphState) -> dict:
     """
-    TODO: FUNC-004 (질의 재작성 노드) - Mock 구현
-    실제 구현 대기 (src/agent/nodes/rewrite.py)
-
-    [반환 패턴 설명]
-    LangGraph는 노드가 반환한 dict의 키를 State의 필드명과 매칭하여 해당 필드만 증분 업데이트합니다.
-    따라서 GraphState 전체를 반환할 필요 없이, 이 노드가 업데이트할 필드(여기서는 rewrite_count)만 반환하면 됩니다.
+    질의 재작성 노드 연결
     """
-    return {"rewrite_count": state.rewrite_count + 1}
+    # 주의: 래퍼에서 rewrite_count를 증가시키므로, 
+    # _rewrite_impl 내부에서는 카운트를 증가시키지 않아야 한다는 계약을 유지합니다.
+    state.rewrite_count += 1
+    
+    # 실제 모듈을 통해 상태 변화 수행 (in-place mutation)
+    # updated_state는 사실상 state와 동일한 객체입니다.
+    updated_state = _rewrite_impl(state)
+    
+    # TODO: _rewrite_impl과 handle_node_errors 간의 이중 예외 처리 중복 해결 필요
+    return {
+        "rewrite_count": updated_state.rewrite_count,
+        "rewritten_query": updated_state.rewritten_query,
+        "is_accounting_query": updated_state.is_accounting_query,
+        "error_logs": updated_state.error_logs,
+    }
 
 def hybrid_search(state: GraphState) -> dict:
     """하이브리드 검색 노드 — searcher.hybrid_search() 호출"""
@@ -218,6 +230,10 @@ def route_after_evaluate(state: GraphState) -> str:
     error_logs[-1]["node"] == "evaluate" 조건이 먼저 트리거되고, 결과적으로 needs_reretrieval=True 신호가
     무시된 채 잘못된 답변 생성으로 직행하는 버그가 발생한다.
     """
+    # TODO: evaluation이 None일 경우의 예외 처리에 대해 재검토 요망.
+    # 현재 단계에서는 유닛 테스트와의 충돌 방지 및 파이프라인의 안전한 종료를 위해 
+    # ValueError 발생 대신 generate로 안전하게 우회하도록 유지합니다.
+
     # 1순위: 어느 노드에서든 재검색이 확정된 상태라면, 다른 안전장치보다 먼저 rewrite를 고려한다.
     if state.needs_reretrieval and state.rewrite_count < MAX_REWRITE_COUNT:
         return "rewrite"
@@ -282,3 +298,42 @@ def build_workflow() -> CompiledStateGraph:
 
     # 그래프 컴파일
     return workflow.compile()
+
+
+def run_workflow(query: str, standard_filter: Literal["GAAP", "KIFRS", "ALL"] = "ALL") -> dict[str, Any]:
+    """
+    외부에서 워크플로우를 실행하기 위한 진입점 함수.
+    """
+    app = build_workflow()
+    
+    # 노드별 30초 타임아웃 설정 (LangGraph CompiledStateGraph 속성)
+    app.step_timeout = 30
+    
+    initial_state = GraphState(original_query=query, standard_filter=standard_filter)
+    
+    try:
+        # 정상 반환 시 LangGraph의 invoke()는 dict를 반환하며 값들은 Pydantic 객체를 유지합니다.
+        return app.invoke(
+            initial_state, 
+            config={
+                "recursion_limit": MAX_REWRITE_COUNT * 5 + 5
+            }
+        )
+    except GraphRecursionError:
+        # GraphRecursionError 발생 시 최선 답변 혹은 답변 불가 상태 반환
+        initial_state.final_response = FinalResponse(
+            answer="너무 많은 재시도가 발생하여 답변을 생성하지 못했습니다. 질문을 구체화하여 다시 시도해주세요.",
+            citations=[],
+            is_answerable=False,
+            confidence_score=0.0
+        )
+        # TODO: 예외 발생 시 error_logs 기록 및 우아한(graceful) 상태 반환 로직 정교화
+        # invoke() 결과와 동일한 직렬화 구조 유지를 위해, model_dump() 대신 
+        # Pydantic 인스턴스를 값으로 유지하는 dict comprehension 방식을 사용합니다.
+        return {k: getattr(initial_state, k) for k in GraphState.model_fields}  # {<'original_query': QueryObject>, <'standard_filter': 'ALL'>, ...}
+    except TimeoutError:
+        # 타임아웃 발생 시
+        # TODO: MVP 단계에서는 타임아웃 발생 시 호출자(API 라우터 등)가 예외를 처리하도록 재전파(re-raise)합니다. 
+        # 추후 타임아웃 발생 시 안전한 GraphState 반환 및 error_logs 기록 로직 추가 필요.
+        # traceback을 보존하기 위해 인수 없이 raise를 사용합니다.
+        raise

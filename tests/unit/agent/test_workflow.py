@@ -1,7 +1,7 @@
 import pytest
 from langgraph.graph.state import CompiledStateGraph
 from unittest.mock import MagicMock, patch
-from src.agent.workflow import route_after_evaluate, hybrid_search
+from src.agent.workflow import route_after_evaluate, hybrid_search, run_workflow
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
 from src.models.schemas import EvaluationResult
@@ -278,3 +278,47 @@ class TestHybridSearchNode:
 
         with pytest.raises(RuntimeError, match="예상치 못한 시스템 오류"):
             hybrid_search(self._make_state())
+
+
+@pytest.mark.unit
+class TestRunWorkflow:
+    """run_workflow() 실행기 단위 테스트"""
+
+    @patch("src.agent.workflow.build_workflow")
+    def test_run_workflow_normal(self, mock_build_workflow):
+        """정상 흐름 호출 시 invoke 결과 반환 검증"""
+        mock_app = MagicMock()
+        mock_app.invoke.return_value = {"original_query": "영업권 손상차손 인식 기준은?", "final_response": "영업권의 장부금액이 배분된 현금창출단위(CGU)의 회수가능액에 미달할 때..."}
+        mock_build_workflow.return_value = mock_app
+
+        result = run_workflow("영업권 손상차손 인식 기준은?")
+        assert result["original_query"] == "영업권 손상차손 인식 기준은?"
+        assert result["final_response"] == "영업권의 장부금액이 배분된 현금창출단위(CGU)의 회수가능액에 미달할 때..."
+        assert mock_app.step_timeout == 30
+
+    @patch("src.agent.workflow.build_workflow")
+    def test_run_workflow_recursion_fallback(self, mock_build_workflow):
+        """GraphRecursionError 발생 시 fallback 딕셔너리 반환 검증"""
+        from langgraph.errors import GraphRecursionError
+        from src.models.schemas import FinalResponse
+
+        mock_app = MagicMock()
+        mock_app.invoke.side_effect = GraphRecursionError("최대 재귀 횟수 초과")
+        mock_build_workflow.return_value = mock_app
+
+        result = run_workflow("영업권 손상차손 인식 기준은?")
+        
+        assert isinstance(result["final_response"], FinalResponse)
+        assert result["final_response"].is_answerable is False
+        assert "재시도" in result["final_response"].answer
+
+    @patch("src.agent.workflow.build_workflow")
+    def test_run_workflow_timeout_propagates(self, mock_build_workflow):
+        """TimeoutError 발생 시 예외가 그대로 상위로 전파(raise)되는지 검증"""
+        mock_app = MagicMock()
+        mock_app.invoke.side_effect = TimeoutError("시간 초과")
+        mock_build_workflow.return_value = mock_app
+
+        with pytest.raises(TimeoutError):
+            run_workflow("영업권 손상차손 인식 기준은?")
+
