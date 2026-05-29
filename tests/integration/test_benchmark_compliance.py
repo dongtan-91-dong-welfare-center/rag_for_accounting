@@ -17,31 +17,10 @@ from src.models.schemas import (
     RetrievedChunk, RerankingResult, EvaluationResult, 
     FinalResponse, Citation
 )
+from src.agent.workflow import run_workflow
 
 # ── Benchmark 케이스 로딩 ──
 _BENCHMARK_CASES = load_benchmark()
-
-
-def _make_mock_final_response(case: BenchmarkCase) -> FinalResponse:
-    """
-    Benchmark 케이스의 기대 정답과 근거 문헌을 기반으로 Mock FinalResponse 객체를 생성한다.
-    TODO: 실제 LLM 연동 시 이 Mock을 제거하고 실제 워크플로우 결과를 사용
-    """
-    citations = [
-        Citation(
-            document_id=f"REF-{i:03d}",
-            chunk_id=f"chunk-{i}",
-            content=ref,
-            relevance_score=0.9
-        )
-        for i, ref in enumerate(case.references)
-    ]
-    return FinalResponse(
-        answer=case.expected_answer,
-        citations=citations,
-        is_answerable=True,
-        confidence_score=0.85
-    )
 
 
 @pytest.mark.benchmark
@@ -58,8 +37,10 @@ class TestBenchmarkCompliance:
         답변의 citations에 Benchmark 정답셋의 '근거 문헌' 키워드가 포함되는지 검증.
         회계 RAG 시스템의 핵심 가치는 '어떤 기준서 조항을 근거로 답했는가'에 있습니다.
         """
-        # TODO: 실제 LLM 연동 후 아래 Mock을 workflow_app.invoke()로 교체
-        response = _make_mock_final_response(case)
+        # 실제 워크플로우를 실행하여 결과 획득
+        result = run_workflow(case.query, standard_filter=case.standard)
+        response = result.get("final_response")
+        assert response is not None, f"[{case.id}] final_response 결과가 존재하지 않습니다."
 
         # 모든 citation의 content를 하나의 문자열로 결합
         all_citation_text = " ".join(c.content for c in response.citations)
@@ -84,8 +65,10 @@ class TestBenchmarkCompliance:
         Benchmark 케이스에 대해 is_answerable=True가 반환되는지 검증
         Benchmark에 포함된 질의는 모두 회계 기준서에서 답변 가능한 질의입니다.
         """
-        # TODO: 실제 LLM 연동 후 아래 Mock을 workflow_app.invoke()로 교체
-        response = _make_mock_final_response(case)
+        # 실제 워크플로우를 실행하여 결과 획득
+        result = run_workflow(case.query, standard_filter=case.standard)
+        response = result.get("final_response")
+        assert response is not None, f"[{case.id}] final_response 결과가 존재하지 않습니다."
 
         assert response.is_answerable is True, (
             f"[{case.id}] 답변 가능한 질의인데 is_answerable=False 반환"
@@ -105,3 +88,4 @@ class TestBenchmarkCompliance:
         assert case.standard in valid_standards, (
             f"[{case.id}] 잘못된 standard 값: {case.standard}"
         )
+
