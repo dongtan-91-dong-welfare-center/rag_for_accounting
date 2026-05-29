@@ -17,7 +17,7 @@ class BenchmarkCase:
     id: str
     category: str
     standard: str               # "GAAP" | "KIFRS"
-    input: str                  # 사용자 질의
+    query: str                  # 사용자 질의
     expected_answer: str        # 기대 정답 요약
     references: list[str] = field(default_factory=list)  # 근거 문헌 목록
 
