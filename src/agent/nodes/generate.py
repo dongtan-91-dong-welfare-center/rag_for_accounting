@@ -11,7 +11,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from src.models.state import GraphState
 from src.models.schemas import RerankingResult, Citation, FinalResponse, LLMInternalResponse
 from src.agent.prompts import GENERATION_PROMPT
-from src.utils.config import RERANK_THRESHOLD, KST, MAX_CONTEXT_TOKENS
+from src.utils.config import RERANK_THRESHOLD, KST, MAX_CONTEXT_TOKENS, OPENAI_MODEL
 from src.utils.exception import (
     AccountingRAGError,
     LLMResponseFormatError,
@@ -29,7 +29,7 @@ def generate_response(state: GraphState) -> dict:
     - 인용 근거를 포함한 FinalResponse를 state.final_response에 저장
     """
     # PydanticAI 에이전트 초기화
-    generator_agent = Agent("openai:gpt-4o-mini", output_type=LLMInternalResponse)
+    generator_agent = Agent(f"openai:{OPENAI_MODEL}", output_type=LLMInternalResponse)
 
     # 검색 결과가 없으면 답변 불가능 처리
     if not state.reranked_chunks:

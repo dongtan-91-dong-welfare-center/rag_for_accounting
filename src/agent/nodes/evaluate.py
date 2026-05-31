@@ -5,7 +5,7 @@ from pydantic_ai import Agent
 from src.models.state import GraphState
 from src.models.schemas import RerankingResult, EvaluationResult
 from src.agent.prompts import EVALUATION_PROMPT
-from src.utils.config import RERANK_THRESHOLD, MAX_REWRITE_COUNT
+from src.utils.config import RERANK_THRESHOLD, MAX_REWRITE_COUNT, OPENAI_MODEL
 from src.utils.exception import (
     AccountingRAGError,
     EvaluationParsingError,
@@ -42,7 +42,7 @@ _CITATION_PATTERN = re.compile(
 
 def evaluate_context(state: GraphState) -> dict:
     """
-    reranked_chunks를 EVALUATION_PROMPT + GPT-4o-mini로 평가한다.
+    reranked_chunks를 EVALUATION_PROMPT + config.OPENAI_MODEL로 평가한다.
     - 결과를 state.evaluation에 저장
     - needs_external=True이면 workflow가 외부 검색 경로로 라우팅
     """
@@ -82,7 +82,7 @@ def evaluate_context(state: GraphState) -> dict:
     )
 
     # PydanticAI Agent로 EvaluationResult 직접 파싱
-    evaluator_agent = Agent("openai:gpt-4o-mini", output_type=EvaluationResult)
+    evaluator_agent = Agent(f"openai:{OPENAI_MODEL}", output_type=EvaluationResult)
 
     try:
         result = evaluator_agent.run_sync(prompt)
