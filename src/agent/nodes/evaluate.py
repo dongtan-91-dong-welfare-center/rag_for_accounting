@@ -5,7 +5,7 @@ from pydantic_ai import Agent
 from src.models.state import GraphState
 from src.models.schemas import RerankingResult, EvaluationResult
 from src.agent.prompts import EVALUATION_PROMPT
-from src.utils.config import RERANK_THRESHOLD, MAX_REWRITE_COUNT
+from src.utils.config import RERANK_THRESHOLD, MAX_REWRITE_COUNT, OPENAI_MODEL
 from src.utils.exception import (
     AccountingRAGError,
     EvaluationParsingError,
@@ -81,8 +81,7 @@ def evaluate_context(state: GraphState) -> dict:
         chunks=chunks_text,
     )
 
-    # PydanticAI Agent로 EvaluationResult 직접 파싱
-    evaluator_agent = Agent("openai:gpt-4o-mini", output_type=EvaluationResult)
+    evaluator_agent = Agent(f"openai:{OPENAI_MODEL}", output_type=EvaluationResult)
 
     try:
         result = evaluator_agent.run_sync(prompt)
