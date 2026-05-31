@@ -23,7 +23,7 @@ Phase 구조:
         검증합니다. Phase 0 통과 후에만 실행됩니다.
 
     Phase 2 (Benchmark — Business Quality)
-        Benchmark 정답셋(21개)을 투입하여 답변 품질·근거 인용·
+        Benchmark 정답셋(K-GAAP 14개)을 투입하여 답변 품질·근거 인용·
         기준서 필터 정합성을 검증합니다. Phase 1 통과 후에만 실행됩니다.
 
 설계 원칙:

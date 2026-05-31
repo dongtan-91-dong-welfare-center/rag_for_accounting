@@ -1,7 +1,7 @@
 """
 Benchmark 데이터셋 기반 회계 RAG 정답셋(Ground Truth) 검증
 
-산출물 - Benchmark.csv의 21개 케이스를 pytest.mark.parametrize로 동적 생성하여,
+산출물 - Benchmark 시트의 K-GAAP 14개 케이스를 pytest.mark.parametrize로 동적 생성하여,
 워크플로우의 회계적 신뢰성을 데이터 구동 방식으로 검증합니다.
 
 검증 방식:
