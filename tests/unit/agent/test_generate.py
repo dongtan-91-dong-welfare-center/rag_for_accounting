@@ -8,6 +8,10 @@
     - build_unanswerable_response(): 안전 응답 생성
 """
 import pytest
+import pydantic
+import httpx
+from pydantic import BaseModel
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from unittest.mock import MagicMock, patch
 from src.models.schemas import (
     RetrievedChunk,
@@ -18,7 +22,7 @@ from src.models.schemas import (
     LLMInternalResponse
 )
 from src.models.state import GraphState
-from src.utils.config import RERANK_THRESHOLD
+from src.utils.config import MAX_CONTEXT_TOKENS
 from src.utils.exception import LLMResponseFormatError, LLMAPIConnectionError
 from src.agent.nodes.generate import extract_citations_from_text, build_unanswerable_response, generate_response
 
@@ -177,3 +181,160 @@ class TestGenerateResponse:
         assert "error_logs" in result   # error_logs가 존재하는지 확인
         assert result["error_logs"][0]["error_type"] == "CM-002"    # 에러 타입이 CM-002인지 확인
         assert result["final_response"].is_answerable is False       # 폴백 응답이 반환되는지 확인
+
+    def test_context_truncation_drops_excess_chunks(self):
+        """MAX_CONTEXT_TOKENS 초과 시 후순위 청크가 조립에서 제외되는지 검증 (GN-402 트런케이션)"""
+        small_content = "청크내용" * 10
+        # [2] + large_content를 추가하면 estimated_tokens > MAX_CONTEXT_TOKENS가 되도록 설정
+        large_content = "가" * (MAX_CONTEXT_TOKENS * 2 + 1)
+
+        state = GraphState(
+            original_query="영업권 손상차손의 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content=small_content, score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c2", document_id="D1", content=large_content, score=0.8, metadata={}),
+                    rerank_score=0.85,
+                ),
+            ],
+        )
+        mock_response = LLMInternalResponse(answer="영업권의 장부금액이 배분된 현금창출단위(CGU)의 회수가능액에 미달할 때...[1]", is_answerable=True, llm_self_score=0.9)
+        with _mock_generator_agent(response=mock_response):
+            result = generate_response(state)
+
+        assert "final_response" in result   # 정상적으로 최종 응답이 반환되었는지
+        assert len(result["final_response"].citations) == 1 # 두 번째 청크는 토큰 한도 초과로 인해 제외 → citations는 c1 하나만 포함
+        assert result["final_response"].citations[0].chunk_id == "c1"  # 첫 번째 청크의 ID가 올바르게 저장되었는지
+
+    def test_context_length_exceeded_raises_gn402(self):
+        """첫 번째 청크만으로 토큰 한도 초과 시 GN-402 에러 로그가 기록되는지 검증"""
+        huge_content = "가" * (MAX_CONTEXT_TOKENS * 2 + 1)
+
+        state = GraphState(
+            original_query="영업권 손상차손의 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content=huge_content, score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        result = generate_response(state)
+
+        assert "error_logs" in result   # 에러 로그가 기록되었는지
+        assert result["error_logs"][0]["error_type"] == "GN-402"   # GN-402 타입이 올바르게 기록되었는지
+        assert result["final_response"].is_answerable is False  # 답변 불가능한 경우의 안전 응답이 반환되었는지
+
+    def test_pydantic_validation_error_wrapped_as_gn401(self):
+        """pydantic.ValidationError 발생 시 GN-401 에러 로그로 기록되는지 검증"""
+        class _M(BaseModel):
+            x: int
+
+        try:
+            _M(x="잘못된 값")  # type: ignore[arg-type]
+        except pydantic.ValidationError as ve:
+            validation_error = ve
+
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="내용", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_generator_agent(error=validation_error):
+            result = generate_response(state)
+
+        assert result["error_logs"][0]["error_type"] == "GN-401" # pydantic.ValidationError 발생 시 GN-401 에러 로그로 기록되는지 검증
+        assert result["final_response"].is_answerable is False  # 답변 불가능한 경우의 안전 응답이 반환되었는지
+
+    def test_unexpected_model_behavior_wrapped_as_gn401(self):
+        """pydantic_ai.UnexpectedModelBehavior 발생 시 GN-401 에러 로그로 기록되는지 검증"""
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="내용", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_generator_agent(error=UnexpectedModelBehavior("예상치 못한 모델 출력")):
+            result = generate_response(state)
+
+        assert result["error_logs"][0]["error_type"] == "GN-401" # pydantic_ai.UnexpectedModelBehavior 발생 시 GN-401 에러 로그로 기록되는지 검증
+        assert result["final_response"].is_answerable is False  # 답변 불가능한 경우의 안전 응답이 반환되었는지
+
+    def test_httpx_request_error_wrapped_as_cm002(self):
+        """httpx.RequestError 발생 시 CM-002 에러 로그로 기록되는지 검증"""
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="내용", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_generator_agent(error=httpx.RequestError("connection failed")):
+            result = generate_response(state)
+
+        assert result["error_logs"][0]["error_type"] == "CM-002"    # httpx.RequestError 발생 시 CM-002 에러 로그로 기록되는지 검증
+        assert result["final_response"].is_answerable is False  # 답변 불가능한 경우의 안전 응답이 반환되었는지
+
+    def test_generation_score_clamped_below_zero(self):
+        """llm_self_score < 0.0 이면 generation_score가 0.0으로 클램핑되는지 검증"""
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="내용", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        mock_response = LLMInternalResponse(answer="영업권의 장부금액이 배분된 현금창출단위(CGU)의 회수가능액에 미달할 때...[1]", is_answerable=True, llm_self_score=-0.5)
+        with _mock_generator_agent(response=mock_response):
+            result = generate_response(state)
+
+        assert result["generation_score"] == 0.0    # llm_self_score < 0.0 이면 generation_score가 0.0으로 클램핑되는지 검증
+
+    def test_generation_score_clamped_above_one(self):
+        """llm_self_score > 1.0 이면 generation_score가 1.0으로 클램핑되는지 검증"""
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="내용", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        mock_response = LLMInternalResponse(answer="영업권의 장부금액이 배분된 현금창출단위(CGU)의 회수가능액에 미달할 때...[1]", is_answerable=True, llm_self_score=1.5)
+        with _mock_generator_agent(response=mock_response):
+            result = generate_response(state)
+
+        assert result["generation_score"] == 1.0    # llm_self_score > 1.0 이면 generation_score가 1.0으로 클램핑되는지 검증
+
+    def test_empty_citations_with_answerable_raises_gn401(self):
+        """is_answerable=True이고 citations가 없으면 GN-401 에러 로그가 기록되는지 검증"""
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="내용", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        mock_response = LLMInternalResponse(answer="영업권의 장부금액이 배분된 현금창출단위(CGU)의 회수가능액에 미달할 때...", is_answerable=True, llm_self_score=0.9)
+        with _mock_generator_agent(response=mock_response):
+            result = generate_response(state)
+
+        assert result["error_logs"][0]["error_type"] == "GN-401"    # is_answerable=True이고 citations가 없으면 GN-401 에러 로그가 기록되는지 검증
+        assert result["final_response"].is_answerable is False  # 답변 불가능한 경우의 안전 응답이 반환되었는지

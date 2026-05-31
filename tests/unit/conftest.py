@@ -32,7 +32,7 @@ def mock_llm_agent():
     개별 테스트에서 다른 동작이 필요하면 src.agent.nodes.evaluate.Agent를 재패치하면 된다.
     """
     generate_response = LLMInternalResponse(
-        answer="채권형 매도가능증권은 유효이자율법에 따라 처리됩니다.",
+        answer="채권형 매도가능증권은 유효이자율법에 따라 처리됩니다. [1]",
         is_answerable=True,
         llm_self_score=0.9
     )
