@@ -21,7 +21,7 @@ def get_logger(name: str) -> logging.Logger:
             "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
         ))
         logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+        logger.setLevel(logging.INFO)
     return logger
 
 def log_execution_time(func):
