@@ -8,11 +8,15 @@ import pytest
 from unittest.mock import patch
 from src.retrieval.searcher import search_chunks
 from src.utils.config import CHUNKS_TABLE
-from src.db.connection import get_pool
+from src.db.connection import get_pool, init_pool
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_test_db():
     """테스트용 임시 테이블 생성 및 데이터 적재, 종료 시 삭제"""
+    try:
+        init_pool()
+    except Exception as e:
+        pytest.skip(f"통합 테스트 건너뜀: 커넥션 풀 초기화 불가 ({e})")
     pool = get_pool()
     try:
         with pool.connection() as conn:
