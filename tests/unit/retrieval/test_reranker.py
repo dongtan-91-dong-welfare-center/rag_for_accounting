@@ -1,6 +1,8 @@
+import math
+
 import pytest
-from unittest.mock import patch
-from src.retrieval.reranker import rerank_chunks
+from unittest.mock import patch, MagicMock
+from src.retrieval.reranker import rerank_chunks, compute_relevance_scores
 from src.agent.workflow import rerank
 from src.models.schemas import RetrievedChunk, RerankingResult
 from src.models.state import GraphState
@@ -11,10 +13,10 @@ from src.utils.exception import RerankFailureError, ScoreThresholdError
 class TestRerank:
     """rerank() 헬퍼 함수 단위 테스트"""
 
-    @patch('src.retrieval.reranker.compute_relevance_score')
+    @patch('src.retrieval.reranker.compute_relevance_scores')
     def test_multiple_chunks_returns_descending_order(self, mock_compute, sample_chunks):
         """다중 후보군을 입력받아 연관성 점수 내림차순으로 정렬되어 반환되는지 검증"""
-        mock_compute.side_effect = [0.2, 0.5, 0.9]
+        mock_compute.return_value = [0.2, 0.5, 0.9]
 
         results = rerank_chunks("영업권 손상차손 인식 기준은?", sample_chunks)
 
@@ -31,7 +33,7 @@ class TestRerank:
         results = rerank_chunks("영업권 손상차손 인식 기준은?", [])
         assert results == []    # 빈 리스트인지 확인
 
-    @patch('src.retrieval.reranker.compute_relevance_score')
+    @patch('src.retrieval.reranker.compute_relevance_scores')
     def test_single_chunk_returns_max_score_without_model_call(self, mock_compute):
         """후보가 1개일 때 모델 추론 없이 즉시 1.0 점수로 반환하는지 검증"""
         single_chunk = [RetrievedChunk(chunk_id="1", document_id="doc1", content="content", score=0.5, metadata={})]
@@ -41,13 +43,13 @@ class TestRerank:
         assert results[0].rerank_score == 1.0   # 점수가 1.0인지 확인
         mock_compute.assert_not_called()    # 모델 추론이 호출되지 않았는지 확인
 
-    @patch('src.retrieval.reranker.compute_relevance_score')
+    @patch('src.retrieval.reranker.compute_relevance_scores')
     def test_below_threshold_scores_returns_sorted_list(self, mock_compute, sample_chunks):
         """점수가 RERANK_THRESHOLD 미만이어도 필터링 없이 정렬된 리스트를 반환하는지 확인
 
         NOTE: rerank()는 임계값 필터링을 수행하지 않는다. 필터링은 rerank_chunks() 노드의 책임이다.
         """
-        mock_compute.side_effect = [0.1, 0.2, 0.3]
+        mock_compute.return_value = [0.1, 0.2, 0.3]
 
         results = rerank_chunks("영업권 손상차손 인식 기준은?", sample_chunks)
 
@@ -57,7 +59,7 @@ class TestRerank:
         assert results[2].chunk.chunk_id == "1" # 1번 청크가 가장 낮음
         assert results[2].rerank_score == 0.1   # 0.1로 정렬 확인
 
-    @patch('src.retrieval.reranker.compute_relevance_score')
+    @patch('src.retrieval.reranker.compute_relevance_scores')
     def test_system_exception_propagates_without_wrapping(self, mock_compute, sample_chunks):
         """모델 장애 발생 시 원본 시스템 예외가 AccountingRAGError로 래핑되지 않고 그대로 전파되는지 확인
 
@@ -67,6 +69,39 @@ class TestRerank:
 
         with pytest.raises(Exception, match="예상치 못한 에러 발생"):
             rerank_chunks("영업권 손상차손 인식 기준은?", sample_chunks)
+
+
+@pytest.mark.unit
+class TestComputeRelevanceScores:
+    """compute_relevance_scores() 배치 스코어링 단위 테스트"""
+
+    def test_model_load_failure_raises_rerank_failure_error(self):
+        """모델 로드 실패(_cross_encoder is None) 시 NameError가 아닌 RerankFailureError가 발생하는지 검증
+
+        모듈 상단에서 _cross_encoder/_load_error를 None으로 선언하므로,
+        로드 실패 상태에서도 NameError 없이 의도한 RerankFailureError로 분기되어야 한다.
+        """
+        with patch('src.retrieval.reranker._cross_encoder', None), \
+             patch('src.retrieval.reranker._load_error', RuntimeError("모델 경로 오류")):
+            with pytest.raises(RerankFailureError, match="Cross-Encoder 모델 로드 실패"):
+                compute_relevance_scores("질의", ["문서1", "문서2"])
+
+    def test_single_forward_pass_for_multiple_contents(self):
+        """다수 문서 입력 시 predict가 쌍 리스트로 1회만 호출되는지(forward pass 1회) 검증"""
+        mock_encoder = MagicMock()
+        mock_encoder.predict.return_value = [0.0, 2.0, -2.0]
+
+        with patch('src.retrieval.reranker._cross_encoder', mock_encoder):
+            scores = compute_relevance_scores("질의", ["문서1", "문서2", "문서3"])
+
+        # predict는 청크 수와 무관하게 단 1회 호출되어야 한다
+        mock_encoder.predict.assert_called_once()
+        called_pairs = mock_encoder.predict.call_args[0][0]
+        assert called_pairs == [("질의", "문서1"), ("질의", "문서2"), ("질의", "문서3")]
+
+        # raw score에 로지스틱(시그모이드)이 적용되었는지 확인
+        expected = [1 / (1 + math.exp(-s)) for s in (0.0, 2.0, -2.0)]
+        assert scores == pytest.approx(expected)    # 부동 소수점의 미세한 연산 오차를 허용
 
 
 @pytest.mark.unit
@@ -132,7 +167,7 @@ class TestRerankNode:
         assert result["needs_reretrieval"] is True   # needs_reretrieval이 True인지 확인
 
     @patch('src.agent.workflow.config.USE_RERANKER', True)
-    @patch('src.retrieval.reranker.compute_relevance_score')
+    @patch('src.retrieval.reranker.compute_relevance_scores')
     def test_rerank_all_scores_below_threshold(self, mock_compute):
         """모든 rerank 점수가 임계값 미만: needs_reretrieval=True + reranked_chunks=[] + RR-202
 
@@ -140,10 +175,10 @@ class TestRerankNode:
         to_error_log()를 통해 error_logs에 누적한다. 동시에 needs_reretrieval=True 신호를 발신하여
         라우팅이 rewrite 노드로 재진입하도록 한다.
 
-        NOTE: rerank()는 청크가 1개면 compute_relevance_score를 호출하지 않고 1.0을 반환한다.
-        2개 이상의 청크가 있어야 compute_relevance_score가 실제로 호출된다.
+        NOTE: rerank()는 청크가 1개면 compute_relevance_scores를 호출하지 않고 1.0을 반환한다.
+        2개 이상의 청크가 있어야 compute_relevance_scores가 실제로 호출된다.
         """
-        mock_compute.return_value = 0.1  # RERANK_THRESHOLD(0.5) 미만
+        mock_compute.return_value = [0.1, 0.1]  # RERANK_THRESHOLD(0.5) 미만, 청크 2개
         state = GraphState(
             original_query="영업권 손상차손 인식 기준은?",
             retrieved_chunks=[
@@ -163,13 +198,13 @@ class TestRerankNode:
         assert result["reranked_chunks"] == []   # reranked_chunks가 빈 리스트인지 확인
         assert result["needs_reretrieval"] is True   # needs_reretrieval이 True인지 확인
 
-    @patch('src.retrieval.reranker.compute_relevance_score')
+    @patch('src.retrieval.reranker.compute_relevance_scores')
     def test_success_path_sets_needs_reretrieval_false(self, mock_compute, sample_chunks):
         """정상 경로: 임계치 통과 시 needs_reretrieval=False가 반환 dict에 명시되는지 검증
 
         rerank_chunks의 모든 반환 경로에서 needs_reretrieval이 명시되도록 한 설계를 고정한다.
         """
-        mock_compute.return_value = 0.9   # RERANK_THRESHOLD(0.5) 이상
+        mock_compute.return_value = [0.9] * len(sample_chunks)   # RERANK_THRESHOLD(0.5) 이상
         state = GraphState(
             original_query="영업권 손상차손 인식 기준은?",
             retrieved_chunks=sample_chunks,

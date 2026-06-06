@@ -8,13 +8,17 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 모델 로드 실패 시에도 모듈 임포트가 NameError 없이 진행되도록 기본값을 선언한다.
+# (선언이 없으면 로드 실패 시 compute_relevance_scores의 None 체크가 NameError로 터진다)
+_cross_encoder = None
+_load_error = None
 try:
     from sentence_transformers import CrossEncoder as _CrossEncoder
     _cross_encoder = _CrossEncoder(RERANK_MODEL)
     logger.info(f"Cross-Encoder 모델 로드 완료: {RERANK_MODEL}")
 except Exception as e:
     _load_error = e
-    logger.warning(f"Cross-Encoder 모델 로드 실패 — compute_relevance_score 호출 시 RerankFailureError 발생: {e}")
+    logger.warning(f"Cross-Encoder 모델 로드 실패 — compute_relevance_scores 호출 시 RerankFailureError 발생: {e}")
 
 
 def rerank_chunks(original_query: str, chunks: list[RetrievedChunk]) -> list[RerankingResult]:
@@ -40,10 +44,12 @@ def rerank_chunks(original_query: str, chunks: list[RetrievedChunk]) -> list[Rer
         return [RerankingResult(chunk=chunks[0], rerank_score=1.0)]
 
     try:
-        scored_results = []
-        for chunk in chunks:
-            score = compute_relevance_score(original_query, chunk.content)
-            scored_results.append(RerankingResult(chunk=chunk, rerank_score=score))
+        # 청크별 개별 호출 대신 쌍 리스트를 한 번에 추론하여 forward pass를 1회로 줄인다.
+        scores = compute_relevance_scores(original_query, [chunk.content for chunk in chunks])
+        scored_results = [
+            RerankingResult(chunk=chunk, rerank_score=score)
+            for chunk, score in zip(chunks, scores)
+        ]
 
         # 점수 내림차순 정렬
         # TODO: Threshold 기반 필터링 추가 필요
@@ -63,9 +69,14 @@ def rerank_chunks(original_query: str, chunks: list[RetrievedChunk]) -> list[Rer
         raise
 
 
-def compute_relevance_score(query: str, content: str) -> float:
-    """단일 질의-문서 쌍의 Cross-Encoder 관련도 점수를 반환한다."""
+def compute_relevance_scores(query: str, contents: list[str]) -> list[float]:
+    """질의-문서 쌍 리스트의 Cross-Encoder 관련도 점수를 배치로 반환한다.
+
+    CrossEncoder.predict()는 쌍 리스트를 한 번의 forward pass로 처리하므로
+    청크 수와 무관하게 모델 추론을 1회만 수행한다.
+    """
     if _cross_encoder is None:
         raise RerankFailureError(f"Cross-Encoder 모델 로드 실패: {_load_error}")
-    score = _cross_encoder.predict([(query, content)])[0]
-    return 1 / (1 + math.exp(-score))    # 로지스틱 함수로 변환
+    pairs = [(query, content) for content in contents]
+    raw_scores = _cross_encoder.predict(pairs)  # type: ignore  # forward pass 1회, numpy.ndarray 반환
+    return [1 / (1 + math.exp(-float(score))) for score in raw_scores]    # 로지스틱 함수로 변환
