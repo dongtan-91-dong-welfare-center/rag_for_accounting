@@ -4,10 +4,13 @@ from typing import Literal, TypedDict
 from src.models.schemas import RewrittenQuery, RetrievedChunk, RerankingResult, EvaluationResult, FinalResponse
 
 class ErrorLog(TypedDict):
-    timestamp:  str   # ISO 8601 (UTC), 예: "2026-04-19T10:00:00Z"
-    node:       str   # 노드명: "rewrite" | "search" | "rerank" | "evaluate" | "generate"
-    error_type: str   # 예외 클래스명, 예: "TimeoutError"
-    message:    str   # str(e)
+    """
+    각 노드 실행 중 발생한 예외 정보를 기록하는 타입 딕셔너리.
+    """
+    timestamp:  str   # ISO 8601 형식의 한국 표준시(KST, +09:00). 예: "2026-04-19T10:00:00+09:00" (src.utils.config KST 활용)
+    node:       str   # 예외가 발생한 노드명: "rewrite" | "search" | "rerank" | "evaluate" | "generate" | "parse" | "ontology" | "index"
+    error_type: str   # 커스텀 에러 코드 (예: "CM-002", "SE-101") 또는 일반 예외 시 "UNKNOWN"
+    message:    str   # 에러 상세 메시지
 
 class GraphState(BaseModel):
     """
@@ -16,7 +19,7 @@ class GraphState(BaseModel):
     전체 흐름은 [상태 다이어그램](docs/assets/arch-state.svg)을 참고하세요.
     """
     # 사용자 초기 입력값
-    query:                str                    # 워크플로우 시작 시 주입됨. 불변에 가깝게 유지
+    original_query:                str                    # 워크플로우 시작 시 주입됨. 불변에 가깝게 유지
 
     # !TODO: UI 구현 시 사용자가 선택한 기준서(K-GAAP / K-IFRS / 모두)를 이 필드에 담아 GraphState를 생성해야 함
     standard_filter:      Literal["GAAP", "KIFRS", "ALL"] = "ALL"  # UI에서 사용자가 선택한 기준서 범위
@@ -33,10 +36,13 @@ class GraphState(BaseModel):
     # 문서 검색 및 재정렬 관련
     retrieved_chunks:     list[RetrievedChunk]   = []     # [search 노드] DB/벡터 검색된 원본 문서 청크 리스트
     reranked_chunks:      list[RerankingResult]  = []     # [rerank 노드] 쿼리와의 유사도를 기준으로 재정렬 및 필터링된 결과
+    needs_reretrieval:    bool                   = False  # [rerank/search/evaluate 노드] 검색 품질 부족으로 재검색이 필요함을 알리는 범용 신호. True면 route_after_evaluate가 최우선으로 rewrite로 라우팅한다.
 
     # 평가 및 답변 생성 관련
     evaluation:           EvaluationResult | None = None  # [evaluate 노드] 검색된 컨텍스트가 질의에 답하기 충분한지에 대한 LLM 판단
     final_response:       FinalResponse | None   = None   # [generate 노드] 최종 사용자 답변 및 참조 문서 메타데이터
+    retrieval_score:      float                  = 0.0    # [generate 노드] 검색 연관성 가중 평균 점수
+    generation_score:     float                  = 0.0    # [generate 노드] LLM 생성 자가 검증 점수
 
     # 에러 추적 및 부가 정보
     # 참고: error_logs를 노드가 실행될 때마다 기존 로그에 누적 추가하기 위해 데코레이터에서 직접 list.append()를 수행하거나,

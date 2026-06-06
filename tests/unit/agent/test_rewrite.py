@@ -1,4 +1,5 @@
 import json
+import pytest
 from unittest.mock import MagicMock, patch
 
 from src.agent.nodes.rewrite import (
@@ -31,15 +32,17 @@ def _mock_raw_resp(raw: str) -> MagicMock:
 
 # ── GraphState 기본값 ──────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 def test_state_default_fields():
-    state = GraphState(query="영업권 손상차손 인식 기준은?")
+    state = GraphState(original_query="영업권 손상차손 인식 기준은?")
     assert state.is_accounting_query is True
-    assert state.crag_count == 0
+    assert state.rewrite_count == 0
     assert state.rewritten_query is None
 
 
 # ── classify_and_select ────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestClassifyAndSelect:
     # [단위 테스트 범위]
     # LLM이 반환한 JSON을 올바르게 파싱·처리하는지만 검증
@@ -128,6 +131,7 @@ class TestClassifyAndSelect:
 
 # ── apply_hyde ─────────────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestApplyHyde:
     PATCH = "src.agent.nodes.rewrite.client"
     QUERY = "리스부채 최초 인식 방법은?"
@@ -137,7 +141,7 @@ class TestApplyHyde:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"hypothetical_answer": "리스부채는 리스료의 현재가치로 측정합니다."}
             )
-            result = apply_hyde(self.QUERY)
+            result = apply_hyde(self.QUERY, "ALL")
         assert result[0] == self.QUERY
         assert result[1] == "리스부채는 리스료의 현재가치로 측정합니다."
         assert len(result) == 2
@@ -145,7 +149,7 @@ class TestApplyHyde:
     def test_llm_failure_returns_original_only(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("timeout")
-            result = apply_hyde(self.QUERY)
+            result = apply_hyde(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_empty_hypothetical_returns_original_only(self):
@@ -153,19 +157,20 @@ class TestApplyHyde:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"hypothetical_answer": ""}
             )
-            result = apply_hyde(self.QUERY)
+            result = apply_hyde(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_markdown_wrapper_stripped_and_parsed(self):
         wrapped = "```json\n{\"hypothetical_answer\": \"리스부채는 현재가치로 측정합니다.\"}\n```"
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_raw_resp(wrapped)
-            result = apply_hyde(self.QUERY)
+            result = apply_hyde(self.QUERY, "ALL")
         assert result == [self.QUERY, "리스부채는 현재가치로 측정합니다."]
 
 
 # ── apply_decompose ────────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestApplyDecompose:
     PATCH = "src.agent.nodes.rewrite.client"
     QUERY = "유형자산과 무형자산의 감가상각 방법 차이는?"
@@ -176,7 +181,7 @@ class TestApplyDecompose:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": subs}
             )
-            result = apply_decompose(self.QUERY)
+            result = apply_decompose(self.QUERY, "ALL")
         assert result[0] == self.QUERY
         assert result[1:] == subs
         assert len(result) == 3
@@ -184,7 +189,7 @@ class TestApplyDecompose:
     def test_llm_failure_returns_original_only(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("timeout")
-            result = apply_decompose(self.QUERY)
+            result = apply_decompose(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_empty_subqueries_returns_original_only(self):
@@ -192,20 +197,21 @@ class TestApplyDecompose:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": []}
             )
-            result = apply_decompose(self.QUERY)
+            result = apply_decompose(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_markdown_wrapper_stripped_and_parsed(self):
         wrapped = "```json\n{\"sub_queries\": [\"유형자산 감가상각 방법은?\", \"무형자산 상각 방법은?\"]}\n```"
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_raw_resp(wrapped)
-            result = apply_decompose(self.QUERY)
+            result = apply_decompose(self.QUERY, "ALL")
         assert result[0] == self.QUERY
         assert len(result) == 3
 
 
 # ── apply_stepback ─────────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestApplyStepback:
     PATCH = "src.agent.nodes.rewrite.client"
     QUERY = "삼성전자 2023년 영업권 500억 손상 처리 기준은?"
@@ -215,7 +221,7 @@ class TestApplyStepback:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"abstract_query": "영업권 손상차손 인식 및 측정 기준은?"}
             )
-            result = apply_stepback(self.QUERY)
+            result = apply_stepback(self.QUERY, "ALL")
         assert result[0] == self.QUERY
         assert result[1] == "영업권 손상차손 인식 및 측정 기준은?"
         assert len(result) == 2
@@ -223,7 +229,7 @@ class TestApplyStepback:
     def test_llm_failure_returns_original_only(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("timeout")
-            result = apply_stepback(self.QUERY)
+            result = apply_stepback(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_empty_abstract_returns_original_only(self):
@@ -231,24 +237,25 @@ class TestApplyStepback:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"abstract_query": ""}
             )
-            result = apply_stepback(self.QUERY)
+            result = apply_stepback(self.QUERY, "ALL")
         assert result == [self.QUERY]
 
     def test_markdown_wrapper_stripped_and_parsed(self):
         wrapped = "```json\n{\"abstract_query\": \"영업권 손상차손 인식 기준은?\"}\n```"
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_raw_resp(wrapped)
-            result = apply_stepback(self.QUERY)
+            result = apply_stepback(self.QUERY, "ALL")
         assert result == [self.QUERY, "영업권 손상차손 인식 기준은?"]
 
 
 # ── rewrite_query ──────────────────────────────────────────────────────────────
 
+@pytest.mark.unit
 class TestRewriteQuery:
     PATCH = "src.agent.nodes.rewrite.client"
 
     def _make_state(self, query: str) -> GraphState:
-        return GraphState(query=query)
+        return GraphState(original_query=query)
 
     def test_non_accounting_sets_bypass(self):
         with patch(self.PATCH) as mock_client:
@@ -323,7 +330,7 @@ class TestRewriteQuery:
                 _mock_resp({"is_accounting": True, "strategy": "hyde"}),
                 _mock_resp({"hypothetical_answer": "리스부채는 현재가치로 측정합니다."}),
             ]
-            state = rewrite_query(GraphState(query=query))
+            state = rewrite_query(GraphState(original_query=query))
         assert state.rewritten_query.search_queries[0] == query
 
     def test_rewritten_query_original_matches_state_query(self):
@@ -333,5 +340,5 @@ class TestRewriteQuery:
                 _mock_resp({"is_accounting": True, "strategy": "hyde"}),
                 _mock_resp({"hypothetical_answer": "수익은 5단계로 인식합니다."}),
             ]
-            state = rewrite_query(GraphState(query=query))
-        assert state.rewritten_query.original == query
+            state = rewrite_query(GraphState(original_query=query))
+        assert state.rewritten_query.original_query == query

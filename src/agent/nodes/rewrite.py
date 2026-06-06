@@ -140,29 +140,29 @@ def rewrite_query(state: GraphState) -> GraphState:
     #        - 전략 교체 여부: 동일 전략 재시도 vs. hyde→decompose→stepback 순 에스컬레이션
     #        - rewrite_count 증가 시점: 이 함수 진입 직후 state.rewrite_count += 1
     try:
-        is_accounting, strategy = classify_and_select(state.query)
+        is_accounting, strategy = classify_and_select(state.original_query)
         state.is_accounting_query = is_accounting
 
         if not is_accounting:
             state.rewritten_query = RewrittenQuery(
-                original=state.query,
+                original_query=state.original_query,
                 strategy="bypass",
-                search_queries=[state.query],
+                search_queries=[state.original_query],
             )
             return state
 
-        queries = _STRATEGY_FN[strategy](state.query, state.standard_filter)
+        queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter)
         state.rewritten_query = RewrittenQuery(
-            original=state.query,
+            original_query=state.original_query,
             strategy=strategy,
             search_queries=queries,
         )
 
     except Exception as e:
         state.rewritten_query = RewrittenQuery(
-            original=state.query,
+            original_query=state.original_query,
             strategy="bypass",
-            search_queries=[state.query],
+            search_queries=[state.original_query],
         )
         state.error_logs.append({
             "timestamp": "",

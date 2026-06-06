@@ -14,6 +14,12 @@ class Citation(BaseModel):
     #     assert 0.0 <= v <= 1.0, "relevance_score must be in [0, 1]"
     #     return v
 
+class LLMInternalResponse(BaseModel):
+    """LLM 내부 응답 — PydanticAI에서 생성하는 원시 응답"""
+    answer: str
+    is_answerable: bool
+    llm_self_score: float
+
 class FinalResponse(BaseModel):
     """최종 답변 — 사용자에게 반환되는 응답 구조체"""
     answer: str
@@ -40,7 +46,7 @@ class IndexingResult(BaseModel):
 
 class RewrittenQuery(BaseModel):
     """재작성 질의 — rewrite 노드 출력. search_queries를 search 노드에 전달한다."""
-    original:       str       # 사용자 원문 쿼리
+    original_query:       str       # 사용자 원문 쿼리
     strategy:       str       # "hyde" | "decompose" | "stepback" | "bypass"
     search_queries: list[str] # 검색에 사용할 쿼리 목록 (원문 항상 포함)
 
