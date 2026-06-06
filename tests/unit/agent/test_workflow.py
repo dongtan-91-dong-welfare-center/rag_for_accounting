@@ -1,10 +1,16 @@
 import pytest
 from langgraph.graph.state import CompiledStateGraph
 from unittest.mock import MagicMock, patch
-from src.agent.workflow import route_after_evaluate, search, run_workflow
+from src.agent.workflow import (
+    route_after_evaluate,
+    route_after_rewrite,
+    early_exit,
+    search,
+    run_workflow,
+)
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
-from src.models.schemas import EvaluationResult
+from src.models.schemas import EvaluationResult, FinalResponse
 from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError
 
 @pytest.fixture(autouse=True)
@@ -36,10 +42,10 @@ class TestWorkflowConstruction:
         assert isinstance(workflow_app, CompiledStateGraph)
 
     def test_workflow_has_required_nodes(self, workflow_app):
-        """5개 노드(rewrite, search, rerank, evaluate, generate) 등록 여부 검증"""
+        """6개 노드(rewrite, early_exit, search, rerank, evaluate, generate) 등록 여부 검증"""
         # 추상화된 CompiledStateGraph에서 .get_graph()를 통해 독립적인 Graph 객체를 얻고, 노드 목록을 가져옴
         nodes = workflow_app.get_graph().nodes
-        required_nodes = ["rewrite", "search", "rerank", "evaluate", "generate"]
+        required_nodes = ["rewrite", "early_exit", "search", "rerank", "evaluate", "generate"]
         for node in required_nodes:
             assert node in nodes
 
@@ -52,11 +58,15 @@ class TestWorkflowConstruction:
         # START/END 엣지 확인
         assert ("__start__", "rewrite") in edges    # start에서 rewrite로 시작
         assert ("generate", "__end__") in edges     # generate에서 종료
+        assert ("early_exit", "__end__") in edges   # 비회계 조기 종료
 
         # 직렬 엣지 확인
-        assert ("rewrite", "search") in edges       # rewrite에서 search로 이동
         assert ("search", "rerank") in edges        # search에서 rerank로 이동
         assert ("rerank", "evaluate") in edges      # rerank에서 evaluate로 이동
+
+        # rewrite 직후 조건부 라우팅 엣지 확인 (rewrite → search, rewrite → early_exit)
+        assert ("rewrite", "search") in conditional_edges       # 회계 질의 → search
+        assert ("rewrite", "early_exit") in conditional_edges   # 비회계 질의 → early_exit
 
         # 조건부 라우팅 엣지 확인 (evaluate → rewrite, evaluate → generate)
         assert ("evaluate", "rewrite") in conditional_edges # evaluate에서 evaluate로 재귀
@@ -221,6 +231,59 @@ class TestCRAGLoopPath:
         assert final_state["rewrite_count"] == MAX_REWRITE_COUNT    # 최대 재시도 횟수에 도달했는지 확인
         assert final_state["final_response"] is not None            # 루프 종료 후 최선의 답변이 반환됐는지 확인
         assert final_state["evaluation"].needs_external is True     # 루프 종료 사유가 max count임을 간접 검증
+
+
+@pytest.mark.unit
+class TestEarlyExitRouting:
+    """비회계 질문 조기 종료 라우팅(route_after_rewrite, early_exit) 검증"""
+
+    def test_route_after_rewrite_non_accounting_to_early_exit(self):
+        """is_accounting_query=False → early_exit 반환"""
+        state = GraphState(original_query="대한민국 수도는 어디야?", is_accounting_query=False)
+        assert route_after_rewrite(state) == "early_exit"   # route_after_rewrite가 early_exit로 라우팅되는지 확인
+
+    def test_route_after_rewrite_accounting_to_search(self):
+        """is_accounting_query=True → search 반환"""
+        state = GraphState(original_query="영업권 손상차손 인식 기준은?", is_accounting_query=True)
+        assert route_after_rewrite(state) == "search"   # route_after_rewrite가 search로 라우팅되는지 확인
+
+    def test_early_exit_builds_final_response_with_confidence(self):
+        """early_exit 노드가 안내 응답과 분류 신뢰도를 담은 FinalResponse를 생성"""
+        state = GraphState(
+            original_query="대한민국 수도는 어디야?",
+            is_accounting_query=False,
+            classification_confidence=0.88,
+        )
+        result = early_exit(state)
+        fr = result["final_response"]
+        assert isinstance(fr, FinalResponse)   # early_exit가 FinalResponse를 생성하는지 확인
+        assert fr.answer == "죄송합니다. 회계 관련 질문을 해 주세요."   # early_exit가 안내 응답을 생성하는지 확인
+        assert fr.is_answerable is False   # early_exit가 is_answerable=False를 설정하는지 확인
+        assert fr.citations == []   # early_exit가 citations=[]로 설정하는지 확인
+        # 고정값이 아니라 rewrite가 기록한 실제 분류 신뢰도가 전달되어야 함
+        assert fr.confidence_score == 0.88   # early_exit가 confidence_score를 설정하는지 확인
+
+    def test_non_accounting_query_skips_pipeline_e2e(self, workflow_app, initial_state, mock_searcher):
+        """비회계 질의는 search/rerank/evaluate/generate를 거치지 않고 즉시 종료된다 (E2E)"""
+        with patch(
+            "src.agent.nodes.rewrite.classify_and_select",
+            return_value=(False, "bypass", 0.9),
+        ):
+            final_state = workflow_app.invoke(initial_state)
+
+        # 하위 검색 파이프라인이 호출되지 않았는지 확인
+        # (조기 종료 경로에서는 해당 채널이 한 번도 갱신되지 않으므로 .get으로 안전하게 조회)
+        mock_searcher.assert_not_called()
+        assert final_state.get("retrieved_chunks", []) == []    # retrieved_chunks가 []인지 확인
+        assert final_state.get("reranked_chunks", []) == []    # reranked_chunks가 []인지 확인
+        assert final_state.get("evaluation") is None    # evaluation이 None인지 확인
+
+        # 조기 종료 응답 검증
+        fr = final_state["final_response"]
+        assert fr is not None    # early_exit가 FinalResponse를 생성하는지 확인
+        assert fr.is_answerable is False    # early_exit가 is_answerable=False를 설정하는지 확인
+        assert fr.confidence_score == 0.9    # early_exit가 confidence_score를 설정하는지 확인
+        assert "회계 관련 질문" in fr.answer    # early_exit가 안내 응답을 생성하는지 확인
 
 
 @pytest.mark.unit

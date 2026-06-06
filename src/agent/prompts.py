@@ -46,7 +46,11 @@ CLASSIFY_STRATEGY_PROMPT: str = """당신은 사용자 질의를 분석하여 �
 질의: {query}
 
 반드시 JSON으로만 답하세요:
-{{"is_accounting": true | false, "strategy": "hyde" | "decompose" | "stepback" | "bypass"}}
+{{"is_accounting": true | false, "strategy": "hyde" | "decompose" | "stepback" | "bypass", "confidence": 0.0 ~ 1.0}}
+
+[confidence 작성 규칙]
+- is_accounting 판단(회계/비회계 분류)에 대한 스스로의 확신 정도를 0.0~1.0으로 기록합니다.
+- 명백하게 회계/비회계로 구분되는 질의는 1.0에 가깝게, 경계가 모호한 질의는 0.5~0.7 수준으로 보수적으로 기록합니다.
 
 [is_accounting 판단 기준]
 회계 관련 (true):

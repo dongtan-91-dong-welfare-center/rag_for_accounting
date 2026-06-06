@@ -77,8 +77,40 @@ def rewrite(state: GraphState) -> dict:
         "rewrite_count": updated_state.rewrite_count,
         "rewritten_query": updated_state.rewritten_query,
         "is_accounting_query": updated_state.is_accounting_query,
+        "classification_confidence": updated_state.classification_confidence,
         "error_logs": updated_state.error_logs,
     }
+
+
+def early_exit(state: GraphState) -> dict:
+    """
+    비회계 질문 조기 종료 노드.
+
+    route_after_rewrite가 비회계 질의로 분기시킨 경우 검색·재정렬·평가·생성 파이프라인을
+    건너뛰고 안내 메시지를 담은 FinalResponse를 생성한 뒤 END로 종료한다.
+    confidence_score에는 rewrite 노드가 기록한 LLM 분류 신뢰도를 그대로 전달하여,
+    운영 단계에서 분류 경계가 모호한 케이스를 추출·분석할 수 있도록 한다.
+    """
+    return {
+        "final_response": FinalResponse(
+            answer="죄송합니다. 회계 관련 질문을 해 주세요.",
+            citations=[],
+            is_answerable=False,
+            confidence_score=state.classification_confidence,
+        )
+    }
+
+
+def route_after_rewrite(state: GraphState) -> Literal["early_exit", "search"]:
+    """
+    rewrite 노드 직후 분기 결정.
+
+    - 비회계 질의(is_accounting_query=False): early_exit 노드로 분기하여 안내 응답 후 종료.
+    - 회계 질의: 정상적으로 search 노드로 진행.
+    """
+    if not state.is_accounting_query:
+        return "early_exit"
+    return "search"
 
 def search(state: GraphState) -> dict:
     """하이브리드 검색 노드 — searcher.search_chunks() 호출"""
@@ -261,8 +293,9 @@ def build_workflow() -> CompiledStateGraph:
     LangGraph StateGraph를 구성하고 컴파일하여 반환합니다.
 
     노드 등록 및 조건부 엣지를 정의하여 StateGraph를 반환한다.
-    실행 순서: rewrite → search → rerank → evaluate → generate
-    evaluate 이후 route_after_evaluate로 분기 처리.
+    실행 순서: rewrite → (회계 질의) search → rerank → evaluate → generate
+                       → (비회계 질의) early_exit → END
+    rewrite 이후 route_after_rewrite로, evaluate 이후 route_after_evaluate로 분기 처리.
 
     return CompiledStateGraph : LangGraph로 빌드된 상태 그래프
     왜 CompiledGraph를 사용하는가? -> StateGraph보다 성능이 좋다. (동작 방식은 동일하지만 내부적으로 최적화됨)
@@ -273,6 +306,7 @@ def build_workflow() -> CompiledStateGraph:
 
     # 노드 추가
     workflow.add_node("rewrite", rewrite)
+    workflow.add_node("early_exit", early_exit)
     workflow.add_node("search", search)
     workflow.add_node("rerank", rerank)
     workflow.add_node("evaluate", evaluate)
@@ -280,7 +314,18 @@ def build_workflow() -> CompiledStateGraph:
 
     # 엣지 연결 (고정 흐름)
     workflow.add_edge(START, "rewrite")
-    workflow.add_edge("rewrite", "search")
+
+    # rewrite 직후 조건부 분기: 비회계 질의는 early_exit로 조기 종료, 회계 질의는 search로 진행
+    workflow.add_conditional_edges(
+        "rewrite",
+        route_after_rewrite,
+        {
+            "early_exit": "early_exit",
+            "search": "search",
+        }
+    )
+    workflow.add_edge("early_exit", END)
+
     workflow.add_edge("search", "rerank")
     workflow.add_edge("rerank", "evaluate")
 

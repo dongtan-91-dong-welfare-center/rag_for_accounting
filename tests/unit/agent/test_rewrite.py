@@ -57,7 +57,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": True, "strategy": "hyde"}
             )
-            is_acc, strategy = classify_and_select("영업권 손상차손 인식 기준은?")
+            is_acc, strategy, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
         assert is_acc is True
         assert strategy == "hyde"
 
@@ -66,7 +66,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": True, "strategy": "decompose"}
             )
-            is_acc, strategy = classify_and_select("유형자산과 무형자산의 감가상각 방법 차이는?")
+            is_acc, strategy, confidence = classify_and_select("유형자산과 무형자산의 감가상각 방법 차이는?")
         assert is_acc is True
         assert strategy == "decompose"
 
@@ -75,7 +75,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": True, "strategy": "stepback"}
             )
-            is_acc, strategy = classify_and_select("삼성전자 2023년 영업권 500억 손상 처리 기준은?")
+            is_acc, strategy, confidence = classify_and_select("삼성전자 2023년 영업권 500억 손상 처리 기준은?")
         assert is_acc is True
         assert strategy == "stepback"
 
@@ -84,21 +84,59 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": False, "strategy": "bypass"}
             )
-            is_acc, strategy = classify_and_select("오늘 날씨 어때?")
+            is_acc, strategy, confidence = classify_and_select("오늘 날씨 어때?")
         assert is_acc is False
         assert strategy == "bypass"
 
     def test_llm_failure_fallback(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("timeout")
-            is_acc, strategy = classify_and_select("영업권 손상차손 인식 기준은?")
+            is_acc, strategy, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
         assert is_acc is True
         assert strategy == "hyde"
+        assert confidence == 0.0   # 폴백 시 신뢰도 0.0
+
+    def test_confidence_parsed_from_response(self):
+        # LLM이 반환한 confidence 값이 그대로 파싱되어야 함
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": False, "strategy": "bypass", "confidence": 0.12}
+            )
+            is_acc, strategy, confidence = classify_and_select("오늘 날씨 어때?")
+        assert is_acc is False
+        assert confidence == 0.12
+
+    def test_confidence_missing_defaults_to_zero(self):
+        # confidence 키가 없으면 0.0으로 폴백
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": True, "strategy": "hyde"}
+            )
+            _, _, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
+        assert confidence == 0.0
+
+    def test_confidence_clamped_to_unit_range(self):
+        # 범위를 벗어난 값은 [0.0, 1.0]으로 클램프
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": True, "strategy": "hyde", "confidence": 1.7}
+            )
+            _, _, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
+        assert confidence == 1.0
+
+    def test_confidence_non_numeric_defaults_to_zero(self):
+        # 숫자로 변환 불가한 값은 0.0으로 폴백
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": True, "strategy": "hyde", "confidence": "high"}
+            )
+            _, _, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
+        assert confidence == 0.0
 
     def test_missing_keys_use_defaults(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp({})
-            is_acc, strategy = classify_and_select("영업권 손상차손 인식 기준은?")
+            is_acc, strategy, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
         assert is_acc is True
         assert strategy == "hyde"
 
@@ -107,7 +145,7 @@ class TestClassifyAndSelect:
         wrapped = "```json\n{\"is_accounting\": false, \"strategy\": \"bypass\"}\n```"
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_raw_resp(wrapped)
-            is_acc, strategy = classify_and_select("오늘 날씨 어때?")
+            is_acc, strategy, confidence = classify_and_select("오늘 날씨 어때?")
         assert is_acc is False
         assert strategy == "bypass"
 
@@ -117,7 +155,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": "False", "strategy": "bypass"}
             )
-            is_acc, strategy = classify_and_select("오늘 날씨 어때?")
+            is_acc, strategy, confidence = classify_and_select("오늘 날씨 어때?")
         assert is_acc is False
 
     def test_string_true_treated_as_true(self):
@@ -125,7 +163,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": "True", "strategy": "hyde"}
             )
-            is_acc, strategy = classify_and_select("영업권 손상차손 인식 기준은?")
+            is_acc, strategy, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
         assert is_acc is True
 
 
@@ -260,12 +298,14 @@ class TestRewriteQuery:
     def test_non_accounting_sets_bypass(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
-                {"is_accounting": False, "strategy": "bypass"}
+                {"is_accounting": False, "strategy": "bypass", "confidence": 0.95}
             )
             state = rewrite_query(self._make_state("오늘 날씨 어때?"))
         assert state.is_accounting_query is False
         assert state.rewritten_query.strategy == "bypass"
         assert state.rewritten_query.search_queries == ["오늘 날씨 어때?"]
+        # 비회계 조기 종료 시 early_exit가 사용할 분류 신뢰도가 state에 기록되어야 함
+        assert state.classification_confidence == 0.95
 
     def test_accounting_hyde_strategy(self):
         with patch(self.PATCH) as mock_client:
@@ -304,7 +344,7 @@ class TestRewriteQuery:
         # 예외가 rewrite_query까지 전파되므로 error_logs에 기록됨
         # cf. test_all_llm_failure: 각 함수가 예외를 내부에서 삼키므로 outer except 미발동
         with patch("src.agent.nodes.rewrite.classify_and_select") as mock_classify:
-            mock_classify.return_value = (True, "unknown_strategy")
+            mock_classify.return_value = (True, "unknown_strategy", 0.8)
             state = rewrite_query(self._make_state("영업권 손상차손 인식 기준은?"))
         assert state.rewritten_query.strategy == "bypass"
         assert state.rewritten_query.search_queries == ["영업권 손상차손 인식 기준은?"]

@@ -25,7 +25,8 @@ class GraphState(BaseModel):
     standard_filter:      Literal["GAAP", "KIFRS", "ALL"] = "ALL"  # UI에서 사용자가 선택한 기준서 범위
 
     # 의도 분류
-    is_accounting_query:  bool                   = True   # 회계 질의 여부. 비회계면 rewrite 노드에서 Bypass
+    is_accounting_query:  bool                   = True   # 회계 질의 여부. 비회계면 route_after_rewrite가 early_exit로 분기
+    classification_confidence: float             = 0.0    # [rewrite 노드] LLM이 보고한 회계/비회계 분류 신뢰도(0.0~1.0). early_exit가 FinalResponse.confidence_score로 전달
 
     # 질의 재작성 및 검색 관련
     # !TODO: 평가 임계치 미달로 CRAG 루프를 통해 재진입할 때 rewrite_query가 동일 전략을 반복할지, 전략을 교체할지(예: hyde→decompose→stepback) 결정 필요.
