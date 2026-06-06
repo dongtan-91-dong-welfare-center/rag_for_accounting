@@ -34,6 +34,11 @@ class GraphState(BaseModel):
     rewrite_count:        int                    = 0      # [rewrite 노드] CRAG 루프 진입 횟수 기록 (최대 MAX_REWRITE_COUNT)
     rewritten_query:      RewrittenQuery | None  = None   # [rewrite 노드] 검색에 최적화된 새로운 쿼리
 
+    # Human-in-the-Loop (HIL) 관련 — human_review 노드가 interrupt()로 사용자 확인을 받는다
+    human_feedback:       str | None             = None   # [human_review→rewrite] 사용자가 입력한 재작성 요청 사항. rewrite 노드가 프롬프트에 반영 후 초기화
+    human_approved:       bool                   = False  # [human_review 노드] 사용자가 현재 재작성 결과를 승인했는지 여부
+    hil_count:            int                    = 0      # [human_review 노드] HIL 재작성 요청 횟수 (최대 MAX_HIL_COUNT, CRAG 루프와 분리)
+
     # 문서 검색 및 재정렬 관련
     retrieved_chunks:     list[RetrievedChunk]   = []     # [search 노드] DB/벡터 검색된 원본 문서 청크 리스트
     reranked_chunks:      list[RerankingResult]  = []     # [rerank 노드] 쿼리와의 유사도를 기준으로 재정렬 및 필터링된 결과

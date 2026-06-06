@@ -12,6 +12,12 @@ from src.agent.nodes.rewrite import (
 from src.models.state import GraphState
 
 
+def _last_user_content(mock_client) -> str:
+    """가장 최근 client.chat.completions.create 호출의 사용자 메시지 본문을 반환"""
+    call = mock_client.chat.completions.create.call_args
+    return call.kwargs["messages"][0]["content"]
+
+
 def _mock_resp(content: dict) -> MagicMock:
     # OpenAI 응답 객체를 흉내 낸 가짜 객체 생성
     # content 딕셔너리를 JSON 문자열로 변환해 resp.choices[0].message.content에 실제로 저장
@@ -382,3 +388,60 @@ class TestRewriteQuery:
             ]
             state = rewrite_query(GraphState(original_query=query))
         assert state.rewritten_query.original_query == query
+
+
+# ── HIL 피드백 주입 (apply_* / rewrite_query) ───────────────────────────────────
+
+@pytest.mark.unit
+class TestFeedbackInjection:
+    PATCH = "src.agent.nodes.rewrite.client"
+    FEEDBACK = "리스 회계처리를 강조해줘"
+
+    def test_apply_hyde_injects_feedback_into_prompt(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"hypothetical_answer": "..."}
+            )
+            apply_hyde("리스부채 최초 인식 방법은?", "ALL", feedback=self.FEEDBACK)
+        content = _last_user_content(mock_client)
+        assert self.FEEDBACK in content        # 피드백이 프롬프트에 포함
+        assert "[사용자 추가 요청]" in content   # 제약 문구 헤더 포함
+
+    def test_apply_hyde_without_feedback_omits_clause(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"hypothetical_answer": "..."}
+            )
+            apply_hyde("리스부채 최초 인식 방법은?", "ALL")
+        content = _last_user_content(mock_client)
+        assert "[사용자 추가 요청]" not in content   # 피드백 없으면 절 미포함
+
+    def test_apply_decompose_injects_feedback(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"sub_queries": ["a", "b"]}
+            )
+            apply_decompose("유형자산과 무형자산 차이는?", "ALL", feedback=self.FEEDBACK)
+        assert self.FEEDBACK in _last_user_content(mock_client)
+
+    def test_apply_stepback_injects_feedback(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"abstract_query": "..."}
+            )
+            apply_stepback("삼성전자 2023년 영업권 손상은?", "ALL", feedback=self.FEEDBACK)
+        assert self.FEEDBACK in _last_user_content(mock_client) 
+
+    def test_rewrite_query_passes_feedback_and_clears_it(self):
+        # state.human_feedback이 전략 프롬프트에 주입되고, 사용 후 None으로 초기화되어야 함
+        state = GraphState(original_query="리스부채 최초 인식 방법은?", human_feedback=self.FEEDBACK)
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.side_effect = [
+                _mock_resp({"is_accounting": True, "strategy": "hyde", "confidence": 0.9}),
+                _mock_resp({"hypothetical_answer": "리스부채는 현재가치로 측정합니다."}),
+            ]
+            result = rewrite_query(state)
+
+        strategy_call = mock_client.chat.completions.create.call_args_list[1] 
+        assert self.FEEDBACK in strategy_call.kwargs["messages"][0]["content"]  # 두 번째 호출(전략 프롬프트)에 피드백이 포함되었는지 검증
+        assert result.human_feedback is None    # 사용 후 초기화 (다음 루프 대비)

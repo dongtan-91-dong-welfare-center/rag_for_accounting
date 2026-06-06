@@ -64,9 +64,13 @@ class TestWorkflowConstruction:
         assert ("search", "rerank") in edges        # search에서 rerank로 이동
         assert ("rerank", "evaluate") in edges      # rerank에서 evaluate로 이동
 
-        # rewrite 직후 조건부 라우팅 엣지 확인 (rewrite → search, rewrite → early_exit)
-        assert ("rewrite", "search") in conditional_edges       # 회계 질의 → search
-        assert ("rewrite", "early_exit") in conditional_edges   # 비회계 질의 → early_exit
+        # rewrite 직후 조건부 라우팅 엣지 확인 (rewrite → human_review, rewrite → early_exit)
+        assert ("rewrite", "human_review") in conditional_edges  # 회계 질의 → human_review
+        assert ("rewrite", "early_exit") in conditional_edges    # 비회계 질의 → early_exit
+
+        # human_review 직후 조건부 라우팅 엣지 확인 (human_review → search, human_review → rewrite)
+        assert ("human_review", "search") in conditional_edges   # 승인/통과 → search
+        assert ("human_review", "rewrite") in conditional_edges  # 재작성 요청 → rewrite 루프백
 
         # 조건부 라우팅 엣지 확인 (evaluate → rewrite, evaluate → generate)
         assert ("evaluate", "rewrite") in conditional_edges # evaluate에서 evaluate로 재귀
@@ -242,10 +246,10 @@ class TestEarlyExitRouting:
         state = GraphState(original_query="대한민국 수도는 어디야?", is_accounting_query=False)
         assert route_after_rewrite(state) == "early_exit"   # route_after_rewrite가 early_exit로 라우팅되는지 확인
 
-    def test_route_after_rewrite_accounting_to_search(self):
-        """is_accounting_query=True → search 반환"""
+    def test_route_after_rewrite_accounting_to_human_review(self):
+        """is_accounting_query=True → human_review 반환 (HIL 적용 여부는 human_review가 결정)"""
         state = GraphState(original_query="영업권 손상차손 인식 기준은?", is_accounting_query=True)
-        assert route_after_rewrite(state) == "search"   # route_after_rewrite가 search로 라우팅되는지 확인
+        assert route_after_rewrite(state) == "human_review"   # 회계 질의는 human_review로 진행
 
     def test_early_exit_builds_final_response_with_confidence(self):
         """early_exit 노드가 안내 응답과 분류 신뢰도를 담은 FinalResponse를 생성"""

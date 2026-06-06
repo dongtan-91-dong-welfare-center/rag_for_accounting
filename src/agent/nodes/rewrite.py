@@ -79,14 +79,24 @@ def _coerce_confidence(raw) -> float:
         return 0.0
 
 
-def apply_hyde(query: str, standard_filter: str) -> list[str]:
+def _feedback_clause(feedback: str | None) -> str:
+    """HIL 사용자 피드백을 프롬프트에 덧붙일 제약 문구로 변환한다. 피드백이 없으면 빈 문자열."""
+    if not feedback:
+        return ""
+    return (
+        f"\n\n[사용자 추가 요청]\n{feedback}\n"
+        "위 추가 요청을 반드시 반영하여 작성하세요."
+    )
+
+
+def apply_hyde(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
     """원문 + 가상 답변을 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "user", "content": HYDE_PROMPT.format(
                 query=query, standard_context=_standard_context(standard_filter)
-            )}],
+            ) + _feedback_clause(feedback)}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -99,14 +109,14 @@ def apply_hyde(query: str, standard_filter: str) -> list[str]:
     return [query]
 
 
-def apply_decompose(query: str, standard_filter: str) -> list[str]:
+def apply_decompose(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
     """원문 + 서브쿼리들을 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "user", "content": DECOMPOSE_PROMPT.format(
                 query=query, standard_context=_standard_context(standard_filter)
-            )}],
+            ) + _feedback_clause(feedback)}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -119,14 +129,14 @@ def apply_decompose(query: str, standard_filter: str) -> list[str]:
     return [query]
 
 
-def apply_stepback(query: str, standard_filter: str) -> list[str]:
+def apply_stepback(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
     """원문 + 추상화된 원칙 쿼리를 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "user", "content": STEPBACK_PROMPT.format(
                 query=query, standard_context=_standard_context(standard_filter)
-            )}],
+            ) + _feedback_clause(feedback)}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -152,6 +162,12 @@ def rewrite_query(state: GraphState) -> GraphState:
     #        - classify_and_select는 재호출 불필요 (질의·is_accounting 불변) → state 값 재사용
     #        - 전략 교체 여부: 동일 전략 재시도 vs. hyde→decompose→stepback 순 에스컬레이션
     #        - rewrite_count 증가 시점: 이 함수 진입 직후 state.rewrite_count += 1
+
+    # HIL 루프에서 주입된 사용자 피드백을 사용 즉시 회수·초기화한다.
+    # (다음 CRAG/HIL 루프에서 이전 피드백이 잘못 재사용되는 것을 방지)
+    feedback = state.human_feedback
+    state.human_feedback = None
+
     try:
         is_accounting, strategy, confidence = classify_and_select(state.original_query)
         state.is_accounting_query = is_accounting
@@ -165,7 +181,7 @@ def rewrite_query(state: GraphState) -> GraphState:
             )
             return state
 
-        queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter)
+        queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter, feedback)
         state.rewritten_query = RewrittenQuery(
             original_query=state.original_query,
             strategy=strategy,

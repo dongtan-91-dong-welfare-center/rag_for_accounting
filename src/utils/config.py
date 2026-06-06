@@ -1,7 +1,8 @@
 from datetime import timezone, timedelta
 
 # 파이프라인 전역 설정값
-MAX_REWRITE_COUNT: int = 3          # FUNC-004: 질의 재작성 최대 반복 횟수
+MAX_REWRITE_COUNT: int = 3          # FUNC-004: CRAG 루프(평가 임계치 미달 재검색) 최대 반복 횟수
+MAX_HIL_COUNT: int = 5              # 워크플로우: Human-in-the-Loop 재작성 요청 최대 반복 횟수 (CRAG 루프와 분리)
 TOP_K_RETRIEVAL: int = 10           # FUNC-005: 1차 검색 반환 청크 수
 
 # Reranking Configuration
