@@ -5,8 +5,8 @@
 검증 범위:
     - dense_search(): Dense 검색 DB 쿼리 및 반환 규격
     - sparse_search(): Sparse 검색 DB 쿼리 및 반환 규격
-    - normalize_scores(): Min-Max 정규화 로직
-    - search_chunks(): DENSE/SPARSE 가중 병합, 중복 처리, 필터 적용
+    - reciprocal_rank_fusion(): RRF 순위 기반 병합 로직
+    - search_chunks(): DENSE/SPARSE RRF 병합, 중복 처리, 필터 적용
     - 예외 처리 (SE-101, SE-102, SE-103)
 """
 import pytest
@@ -18,7 +18,7 @@ from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContex
 from src.retrieval.searcher import (
     dense_search,
     sparse_search,
-    normalize_scores,
+    reciprocal_rank_fusion,
     search_chunks
 )
 from src.utils import config
@@ -90,59 +90,62 @@ class TestHybridSearchComponents:
         # SET statement_timeout 1회, SELECT 1회
         assert mock_db_pool.execute.call_count == 2
         
-    def test_normalize_scores(self):
-        """Min-Max 정규화 로직 검증"""
-        chunks = [
-            RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=10.0, metadata={}),
-            RetrievedChunk(chunk_id="2", document_id="D2", content="c2", score=5.0, metadata={}),
-            RetrievedChunk(chunk_id="3", document_id="D3", content="c3", score=0.0, metadata={}),
+    def test_reciprocal_rank_fusion_rank_based(self):
+        """RRF가 점수가 아닌 순위(리스트 위치) 기반으로 병합하는지 검증"""
+        k = config.RRF_K
+        # 점수 절댓값이 극단적으로 달라도 순위만 반영되어야 함
+        results = [
+            RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=999.0, metadata={}),
+            RetrievedChunk(chunk_id="2", document_id="D2", content="c2", score=0.001, metadata={}),
         ]
-        
-        normalized = normalize_scores(chunks)
-        assert normalized[0].score == 1.0   # max_score / max_score
-        assert normalized[1].score == 0.5   # min_score / max_score
-        assert normalized[2].score == 0.0   # 0 / max_score
 
-    def test_normalize_scores_same_values(self):
-        """정규화 시 모든 점수가 같으면 1.0 부여 검증"""
-        chunks = [
-            RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=5.0, metadata={}),
-            RetrievedChunk(chunk_id="2", document_id="D2", content="c2", score=5.0, metadata={}),
-        ]
-        normalized = normalize_scores(chunks)
-        assert normalized[0].score == 1.0   # min = max이므로 1.0 반환
-        assert normalized[1].score == 1.0   # min = max이므로 1.0 반환
+        fused = reciprocal_rank_fusion([results])
 
-    def test_normalize_scores_does_not_mutate_input(self):
-        """정규화가 호출자의 원본 객체 score를 변형하지 않는지 검증 (불변 반환)"""
+        # rank는 1부터 시작: 1/(k+1), 1/(k+2)
+        assert fused[0].chunk_id == "1" # 999.0 > 0.001 이므로 1번이 0번 인덱스로
+        assert fused[0].score == pytest.approx(1.0 / (k + 1))   # 1/(k+1)
+        assert fused[1].chunk_id == "2" # 0.001 < 999.0 이므로 2번이 1번 인덱스로
+        assert fused[1].score == pytest.approx(1.0 / (k + 2))   # 1/(k+2)
+
+    def test_reciprocal_rank_fusion_merges_duplicates(self):
+        """여러 리스트에 동일 chunk_id가 있으면 RRF 점수를 합산하는지 검증"""
+        k = config.RRF_K
+        dense = [RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=0.9, metadata={})]
+        sparse = [RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=0.5, metadata={})]
+
+        fused = reciprocal_rank_fusion([dense, sparse])
+
+        assert len(fused) == 1   # 중복 병합
+        assert fused[0].score == pytest.approx(2.0 / (k + 1))   # 양쪽 모두 1위(rank=1): 1/(k+1) + 1/(k+1)
+
+    def test_reciprocal_rank_fusion_single_list_fallback(self):
+        """한쪽 리스트가 비어도(폴백) 나머지 리스트로 정상 병합되는지 검증"""
+        k = config.RRF_K
+        dense = [RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=0.9, metadata={})]
+
+        fused = reciprocal_rank_fusion([dense, []])
+
+        assert len(fused) == 1  # 한쪽 리스트가 비어도 나머지 리스트로 정상 병합되는지 검증
+        assert fused[0].chunk_id == "1" # dense에만 chunk_id가 있으므로 1번이 반환
+        assert fused[0].score == pytest.approx(1.0 / (k + 1)) # 1/(k+1)
+
+    def test_reciprocal_rank_fusion_empty(self):
+        """모든 리스트가 비면 빈 결과 반환"""
+        assert reciprocal_rank_fusion([[], []]) == []
+
+    def test_reciprocal_rank_fusion_does_not_mutate_input(self):
+        """RRF가 호출자의 원본 객체 score를 변형하지 않는지 검증 (불변 반환)"""
         chunks = [
             RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=10.0, metadata={}),
             RetrievedChunk(chunk_id="2", document_id="D2", content="c2", score=0.0, metadata={}),
         ]
 
-        normalized = normalize_scores(chunks)
+        fused = reciprocal_rank_fusion([chunks])
 
         # 원본 객체의 score는 그대로 보존되어야 함
-        assert chunks[0].score == 10.0  # 원본값은 10.0
-        assert chunks[1].score == 0.0   # 원본값은 0.0
-        # 반환된 객체는 원본과 다른 인스턴스이며 정규화된 값을 가짐
-        assert normalized[0] is not chunks[0]   # 다른 인스턴스
-        assert normalized[0].score == 1.0   # 정규화된 값
-        assert normalized[1].score == 0.0   # 정규화된 값
-
-    def test_normalize_scores_same_values_does_not_mutate_input(self):
-        """정규화(동일 점수 분기)도 원본 객체를 변형하지 않는지 검증"""
-        chunks = [
-            RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=5.0, metadata={}),
-            RetrievedChunk(chunk_id="2", document_id="D2", content="c2", score=5.0, metadata={}),
-        ]
-
-        normalized = normalize_scores(chunks)
-
-        assert chunks[0].score == 5.0   # 원본 보존
-        assert chunks[1].score == 5.0   # 원본 보존
-        assert normalized[0] is not chunks[0]   # 다른 인스턴스
-        assert normalized[0].score == 1.0   # 정규화된 값
+        assert chunks[0].score == 10.0   # 원본값은 10.0
+        assert chunks[1].score == 0.0    # 원본값은 0.0
+        assert all(f is not c for f, c in zip(fused, chunks)) # 반환된 객체는 원본과 다른 인스턴스
 
 
 @pytest.mark.unit
@@ -152,7 +155,8 @@ class TestHybridSearchIntegration:
     @patch("src.retrieval.searcher.dense_search")
     @patch("src.retrieval.searcher.sparse_search")
     def test_hybrid_merges_results(self, mock_sparse, mock_dense, mock_embed):
-        """Dense + Sparse 가중 병합 검증"""
+        """Dense + Sparse RRF 병합 검증"""
+        k = config.RRF_K
         mock_dense.return_value = [
             RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=1.0, metadata={}),
             RetrievedChunk(chunk_id="2", document_id="D2", content="c2", score=0.5, metadata={}),
@@ -161,48 +165,41 @@ class TestHybridSearchIntegration:
             RetrievedChunk(chunk_id="3", document_id="D3", content="c3", score=1.0, metadata={}),
             RetrievedChunk(chunk_id="4", document_id="D4", content="c4", score=0.0, metadata={}),
         ]
-        
-        # 가중치: Dense=0.4, Sparse=0.6 가정
-        with patch.object(config, "DENSE_WEIGHT", 0.4), patch.object(config, "SPARSE_WEIGHT", 0.6):
-            results = search_chunks("query", top_k=5)
-            
+
+        results = search_chunks("query", top_k=5)
+
         assert len(results) == 4    # top_k 만큼 반환
-        # 정규화:
-        # Dense -> "1": 1.0, "2": 0.0
-        # Sparse -> "3": 1.0, "4": 0.0
-        # 병합 (Dense*0.4 + Sparse*0.6):
-        # "1" = 1.0*0.4 = 0.4
-        # "2" = 0.0*0.4 = 0.0
-        # "3" = 1.0*0.6 = 0.6
-        # "4" = 0.0*0.6 = 0.0
+        # RRF (rank는 1부터, 중복 없음):
+        # Dense  -> "1": 1/(k+1), "2": 1/(k+2)
+        # Sparse -> "3": 1/(k+1), "4": 1/(k+2)
         scores = {r.chunk_id: r.score for r in results}
-        assert scores["3"] == 0.6   # Sparse 가중치 적용
-        assert scores["1"] == 0.4   # Dense 가중치 적용
-        assert scores["2"] == 0.0   # Sparse 가중치 적용
-        assert scores["4"] == 0.0   # Sparse 가중치 적용
-        
-        # 내림차순 정렬 확인
-        assert results[0].chunk_id == "3"   # 가장 높은 점수
-        assert results[1].chunk_id == "1"   # 두 번째로 높은 점수
+        assert scores["1"] == pytest.approx(1.0 / (k + 1))   # Dense 1위
+        assert scores["3"] == pytest.approx(1.0 / (k + 1))   # Sparse 1위
+        assert scores["2"] == pytest.approx(1.0 / (k + 2))   # Dense 2위
+        assert scores["4"] == pytest.approx(1.0 / (k + 2))   # Sparse 2위
+
+        # 1위 그룹("1", "3")이 2위 그룹("2", "4")보다 앞에 정렬되어야 함
+        assert {results[0].chunk_id, results[1].chunk_id} == {"1", "3"} # 점수는 동일하므로 순서는 보장되지 않음
+        assert {results[2].chunk_id, results[3].chunk_id} == {"2", "4"} # 점수는 동일하므로 순서는 보장되지 않음
 
     @patch("src.retrieval.searcher.dense_search")
     @patch("src.retrieval.searcher.sparse_search")
     def test_duplicate_dedup(self, mock_sparse, mock_dense, mock_embed):
-        """동일 chunk_id 반환 시 가중합(병합) 검증"""
+        """동일 chunk_id 반환 시 RRF 점수 합산(병합) 검증"""
+        k = config.RRF_K
         mock_dense.return_value = [
             RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=1.0, metadata={})
         ]
         mock_sparse.return_value = [
             RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=1.0, metadata={})
         ]
-        
-        with patch.object(config, "DENSE_WEIGHT", 0.4), patch.object(config, "SPARSE_WEIGHT", 0.6):
-            results = search_chunks("query", top_k=5)
-            
-        # ID 1이 양쪽에 존재 -> 정규화 후 각각 1.0 -> 1.0*0.4 + 1.0*0.6 = 1.0
+
+        results = search_chunks("query", top_k=5)
+
+        # ID 1이 양쪽에서 1위 -> 1/(k+1) + 1/(k+1)
         assert len(results) == 1    # 중복 제거
         assert results[0].chunk_id == "1"   # chunk_id
-        assert results[0].score == 1.0  # 가중합(병합)
+        assert results[0].score == pytest.approx(2.0 / (k + 1))  # RRF 점수 합산
 
     @patch("src.retrieval.searcher.dense_search")
     @patch("src.retrieval.searcher.sparse_search")
