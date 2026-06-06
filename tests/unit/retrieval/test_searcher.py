@@ -113,6 +113,37 @@ class TestHybridSearchComponents:
         assert normalized[0].score == 1.0   # min = max이므로 1.0 반환
         assert normalized[1].score == 1.0   # min = max이므로 1.0 반환
 
+    def test_normalize_scores_does_not_mutate_input(self):
+        """정규화가 호출자의 원본 객체 score를 변형하지 않는지 검증 (불변 반환)"""
+        chunks = [
+            RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=10.0, metadata={}),
+            RetrievedChunk(chunk_id="2", document_id="D2", content="c2", score=0.0, metadata={}),
+        ]
+
+        normalized = normalize_scores(chunks)
+
+        # 원본 객체의 score는 그대로 보존되어야 함
+        assert chunks[0].score == 10.0  # 원본값은 10.0
+        assert chunks[1].score == 0.0   # 원본값은 0.0
+        # 반환된 객체는 원본과 다른 인스턴스이며 정규화된 값을 가짐
+        assert normalized[0] is not chunks[0]   # 다른 인스턴스
+        assert normalized[0].score == 1.0   # 정규화된 값
+        assert normalized[1].score == 0.0   # 정규화된 값
+
+    def test_normalize_scores_same_values_does_not_mutate_input(self):
+        """정규화(동일 점수 분기)도 원본 객체를 변형하지 않는지 검증"""
+        chunks = [
+            RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=5.0, metadata={}),
+            RetrievedChunk(chunk_id="2", document_id="D2", content="c2", score=5.0, metadata={}),
+        ]
+
+        normalized = normalize_scores(chunks)
+
+        assert chunks[0].score == 5.0   # 원본 보존
+        assert chunks[1].score == 5.0   # 원본 보존
+        assert normalized[0] is not chunks[0]   # 다른 인스턴스
+        assert normalized[0].score == 1.0   # 정규화된 값
+
 
 @pytest.mark.unit
 class TestHybridSearchIntegration:
@@ -221,6 +252,22 @@ class TestSearcherExceptions:
             dense_search([0.1] * 1536, top_k=5)
 
         assert "데이터베이스 쿼리 실행 실패" in str(exc_info.value) # SE-102
+
+    def test_programming_error_propagates_without_wrapping(self, mock_db_pool):
+        """재시도 불가 SQL 오류(ProgrammingError)는 DatabaseQueryError로 포장되지 않고 원본 전파"""
+        mock_db_pool.execute.side_effect = errors.ProgrammingError("column \"foo\" does not exist")
+
+        # DatabaseQueryError가 아니라 원본 ProgrammingError가 그대로 올라와야
+        # 검색 노드가 무의미한 CRAG 재탐색을 트리거하지 않는다.
+        with pytest.raises(errors.ProgrammingError):
+            dense_search([0.1] * 1536, top_k=5)
+
+    def test_undefined_table_propagates_without_wrapping(self, mock_db_pool):
+        """재시도 불가 SQL 오류(UndefinedTable)도 원본 그대로 전파"""
+        mock_db_pool.execute.side_effect = errors.UndefinedTable("존재하지 않는 테이블")
+
+        with pytest.raises(errors.UndefinedTable):
+            dense_search([0.1] * 1536, top_k=5)
 
 
 @pytest.mark.unit

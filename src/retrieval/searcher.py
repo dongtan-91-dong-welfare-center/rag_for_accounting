@@ -59,9 +59,9 @@ def dense_search(query_embedding: list[float], top_k: int, metadata_filter: dict
     where_clause, params = _build_where_clause(metadata_filter)
     
     # query_embedding은 %s::vector 타입으로 캐스팅하여 비교
-    # 1 - (embedding <=> %s::vector): 두 벡터 간의 코사인 유사도를 계산 
-    # (1 - (유사도))를 점수로 사용 -> 유사도가 높을수록 점수도 높음
-    sql = f"""
+    # embedding <=> %s::vector: 두 벡터 간의 코사인 유사도를 계산 (0=동일, 2=정반대)
+    # 1 - (코사인 거리) = 코사인 유사도 -> 점수로 사용하면 유사도가 높을수록 점수도 높음
+    query_sql = f"""
         SELECT chunk_id, document_id, content, metadata,
                1 - (embedding <=> %s::vector) AS score
         FROM {CHUNKS_TABLE}
@@ -70,8 +70,8 @@ def dense_search(query_embedding: list[float], top_k: int, metadata_filter: dict
         LIMIT %s
     """
     query_params = [query_embedding] + params + [query_embedding, top_k]
-    
-    return _execute_search_query(sql, query_params, "Dense")
+
+    return _execute_search_query(query_sql, query_params, "Dense")
 
 
 def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
@@ -91,7 +91,7 @@ def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None) -
     # 'simple' 설정은 한국어 형태소 분석을 지원하지 않으므로 정확한 단어 일치 검색만 수행됨
     # ts_rank_cd(to_tsvector, query): 인자로 주어진 두 텍스트에 대한 순위 점수를 반환 (0~1)
     # ts_rank_cd가 반환하는 점수: 두 텍스트의 관련성을 0~1 사이 점수로 반환 -> 유사도가 높을수록 점수도 높음
-    sql = f"""
+    query_sql = f"""
         SELECT chunk_id, document_id, content, metadata,
                ts_rank_cd(to_tsvector('simple', content), plainto_tsquery('simple', %s)) AS score
         FROM {CHUNKS_TABLE}
@@ -100,8 +100,8 @@ def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None) -
         LIMIT %s
     """
     query_params = [query] + filter_params + [query, top_k]
-    
-    return _execute_search_query(sql, query_params, "Sparse")
+
+    return _execute_search_query(query_sql, query_params, "Sparse")
 
 
 def _execute_search_query(sql_query: str | sql.SQL | sql.Composed, params: list, search_type: str) -> list[RetrievedChunk]:
@@ -144,6 +144,12 @@ def _execute_search_query(sql_query: str | sql.SQL | sql.Composed, params: list,
     except errors.QueryCanceled as e:
         logger.error(f"{search_type} 검색 타임아웃 초과: {e}")
         raise SearchTimeoutError(f"DB 검색 응답 시간 초과 ({SEARCH_TIMEOUT_SECONDS}s)")
+    except (errors.ProgrammingError, errors.UndefinedTable) as e:
+        # 잘못된 SQL 문법·존재하지 않는 컬럼/테이블 등은 재시도로 해결되지 않는다.
+        # DatabaseQueryError로 포장하면 검색 노드가 무의미한 CRAG 재탐색을
+        # MAX_REWRITE_COUNT까지 반복하므로, 원본 예외를 그대로 전파해 즉시 중단한다.
+        logger.error(f"{search_type} 검색 프로그래밍 오류 (재시도 불가): {e}", exc_info=True)
+        raise  # 원본 예외 전파 → 파이프라인 즉시 중단
     except Exception as e:
         logger.error(f"{search_type} 검색 중 DB 오류: {e}")
         raise DatabaseQueryError(f"데이터베이스 쿼리 실행 실패: {e}")
@@ -158,17 +164,16 @@ def normalize_scores(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         
     scores = [c.score for c in chunks]
     min_score, max_score = min(scores), max(scores)
-    
+
+    # 호출자가 보유한 원본 객체를 변형하지 않도록 model_copy로 새 객체를 반환한다.
     # 모든 점수가 동일하거나 최대/최소가 같으면 1.0으로 통일
     if max_score == min_score:
-        for c in chunks:
-            c.score = 1.0
-        return chunks
-        
-    for c in chunks:
-        c.score = (c.score - min_score) / (max_score - min_score)
-        
-    return chunks
+        return [c.model_copy(update={"score": 1.0}) for c in chunks]
+
+    return [
+        c.model_copy(update={"score": (c.score - min_score) / (max_score - min_score)})
+        for c in chunks
+    ]
 
 
 def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
@@ -182,8 +187,8 @@ def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = No
 
     query_vector = embed_query(query)
 
-    merged = _search_and_merge(query, query_vector, top_k, metadata_filter)
     # Dense 및 Sparse 검색 실행 (각각 top_k만큼 가져와서 병합 풀 확보)
+    merged = _search_and_merge(query, query_vector, top_k, metadata_filter)
     final_results = merged[:top_k]
 
     if not final_results:
