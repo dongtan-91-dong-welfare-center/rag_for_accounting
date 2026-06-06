@@ -25,10 +25,10 @@ SEARCH_TIMEOUT_SECONDS: int = 5
 EMBEDDING_MODEL: str = "text-embedding-3-small"
 EMBEDDING_DIM: int = 1536   # OpenAI 임베딩 모델의 벡터 차원 수
 
-# gpt-5.4-mini 컨텍스트 윈도우(128K) 중 컨텍스트 입력에 할당할 안전 한도
+# gpt-5.4-mini 컨텍스트 윈도우(400K) 중 컨텍스트 입력에 할당할 안전 한도
 # o200k_base 토크나이저 기준 한국어 ~0.5 토큰/글자 (즉 1 토큰 ≈ 2~3 글자)
-# 128K - 최대 출력(16,384) - 시스템 프롬프트/쿼리 여유 ≈ 105,000 으로 설정
-MAX_CONTEXT_TOKENS: int = 105000
+# 400K - 최대 출력(128K) - 시스템 프롬프트/쿼리 여유 ≈ 270,000 으로 설정
+MAX_CONTEXT_TOKENS: int = 270000
 
 # 검색 대상 테이블명 — RetrievedChunk 스키마와 컬럼명을 통일
 CHUNKS_TABLE: str = "chunks"
