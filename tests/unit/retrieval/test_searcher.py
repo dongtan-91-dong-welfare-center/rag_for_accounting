@@ -72,7 +72,7 @@ class TestHybridSearchComponents:
         assert isinstance(results[0], RetrievedChunk)   # RetrievedChunk 타입
         assert results[0].chunk_id == "1"   # chunk_id 반환
         assert results[0].score == 0.9    # score 반환
-        assert results[0].metadata == {"standard_type": "K-GAAP"}   # metadata 반환
+        assert results[0].metadata.standard_type == "K-GAAP"   # metadata 명시 필드 반환
         # SET statement_timeout 1회, SELECT 1회
         assert mock_db_pool.execute.call_count == 2 
 
@@ -86,7 +86,7 @@ class TestHybridSearchComponents:
         assert isinstance(results[0], RetrievedChunk)   # RetrievedChunk 타입
         assert results[0].chunk_id == "1"   # chunk_id 반환
         assert results[0].score == 0.5    # score 반환
-        assert results[0].metadata == {"standard_type": "K-GAAP"}   # metadata 반환
+        assert results[0].metadata.standard_type == "K-GAAP"   # metadata 명시 필드 반환
         # SET statement_timeout 1회, SELECT 1회
         assert mock_db_pool.execute.call_count == 2
         
