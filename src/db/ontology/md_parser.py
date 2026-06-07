@@ -7,27 +7,8 @@ _SECTION_RE = re.compile(r'제\s*(\d+)\s*절')
 # [A-Z]\d+ : 부록 문단 형식 (예: 6.A13, 6.A1의2). 일반 숫자 패턴(\d+)보다 먼저 시도한다.
 _PARA_RE = re.compile(r'^(?:실|결)?(?:\d+\.(?:[A-Z]\d+|\d+)(?:의\d+)?)|^사례\s*\d+')
 # H3·H4 헤딩 및 본문 줄 끝의 참조 어노테이션. 예: "기타 (문단 6.28)", "...이다. (문단 10.8∼10.9)"
+# 범위 표기(∼~)는 resolver에서 그래프의 실제 paragraphs를 보고 확장한다.
 _PARA_ANNOT_RE = re.compile(r'\(문단\s*([^)]+)\)\s*$')
-
-
-def _expand_range(start: str, end: str) -> list[str]:
-    # 끝 정수 suffix를 기준으로 범위 확장. "실6.66~6.67"처럼 prefix가 달라도 start prefix로 생성한다.
-    m_s = re.search(r'(\d+)$', start)
-    m_e = re.search(r'(\d+)$', end)
-    if m_s and m_e:
-        n_s, n_e = int(m_s.group(1)), int(m_e.group(1))
-        if n_e > n_s:
-            prefix = start[:m_s.start()]
-            return [f"{prefix}{i}" for i in range(n_s, n_e + 1)]
-    return [start, end]
-
-
-def _split_annot_refs(ref_text: str) -> list[str]:
-    # "(문단 ...)" 내부의 범위 표기(∼~)를 확장해 개별 참조 목록으로 반환한다.
-    parts = re.split(r'[∼~]', ref_text.strip())
-    if len(parts) == 2:
-        return _expand_range(parts[0].strip(), parts[1].strip())
-    return [ref_text.strip()]
 
 
 def _slugify(text: str) -> str:
@@ -74,8 +55,7 @@ def parse_markdown(
 
     current_section: OntologyNode | None = None
     current_subsection: OntologyNode | None = None
-    section_order = 0
-    subsection_order = 0
+    child_order: dict[str, int] = {}  # parent_id → 자식 누적 수. Section·Subsection 구분 없이 부모 기준으로 순번 부여.
     content_lines: list[str] = []
     section_content_lines: list[str] = []
     subsection_occurrence: dict[str, int] = {}  # base_id → 등장 횟수. 재등장 시 suffix(-2, -3)로 id 구분.
@@ -134,10 +114,10 @@ def parse_markdown(
             m = _CHAPTER_RE.search(heading)
             if m:
                 # 부록 등에서 장 헤딩이 재등장하면 섹션 컨텍스트를 초기화해 이후 내용이 Standard 직속으로 붙는다.
+                # child_order는 부모별 카운터라 리셋 불필요 (Standard 직속 자식 누적 유지).
                 flush_subsection()
                 flush_section_content()
                 current_section = None
-                subsection_order = 0
                 standard.name = heading
                 standard.chapter = m.group(1)
                 continue
@@ -146,6 +126,15 @@ def parse_markdown(
         # H2: Section (## 제N절, 또는 절 번호 없는 헤딩)
         if stripped.startswith('## ') and not stripped.startswith('### '):
             heading = stripped[3:].strip()
+            # 헤딩 끝의 "(문단 X.X)" 어노테이션 추출 → REFERENCES 엣지 예약 + 깨끗한 title.
+            # 범위 표기(X~Y)는 그대로 저장하고 resolver에서 확장한다.
+            m_annot = _PARA_ANNOT_RE.search(heading)
+            section_ref_source = ""
+            section_ref_target = ""
+            if m_annot:
+                section_ref_source = heading
+                section_ref_target = f"문단 {m_annot.group(1).strip()}"
+                heading = heading[:m_annot.start()].strip()
             m = _SECTION_RE.search(heading)
             flush_subsection()
             flush_section_content()
@@ -155,19 +144,27 @@ def parse_markdown(
             existing = next((n for n in graph.nodes if n.id == sec_id), None)
             if existing:
                 current_section = existing
-                # 기존 섹션의 subsection 수에서 이어받아 order가 겹치지 않도록 한다.
-                subsection_order = sum(1 for e in graph.edges if e.from_id == sec_id and e.edge_type == "CONTAINS")
+                # child_order[sec_id]는 기존 자식 수가 이미 누적되어 있어 그대로 이어진다.
             else:
-                section_order += 1
-                subsection_order = 0
+                child_order[standard_id] = child_order.get(standard_id, 0) + 1
+                order = child_order[standard_id]
                 current_section = OntologyNode(
                     id=sec_id, node_type="Section",
-                    title=heading, order=section_order,
+                    title=heading, order=order,
                 )
                 graph.nodes.append(current_section)
                 graph.edges.append(OntologyEdge(
                     from_id=standard_id, to_id=sec_id,
-                    edge_type="CONTAINS", order=section_order,
+                    edge_type="CONTAINS", order=order,
+                ))
+            # H2 헤딩 어노테이션을 REFERENCES 엣지로 추가
+            if section_ref_target:
+                graph.edges.append(OntologyEdge(
+                    from_id=current_section.id,
+                    to_id="",
+                    edge_type="REFERENCES",
+                    source_text=section_ref_source,
+                    unresolved_target=section_ref_target,
                 ))
             continue
 
@@ -175,12 +172,12 @@ def parse_markdown(
         if stripped.startswith('### ') and not stripped.startswith('#### '):
             flush_subsection()
             heading = stripped[4:].strip()
-            # 헤딩 끝의 "(문단 X.X)" 어노테이션 추출 → 깨끗한 ID 생성 + REFERENCES 엣지 예약
+            # 헤딩 끝의 "(문단 X.X)" 어노테이션 추출 → 깨끗한 ID 생성 + REFERENCES 엣지 예약.
+            # 범위 표기(X~Y)는 그대로 저장하고 resolver에서 확장한다.
             m_annot = _PARA_ANNOT_RE.search(heading)
             if m_annot:
                 heading_ref_source = heading
-                for r in _split_annot_refs(m_annot.group(1)):
-                    heading_ref_targets.append(f"문단 {r}")
+                heading_ref_targets.append(f"문단 {m_annot.group(1).strip()}")
                 heading = heading[:m_annot.start()].strip()
             else:
                 heading_ref_source = ""
@@ -192,18 +189,18 @@ def parse_markdown(
             count = subsection_occurrence.get(base_id, 0)
             subsection_occurrence[base_id] = count + 1
             sub_id = base_id if count == 0 else f"{base_id}-{count + 1}"
-            subsection_order += 1
+            child_order[parent_id] = child_order.get(parent_id, 0) + 1
             current_subsection = OntologyNode(
                 id=sub_id,
                 node_type="Subsection",
                 title=heading,
-                order=subsection_order,
+                order=child_order[parent_id],
             )
             continue
 
         # H4+: 문단 번호 헤딩 또는 하위 항목
         if stripped.startswith('####'):
-            heading_text = re.sub(r'^#{4,6}\s*', '', stripped)
+            heading_text = re.sub(r'^#{4,7}\s*', '', stripped)
             para_id = _extract_para_id(heading_text)
             if para_id:
                 current_para_id = para_id
@@ -213,15 +210,14 @@ def parse_markdown(
                 # Subsection이 살아있으면 우선 사용, 없으면 Section으로 fallback (or 단락 평가)
                 from_node = current_subsection or current_section
                 if from_node:
-                    for r in _split_annot_refs(m_annot.group(1)):
-                        graph.edges.append(OntologyEdge(
-                            from_id=from_node.id,
-                            to_id="",
-                            edge_type="REFERENCES",
-                            source_text=heading_text,
-                            unresolved_target=f"문단 {r}",
-                            paragraph=para_id or "",
-                        ))
+                    graph.edges.append(OntologyEdge(
+                        from_id=from_node.id,
+                        to_id="",
+                        edge_type="REFERENCES",
+                        source_text=heading_text,
+                        unresolved_target=f"문단 {m_annot.group(1).strip()}",
+                        paragraph=para_id or "",
+                    ))
                 line = re.sub(r'\s*\(문단\s*[^)]+\)', '', line)
             if current_subsection is not None:
                 content_lines.append(line)
@@ -238,28 +234,26 @@ def parse_markdown(
         if current_subsection is not None:
             m_annot = _PARA_ANNOT_RE.search(stripped)
             if m_annot:
-                for r in _split_annot_refs(m_annot.group(1)):
-                    graph.edges.append(OntologyEdge(
-                        from_id=current_subsection.id,
-                        to_id="",
-                        edge_type="REFERENCES",
-                        source_text=stripped,
-                        unresolved_target=f"문단 {r}",
-                        paragraph=current_para_id,
-                    ))
+                graph.edges.append(OntologyEdge(
+                    from_id=current_subsection.id,
+                    to_id="",
+                    edge_type="REFERENCES",
+                    source_text=stripped,
+                    unresolved_target=f"문단 {m_annot.group(1).strip()}",
+                    paragraph=current_para_id,
+                ))
                 line = re.sub(r'\s*\(문단\s*[^)]+\)', '', line)
             content_lines.append(line)
         elif current_section is not None:
             m_annot = _PARA_ANNOT_RE.search(stripped)
             if m_annot:
-                for r in _split_annot_refs(m_annot.group(1)):
-                    graph.edges.append(OntologyEdge(
-                        from_id=current_section.id,
-                        to_id="",
-                        edge_type="REFERENCES",
-                        source_text=stripped,
-                        unresolved_target=f"문단 {r}",
-                    ))
+                graph.edges.append(OntologyEdge(
+                    from_id=current_section.id,
+                    to_id="",
+                    edge_type="REFERENCES",
+                    source_text=stripped,
+                    unresolved_target=f"문단 {m_annot.group(1).strip()}",
+                ))
                 line = re.sub(r'\s*\(문단\s*[^)]+\)', '', line)
             section_content_lines.append(line)
 
