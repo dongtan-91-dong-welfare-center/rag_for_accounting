@@ -41,10 +41,11 @@ def build_graph(
     # 1단계: 마크다운 파싱 → 노드·CONTAINS 엣지 생성
     graph = parse_markdown(text, standard_id, standard_type)
 
-    # 2·3단계: Subsection마다 후보 탐지 → LLM 엣지 추출
+    # 2·3단계: Subsection·Section마다 후보 탐지 → LLM 엣지 추출
+    # Section 직속 문단(H3 없이 H2 바로 아래에 H4 등장)도 LLM 탐지 대상에 포함.
     for node in graph.nodes:
-        if node.node_type != "Subsection" or not node.content:
-            continue  # 내용이 없는 노드는 건너뜀
+        if node.node_type not in ("Subsection", "Section") or not node.content:
+            continue  # Standard 노드와 내용이 없는 노드는 건너뜀
 
         candidates = detect_candidates(node.content)
         for ec in extract_edges(node.id, node.title, node.content, candidates):
