@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "docling>=2.85.0",
+    "langgraph>=1.1.10",
     "streamlit>=1.56.0",
     "pydantic>=2.0.0",
     "openai>=1.0.0",
@@ -14,9 +15,15 @@ dependencies = [
     "pyhwp>=0.1b15",
     "pdfminer-six>=20260107",
     "pdf2image>=1.17.0",
+    "pydantic-ai>=0.0.1",
+    "langsmith>=0.1.0",
+    "psycopg[binary,pool]>=3.1.0",
+    "sentence-transformers>=3.0.0",
 ]
 
-[project.optional-dependencies]
+# !TODO: 패키지를 PyPI 등 외부에 배포할 경우, dependency-groups 대신
+#        [project.optional-dependencies]로 전환 필요 (외부 사용자가 pip install pkg[dev] 형태로 설치할 수 있도록)
+[dependency-groups]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
@@ -24,3 +31,14 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = [
+    "unit: 단위 테스트 — 개별 함수 논리 검증, 외부 의존성 없음 (Phase 0: Unit)",
+    "system: 시스템 통합 테스트 — 가짜 데이터 기반 예외 경로/데이터 규격 검증 (Phase 1: Fast Fail)",
+    "benchmark: 비즈니스 통합 테스트 — Benchmark 정답셋 기반 답변 품질 검증 (Phase 2: Quality)",
+]
+
+[tool.pyright]
+include = ["src"]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["."]
