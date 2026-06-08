@@ -96,7 +96,7 @@ class TestSearchNodeContract:
                 document_id="d1",
                 content="정상 검색된 컨텍스트",
                 score=0.95,
-                metadata={}
+                metadata={"ontology_node_id": "test_node_123"}
             )
         ]
 
@@ -117,6 +117,8 @@ class TestSearchNodeContract:
         assert isinstance(result["retrieved_chunks"], list) # retrieved_chunks 리스트 타입 검증
         assert len(result["retrieved_chunks"]) == 1 # retrieved_chunks 길이 검증
         assert result["retrieved_chunks"][0].chunk_id == "c1" # retrieved_chunks 첫 번째 원소 검증
+        # metadata가 ChunkMetadata로 변환되어 ontology_node_id가 명시 필드로 보존되는지 검증 (#80)
+        assert result["retrieved_chunks"][0].metadata.ontology_node_id == "test_node_123"   # metadata.ontology_node_id 명시 필드 검증
         mock_search.assert_called_once() # search 함수 호출 검증
         assert mock_search.call_args[0][0] == "영업권 손상차손 인식 기준은?" # search 함수 첫 번째 인자 검증
 

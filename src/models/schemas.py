@@ -1,5 +1,5 @@
 # FUNC-002~009 전반에서 사용하는 공용 데이터 스키마
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Literal
 
 class Citation(BaseModel):
@@ -50,13 +50,34 @@ class RewrittenQuery(BaseModel):
     strategy:       str       # "hyde" | "decompose" | "stepback" | "bypass"
     search_queries: list[str] # 검색에 사용할 쿼리 목록 (원문 항상 포함)
 
+class ChunkMetadata(BaseModel):
+    """검색 청크의 메타데이터 — 온톨로지 노드 식별자 등 핵심 속성을 타입-세이프하게 보장한다.
+
+    명시 필드는 `src/db/ontology/models.py`의 `OntologyNode`와 정합을 맞춘다:
+      - ontology_node_id ↔ OntologyNode.id   (예: "gaap-ch6-s1-최초인식")
+        ※ OntologyNode 쪽 필드명은 `id`이며, 청크 메타데이터에서는 룩업 의미를
+          분명히 하기 위해 `ontology_node_id`로 부른다.
+      - node_type        ↔ OntologyNode.node_type      ("Standard"|"Section"|"Subsection")
+      - standard_type    ↔ OntologyNode.standard_type  ("GAAP"|"KIFRS")
+      - chapter          ↔ OntologyNode.chapter         (예: "6")
+
+    extra="allow"로 DB JSONB의 비정형 키(예: "source")도 수용하며,
+    이들은 `model_extra`를 통해 접근한다.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    ontology_node_id: str | None = None
+    node_type: str | None = None
+    standard_type: str | None = None
+    chapter: str | None = None
+
 class RetrievedChunk(BaseModel):
     """검색된 청크 — Dense/Sparse/Hybrid 검색 결과 단위 (FUNC-005 출력)"""
     chunk_id: str
     document_id: str
     content: str
     score: float
-    metadata: dict
+    metadata: ChunkMetadata = Field(default_factory=ChunkMetadata)
 
 class RerankingResult(BaseModel):
     """재정렬 결과 — Cross-Encoder 재정렬 후 청크 (FUNC-006 출력)"""

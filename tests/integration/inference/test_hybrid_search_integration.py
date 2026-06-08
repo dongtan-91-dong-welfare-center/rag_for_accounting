@@ -81,6 +81,6 @@ class TestHybridSearchIntegration:
             )
             
             assert len(results) >= 1    # 쿼리당 최소 1개 결과 보장
-            assert results[0].metadata.get("standard_type") == "K-GAAP" # K-GAAP 데이터가 잘 검색되었는지 확인
+            assert results[0].metadata.standard_type == "K-GAAP" # K-GAAP 데이터가 잘 검색되었는지 확인
             assert "유형자산" in results[0].content # '유형자산' 키워드가 포함되었는지 확인
 

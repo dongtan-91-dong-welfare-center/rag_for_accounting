@@ -127,7 +127,7 @@ class TestIngestionPipeline:
 
         # 데이터 무결성: 청크의 source 메타데이터가 원본 문서에서 전달됨
         for chunk in chunks:
-            assert chunk.metadata["source"] == doc.metadata["source"]
+            assert chunk.metadata.model_extra["source"] == doc.metadata["source"]
 
         # Index 단계
         result = simulate_indexing(f"DOC-{title}", len(chunks))
@@ -178,7 +178,7 @@ class TestIngestionPipeline:
 
         # 모든 청크에 원본 메타데이터의 source가 보존
         for chunk in chunks:
-            assert chunk.metadata["source"] == metadata["source"]
+            assert chunk.metadata.model_extra["source"] == metadata["source"]   # metadata.model_extra.source 명시 필드 검증
 
         # document_id가 일관되게 부여
         doc_ids = {chunk.document_id for chunk in chunks}
