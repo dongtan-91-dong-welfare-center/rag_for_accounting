@@ -55,3 +55,20 @@ def embed_texts(texts: list[str], node: NodeType = "index") -> list[list[float]]
     except Exception as e:
         logger.error(f"임베딩 생성 실패: {e}")
         raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)
+
+
+def count_tokens(text: str, node: NodeType = "index") -> int:
+    """KURE-v1 토크나이저 기준 토큰 수를 반환한다.
+
+    인덱싱 시 EMBEDDING_MAX_TOKENS(8192) 초과 청크를 IX-201로 스킵하기 위한 사전 검사에 쓰인다.
+    sentence-transformers는 한도 초과 입력을 조용히 잘라내므로(silent truncation),
+    잘린 벡터가 저장되는 것을 막으려면 인코딩 전에 이 함수로 길이를 확인해야 한다.
+
+    :raises LLMAPIConnectionError: 모델(토크나이저) 로드 실패 시 CM-002로 분류
+    """
+    try:
+        model = _get_model()
+        return len(model.tokenizer.encode(text))
+    except Exception as e:
+        logger.error(f"토큰 수 계산 실패: {e}")
+        raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)

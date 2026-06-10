@@ -135,9 +135,10 @@ class SearchTimeoutError(AccountingRAGError):
 class DatabaseQueryError(AccountingRAGError):
     """
     [SE-102] 데이터베이스 연결 실패 또는 쿼리 실행 중 오류가 발생했을 때 발생하는 예외입니다.
+    검색(search) 외에 인덱싱(index) 경로에서도 발생하므로 node를 주입받을 수 있습니다.
     """
-    def __init__(self, message: str):
-        super().__init__(message=message, node="search", error_type="SE-102", is_retryable=True)
+    def __init__(self, message: str, node: NodeType = "search"):
+        super().__init__(message=message, node=node, error_type="SE-102", is_retryable=True)
 
 class NoContextFoundError(AccountingRAGError):
     """
