@@ -42,3 +42,7 @@ Thumbs.db
 
 # 개인 학습 노트
 *개인용*.md
+
+# Data
+data/
+dataset_accounting_sample.json
