@@ -20,10 +20,12 @@ BATCH_SIZE: int = 100          # 인덱싱 배치 크기
 # 검색 타임아웃 (초) — pgvector 쿼리가 이 시간을 초과하면 SearchTimeoutError(SE-101) 발생
 SEARCH_TIMEOUT_SECONDS: int = 5
 
-# 임베딩 모델 설정
-# !TODO: 인덱싱(FUNC-003)에서 사용한 모델과 차원 수를 반드시 동일하게 맞출 것
-EMBEDDING_MODEL: str = "text-embedding-3-small"
-EMBEDDING_DIM: int = 1536   # OpenAI 임베딩 모델의 벡터 차원 수
+# 임베딩 모델 설정 — 이슈 #93에서 KURE-v1(자체호스팅, MIT 라이선스)로 확정
+# 인덱싱(FUNC-003)과 검색(FUNC-005)이 src/utils/embedding.embed_texts()를 공유하므로
+# 모델·차원 불일치가 구조적으로 발생하지 않는다.
+EMBEDDING_MODEL: str = "nlpai-lab/KURE-v1"
+EMBEDDING_DIM: int = 1024   # KURE-v1(bge-m3 기반) 벡터 차원 수 → pgvector vector(1024)
+EMBEDDING_MAX_TOKENS: int = 8192    # KURE-v1 컨텍스트 한도 — 초과 청크는 IX-201로 스킵(부분 커밋)
 
 # gpt-5.4-mini 컨텍스트 윈도우(128K) 중 컨텍스트 입력에 할당할 안전 한도
 # o200k_base 토크나이저 기준 한국어 ~0.5 토큰/글자 (즉 1 토큰 ≈ 2~3 글자)

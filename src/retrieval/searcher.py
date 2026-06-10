@@ -6,14 +6,13 @@ from psycopg import errors, sql
 
 from src.models.schemas import RetrievedChunk
 from src.utils.config import (
-    DENSE_WEIGHT, 
-    SPARSE_WEIGHT, 
-    CHUNKS_TABLE, 
-    SEARCH_TIMEOUT_SECONDS, 
-    EMBEDDING_MODEL
+    DENSE_WEIGHT,
+    SPARSE_WEIGHT,
+    CHUNKS_TABLE,
+    SEARCH_TIMEOUT_SECONDS
 )
-from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError, LLMAPIConnectionError
-from src.utils.llm_client import client
+from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError
+from src.utils.embedding import embed_texts
 from src.db.connection import get_pool
 from src.utils.logger import get_logger
 
@@ -21,19 +20,12 @@ logger = get_logger(__name__)
 
 
 def embed_query(query: str) -> list[float]:
-    """OpenAI 임베딩 모델을 사용하여 질의를 벡터로 변환한다."""
-    try:
-        response = client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=query
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        logger.error(f"임베딩 생성 실패: {e}")
-        # 임베딩 실패는 DB 오류(SE-102)가 아니라 LLM/임베딩 API 호출 문제(인증·네트워크)이다.
-        # CM-002로 분류해야 ① 로그상 원인이 'DB 쿼리 실패'로 둔갑하지 않고
-        # ② 검색 노드의 DatabaseQueryError 핸들러가 무의미한 CRAG 재탐색을 트리거하지 않는다.
-        raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node="search")
+    """KURE-v1 임베딩 모델을 사용하여 질의를 벡터로 변환한다.
+
+    인덱싱(FUNC-003)과 동일한 embed_texts()를 공유하므로 모델·차원이 항상 일치한다.
+    실패 시 embed_texts()가 LLMAPIConnectionError(CM-002, node="search")를 발생시킨다.
+    """
+    return embed_texts([query], node="search")[0]
 
 
 def _build_where_clause(metadata_filter: dict | None) -> tuple[str, list]:

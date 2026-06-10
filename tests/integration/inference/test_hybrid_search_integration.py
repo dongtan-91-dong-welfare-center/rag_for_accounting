@@ -7,7 +7,7 @@
 import pytest
 from unittest.mock import patch
 from src.retrieval.searcher import search_chunks
-from src.utils.config import CHUNKS_TABLE
+from src.utils.config import CHUNKS_TABLE, EMBEDDING_DIM
 from src.db.connection import get_pool, init_pool
 
 @pytest.fixture(scope="module", autouse=True)
@@ -35,14 +35,14 @@ def setup_test_db():
                     document_id TEXT,
                     content TEXT,
                     metadata JSONB,
-                    embedding vector(1536)
+                    embedding vector({EMBEDDING_DIM})
                 )
             """)
-            
+
             # 테스트 데이터 삽입
-            # (실제 임베딩 벡터와 유사한 길이 1536짜리 dummy vector 사용)
-            dummy_vec_1 = f"[{','.join(['0.1']*1536)}]"
-            dummy_vec_2 = f"[{','.join(['0.2']*1536)}]"
+            # (실제 임베딩 벡터와 동일한 차원의 dummy vector 사용)
+            dummy_vec_1 = f"[{','.join(['0.1']*EMBEDDING_DIM)}]"
+            dummy_vec_2 = f"[{','.join(['0.2']*EMBEDDING_DIM)}]"
             
             cur.execute(f"""
                 INSERT INTO {CHUNKS_TABLE} (document_id, content, metadata, embedding)
@@ -69,10 +69,10 @@ class TestHybridSearchIntegration:
     def test_end_to_end_kgaap_search(self):
         """K-GAAP 청크 데이터 하이브리드 검색 검증"""
         # "유형자산 감가상각"에 대한 쿼리
-        # embed_query() 내부에서 OpenAI API를 타므로 테스트용 query를 사용하거나 mock 처리 필요
-        # 통합 테스트의 목적이 DB 연동이므로 embed_query만 mock 처리
+        # embed_query() 내부에서 KURE-v1 모델 로드(다운로드)가 발생할 수 있으므로
+        # 통합 테스트의 목적(DB 연동)에 맞게 embed_query만 mock 처리
         with patch("src.retrieval.searcher.embed_query") as mock_embed:
-            mock_embed.return_value = [0.1] * 1536
+            mock_embed.return_value = [0.1] * EMBEDDING_DIM
             
             results = search_chunks(
                 query="유형자산 감가상각 인식 기준",
