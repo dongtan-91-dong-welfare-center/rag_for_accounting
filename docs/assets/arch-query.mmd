@@ -1,0 +1,47 @@
+stateDiagram-v2
+    [*] --> rewrite
+    
+    state rewrite {
+        [*] --> Classify
+        Classify --> IsAccounting: is_accounting_query?
+        IsAccounting --> NonAccounting: False (조기 종료)
+        IsAccounting --> RewriteQuery: True
+        RewriteQuery --> HIL_Interrupt: interrupt()
+        HIL_Interrupt --> [*]: Approved
+        HIL_Interrupt --> RewriteQuery: Revised
+    }
+    
+    rewrite --> END: NonAccounting
+    rewrite --> search: Approved
+    
+    state search {
+        [*] --> HybridSearch
+        HybridSearch --> RRF: Vector + Keyword 결과
+        RRF --> [*]: RRF 병합
+    }
+    
+    search --> rerank
+    
+    state rerank {
+        [*] --> ThresholdCheck
+        ThresholdCheck --> Pass: Score >= 임계값
+        ThresholdCheck --> Fail: Score < 임계값
+    }
+    
+    rerank --> evaluate: Pass (needs_reretrieval=False)
+    rerank --> route_after_evaluate: Fail (needs_reretrieval=True)
+    
+    state evaluate {
+        [*] --> CRAG_Check
+        CRAG_Check --> Relevant: Context 충분
+        CRAG_Check --> NeedsExternal: Context 부족
+    }
+    
+    evaluate --> route_after_evaluate
+    
+    state route_after_evaluate <<choice>>
+    route_after_evaluate --> rewrite: needs_reretrieval or needs_external\n(if rewrite_count < MAX)
+    route_after_evaluate --> generate: else
+    
+    generate --> END
+    END --> [*]
