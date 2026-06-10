@@ -8,15 +8,14 @@
     - delete_collection(): 삭제 로직
 
 DB와 임베딩 모델은 mock으로 차단한다 (searcher 단위 테스트와 동일한 방식).
-
-TODO: similarity_search/delete_collection 구현 완료 후 @pytest.mark.skip을 제거
 """
 import pytest
 from unittest.mock import patch, MagicMock
+from psycopg import errors
 
 from src.models.schemas import RetrievedChunk, IndexingResult
 from src.utils.config import EMBEDDING_DIM
-from src.utils.exception import LLMAPIConnectionError
+from src.utils.exception import LLMAPIConnectionError, SearchTimeoutError, DatabaseQueryError
 
 
 def make_chunks(count: int, document_id: str = "D1") -> list[RetrievedChunk]:
@@ -172,34 +171,81 @@ class TestIndexDocuments:
         mock_embed.assert_not_called()      # DDL 실패 시 임베딩 비용을 쓰지 않음
 
 
+# 테스트용 DB 행 데이터 (chunk_id, document_id, content, metadata, score)
+MOCK_SEARCH_ROWS = [
+    ("c1", "DOC-1", "영업권 정의", {"ontology_node_id": "gaap-ch6-s1"}, 0.95),
+    ("c2", "DOC-1", "손상차손 인식", '{"standard_type": "K-GAAP"}', 0.80),
+    ("c3", "DOC-2", "재평가 주기", None, 0.60),
+]
+
+
 @pytest.mark.unit
 class TestSimilaritySearch:
     """similarity_search() 인터페이스 규격 검증"""
 
-    @pytest.mark.skip(reason="FUNC-003 vector_store 구현 후 활성화 예정 — DB 연동 필요")
-    def test_search_returns_retrieved_chunks(self):
+    def test_search_returns_retrieved_chunks(self, mock_db_pool):
         """
         입력: query_vector (list[float]), top_k (int), collection (str)
-        출력: list[RetrievedChunk]
+        출력: list[RetrievedChunk] — score 내림차순, metadata 타입별(dict/str/None) 파싱
         """
         from src.db.vector_store import similarity_search
+
+        mock_db_pool.fetchall.return_value = MOCK_SEARCH_ROWS
 
         results = similarity_search(
             query_vector=[0.1] * EMBEDDING_DIM, top_k=5, collection="test_collection"
         )
+
         assert isinstance(results, list)
-        if results:
-            assert isinstance(results[0], RetrievedChunk)
+        assert len(results) == 3
+        assert all(isinstance(r, RetrievedChunk) for r in results)
+        assert results[0].chunk_id == "c1"
+        assert results[0].score == 0.95
+        # metadata 파싱: dict 그대로 / JSON 문자열 파싱 / None → 빈 메타데이터
+        assert results[0].metadata.ontology_node_id == "gaap-ch6-s1"
+        assert results[1].metadata.standard_type == "K-GAAP"
+        assert results[2].metadata.ontology_node_id is None
+        # SET statement_timeout 1회 + SELECT 1회
+        assert mock_db_pool.execute.call_count == 2
+
+    def test_search_timeout_raises_SE101(self, mock_db_pool):
+        """statement_timeout 시 SearchTimeoutError(SE-101) 발생 검증"""
+        from src.db.vector_store import similarity_search
+
+        mock_db_pool.execute.side_effect = errors.QueryCanceled("statement timeout")
+
+        with pytest.raises(SearchTimeoutError):
+            similarity_search([0.1] * EMBEDDING_DIM, top_k=5, collection="test_collection")
+
+    def test_search_db_error_raises_SE102(self, mock_db_pool):
+        """기타 쿼리 실패 시 DatabaseQueryError(SE-102) 발생 검증"""
+        from src.db.vector_store import similarity_search
+
+        mock_db_pool.execute.side_effect = Exception("DB 에러")
+
+        with pytest.raises(DatabaseQueryError):
+            similarity_search([0.1] * EMBEDDING_DIM, top_k=5, collection="test_collection")
 
 
 @pytest.mark.unit
 class TestDeleteCollection:
     """delete_collection() 인터페이스 규격 검증"""
 
-    @pytest.mark.skip(reason="FUNC-003 vector_store 구현 후 활성화 예정 — DB 연동 필요")
-    def test_delete_returns_bool(self):
+    def test_delete_returns_true_on_success(self, mock_db_pool):
         """삭제 성공 시 True 반환"""
         from src.db.vector_store import delete_collection
 
         result = delete_collection("test_collection")
-        assert isinstance(result, bool)
+
+        assert result is True
+        mock_db_pool.execute.assert_called_once()
+
+    def test_delete_returns_false_on_failure(self, mock_db_pool):
+        """DB 오류 시 예외 대신 False 반환"""
+        from src.db.vector_store import delete_collection
+
+        mock_db_pool.execute.side_effect = Exception("DB 에러")
+
+        result = delete_collection("test_collection")
+
+        assert result is False

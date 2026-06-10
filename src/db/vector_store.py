@@ -10,14 +10,21 @@
 #     (전체 롤백 대신 부분 커밋을 택한 이유: 수천 청크 인덱싱 중 일시 장애로
 #      전부 버리는 것보다 partial 상태를 드러내고 재시도하는 쪽이 운영상 단순하다)
 
-from psycopg import sql
+import json
+
+from psycopg import errors, sql
 from psycopg.types.json import Jsonb
 
 from src.db.connection import get_pool
 from src.models.schemas import RetrievedChunk, IndexingResult
-from src.utils.config import BATCH_SIZE, EMBEDDING_DIM, EMBEDDING_MAX_TOKENS
+from src.utils.config import BATCH_SIZE, EMBEDDING_DIM, EMBEDDING_MAX_TOKENS, SEARCH_TIMEOUT_SECONDS
 from src.utils.embedding import embed_texts, count_tokens
-from src.utils.exception import AccountingRAGError, DatabaseQueryError, EmbeddingTokenLimitError
+from src.utils.exception import (
+    AccountingRAGError,
+    DatabaseQueryError,
+    EmbeddingTokenLimitError,
+    SearchTimeoutError,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -164,23 +171,71 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
 
 
 def similarity_search(query_vector: list[float], top_k: int, collection: str) -> list[RetrievedChunk]:
-    """코사인 유사도 기반 근사 최근접 이웃(ANN) 검색. pgvector의 <=> 연산자 사용."""
-    # Pseudo:
-    # results = db.execute(
-    #     f"SELECT chunk_id, document_id, content, (1 - (embedding <=> %s)) as score "
-    #     f"FROM {collection} ORDER BY embedding <=> %s LIMIT %s",
-    #     [query_vector, query_vector, top_k])
-    #
-    # return [RetrievedChunk(chunk_id=r[0], document_id=r[1], content=r[2], score=r[3]) for r in results]
-    raise NotImplementedError
+    """코사인 유사도 기반 근사 최근접 이웃(ANN) 검색. pgvector의 <=> 연산자 사용.
+
+    - score = 1 - (코사인 거리) → 유사할수록 1에 가깝다 (HNSW vector_cosine_ops 인덱스 활용)
+    - searcher.py와 동일하게 SEARCH_TIMEOUT_SECONDS를 적용한다
+
+    :raises SearchTimeoutError: 쿼리 응답 시간 초과 시 (SE-101)
+    :raises DatabaseQueryError: 그 외 DB 오류 시 (SE-102)
+    """
+    query = sql.SQL(
+        """
+        SELECT chunk_id, document_id, content, metadata,
+               1 - (embedding <=> %s::vector) AS score
+        FROM {table}
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+        """
+    ).format(table=sql.Identifier(collection))
+
+    timeout_ms = SEARCH_TIMEOUT_SECONDS * 1000
+    try:
+        with get_pool().connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql.SQL("SET LOCAL statement_timeout = {}").format(sql.Literal(f"{timeout_ms}ms")))
+                cur.execute(query, [query_vector, query_vector, top_k])
+                rows = cur.fetchall()
+    except errors.QueryCanceled as e:
+        logger.error(f"유사도 검색 타임아웃 초과: {e}")
+        raise SearchTimeoutError(f"DB 검색 응답 시간 초과 ({SEARCH_TIMEOUT_SECONDS}s)")
+    except Exception as e:
+        logger.error(f"유사도 검색 중 DB 오류: {e}")
+        raise DatabaseQueryError(f"데이터베이스 쿼리 실행 실패: {e}")
+
+    results = []
+    for chunk_id, document_id, content, metadata, score in rows:
+        # metadata가 문자열(JSON)로 반환될 경우 dict로 파싱 (searcher와 동일한 방어 로직)
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        elif metadata is None:
+            metadata = {}
+
+        results.append(RetrievedChunk(
+            chunk_id=str(chunk_id),
+            document_id=str(document_id),
+            content=str(content),
+            score=float(score),
+            metadata=metadata,
+        ))
+    return results
 
 
 def delete_collection(collection: str) -> bool:
-    """지정한 컬렉션의 모든 벡터를 삭제한다."""
-    # Pseudo:
-    # try:
-    #     db.execute(f"DELETE FROM {collection}")
-    #     return True
-    # except Exception:
-    #     return False
-    raise NotImplementedError
+    """지정한 컬렉션의 모든 벡터를 삭제한다. 성공 시 True, 실패 시 False를 반환한다.
+
+    테이블 자체는 유지하고 행만 비운다(DELETE). 재인덱싱 시 _ensure_collection()을
+    다시 태울 필요가 없고, HNSW 인덱스 정의도 보존된다.
+    """
+    try:
+        with get_pool().connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql.SQL("DELETE FROM {table}").format(table=sql.Identifier(collection)))
+        logger.info(f"컬렉션 삭제 완료: collection={collection}")
+        return True
+    except Exception as e:
+        logger.error(f"컬렉션 삭제 실패: collection={collection}, {e}")
+        return False
