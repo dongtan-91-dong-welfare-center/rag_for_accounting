@@ -13,11 +13,11 @@ import pytest
 from unittest.mock import patch
 
 from tests.utils.benchmark_loader import load_benchmark, BenchmarkCase
+from tests.integration.helpers import run_workflow_to_completion
 from src.models.schemas import (
-    RetrievedChunk, RerankingResult, EvaluationResult, 
+    RetrievedChunk, RerankingResult, EvaluationResult,
     FinalResponse, Citation
 )
-from src.agent.workflow import run_workflow
 
 # ── Benchmark 케이스 로딩 ──
 _BENCHMARK_CASES = load_benchmark()
@@ -38,7 +38,9 @@ class TestBenchmarkCompliance:
         회계 RAG 시스템의 핵심 가치는 '어떤 기준서 조항을 근거로 답했는가'에 있습니다.
         """
         # 실제 워크플로우를 실행하여 결과 획득
-        result = run_workflow(case.query, standard_filter=case.standard)
+        # decompose/stepback 분류 시 human_review에서 interrupt 되므로,
+        # auto-approve 헬퍼로 끝까지 진행시켜 단발성 완료를 보장한다. (#90)
+        result = run_workflow_to_completion(case.query, standard_filter=case.standard)
         response = result.get("final_response")
         assert response is not None, f"[{case.id}] final_response 결과가 존재하지 않습니다."
 
@@ -66,7 +68,9 @@ class TestBenchmarkCompliance:
         Benchmark에 포함된 질의는 모두 회계 기준서에서 답변 가능한 질의입니다.
         """
         # 실제 워크플로우를 실행하여 결과 획득
-        result = run_workflow(case.query, standard_filter=case.standard)
+        # decompose/stepback 분류 시 human_review에서 interrupt 되므로,
+        # auto-approve 헬퍼로 끝까지 진행시켜 단발성 완료를 보장한다. (#90)
+        result = run_workflow_to_completion(case.query, standard_filter=case.standard)
         response = result.get("final_response")
         assert response is not None, f"[{case.id}] final_response 결과가 존재하지 않습니다."
 
