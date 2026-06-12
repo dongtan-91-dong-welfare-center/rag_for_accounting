@@ -1,0 +1,22 @@
+graph TD
+    A[원본 문서 PDF/HWP] -->|FUNC-001| B(Docling / LlamaParse)
+    B --> C[텍스트, 메타데이터, 레이아웃 추출]
+    
+    subgraph FUNC-002 [온톨로지 빌드]
+        C --> D{엔티티/관계 추출}
+        D -->|회계기준, 개념, 예외| E[(Apache AGE 그래프 DB)]
+    end
+    
+    subgraph Ontology Bridge
+        C --> F[계층적 청킹 Hierarchical Chunking]
+        F --> G[청크-노드 매핑 chunk→node]
+        G -.->|참조| E
+    end
+    
+    subgraph FUNC-003 [벡터 임베딩 및 적재]
+        G --> H[텍스트 임베딩 생성]
+        H --> I[(pgvector 벡터 DB)]
+    end
+    
+    E --> J((Ingest 완료))
+    I --> J

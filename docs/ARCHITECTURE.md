@@ -89,33 +89,29 @@ K-IFRS 회계기준서(70개, 평균 250페이지)를 대상으로 한 GraphRAG 
 
 ### 파이프라인 흐름
 
-```
-[원본 문서 (PDF/HTML/Word/HWP)]
-        │
-        ▼
-┌───────────────────┐
-│     Docling        │
-│  ├─ PDF 파싱       │  레이아웃 분석 + OCR
-│  ├─ 테이블 추출    │  → 구조화된 테이블 (Markdown/JSON)
-│  ├─ 수식 인식      │  → LaTeX 표현
-│  └─ 계층 구조 보존  │  장 > 절 > 문단 트리
-└───────┬───────────┘
-        │ DoclingDocument 객체
-        ▼
-┌───────────────────┐
-│  전처리기           │
-│  ├─ 상호참조 추출   │  정규식으로 "제XXXX호 문단XX" 패턴 파싱
-│  ├─ 메타데이터 추출  │  기준서번호, 시행일, 적용범위
-│  └─ 텍스트 변환     │  EdgeQuake 입력 형식으로 변환
-└───────┬───────────┘
-        │ 텍스트 + 메타데이터 + 참조 어노테이션
-        ▼
-┌───────────────────┐
-│  EdgeQuake 인제스트  │  API를 통해 문서 투입
-│  ├─ 엔티티 추출     │  LLM 기반 (회계 도메인 프롬프트)
-│  ├─ 관계 추출       │  + 전처리기의 상호참조 힌트 반영
-│  └─ 그래프+벡터 저장 │  AGE + pgvector
-└───────────────────┘
+```mermaid
+graph TD
+    A[원본 문서 PDF/HWP] -->|FUNC-001| B(Docling / LlamaParse)
+    B --> C[텍스트, 메타데이터, 레이아웃 추출]
+    
+    subgraph FUNC-002 [온톨로지 빌드]
+        C --> D{엔티티/관계 추출}
+        D -->|회계기준, 개념, 예외| E[(Apache AGE 그래프 DB)]
+    end
+    
+    subgraph Ontology Bridge
+        C --> F[계층적 청킹 Hierarchical Chunking]
+        F --> G[청크-노드 매핑 chunk→node]
+        G -.->|참조| E
+    end
+    
+    subgraph FUNC-003 [벡터 임베딩 및 적재]
+        G --> H[텍스트 임베딩 생성]
+        H --> I[(pgvector 벡터 DB)]
+    end
+    
+    E --> J((Ingest 완료))
+    I --> J
 ```
 
 ### 핵심 포인트
@@ -127,56 +123,54 @@ K-IFRS 회계기준서(70개, 평균 250페이지)를 대상으로 한 GraphRAG 
 
 ## 4. 검색 및 응답 파이프라인
 
-```
-[사용자 질의]
-        │
-        ▼
-┌─────────────────────────────────┐
-│  LangGraph 오케스트레이션        │
-│                                  │
-│  ① Query Rewriter               │
-│     자연어 → 회계 용어 변환       │
-│     + EdgeQuake 쿼리 모드 결정    │
-│        │                         │
-│        ▼                         │
-│  ② EdgeQuake 검색                │
-│     쿼리 유형에 따라 모드 선택:    │
-│     ├─ local: 특정 기준서 조항    │
-│     ├─ global: 주제 전반 탐색     │
-│     ├─ hybrid: 둘 다 (기본값)     │
-│        │                         │
-│        ▼                         │
-│  ③ CRAG 품질 게이트              │
-│     검색 결과 평가:               │
-│     ├─ CORRECT → ⑤로             │
-│     ├─ AMBIGUOUS → ④ 보충 검색   │
-│     └─ WRONG → ④ 재검색          │
-│        │                         │
-│        ▼                         │
-│  ④ 보충 검색 (필요 시)            │
-│     ├─ 쿼리 리라이팅 후 재검색    │
-│     ├─ 다른 모드로 재시도         │
-│     └─ 그래프 탐색 확장 (홉 증가) │
-│        │                         │
-│        ▼                         │
-│  ⑤ Answer Generator             │
-│     검색된 컨텍스트 → LLM 응답    │
-└────────┬────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────┐
-│  PydanticAI 구조화 출력          │
-│  {                               │
-│    "answer": "...",              │
-│    "citations": [                │
-│      {"기준서": "1116",          │
-│       "문단": "31-33",           │
-│       "내용": "..."}             │
-│    ],                            │
-│    "related_standards": [...],   │
-│    "confidence": 0.92            │
-│  }                               │
-└─────────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> rewrite
+    
+    state rewrite {
+        [*] --> Classify
+        Classify --> IsAccounting: is_accounting_query?
+        IsAccounting --> NonAccounting: False (조기 종료)
+        IsAccounting --> RewriteQuery: True
+        RewriteQuery --> HIL_Interrupt: interrupt()
+        HIL_Interrupt --> [*]: Approved
+        HIL_Interrupt --> RewriteQuery: Revised
+    }
+    
+    rewrite --> END: NonAccounting
+    rewrite --> search: Approved
+    
+    state search {
+        [*] --> HybridSearch
+        HybridSearch --> RRF: Vector + Keyword 결과
+        RRF --> [*]: RRF 병합
+    }
+    
+    search --> rerank
+    
+    state rerank {
+        [*] --> ThresholdCheck
+        ThresholdCheck --> Pass: Score >= 임계값
+        ThresholdCheck --> Fail: Score < 임계값
+    }
+    
+    rerank --> evaluate: Pass (needs_reretrieval=False)
+    rerank --> route_after_evaluate: Fail (needs_reretrieval=True)
+    
+    state evaluate {
+        [*] --> CRAG_Check
+        CRAG_Check --> Relevant: Context 충분
+        CRAG_Check --> NeedsExternal: Context 부족
+    }
+    
+    evaluate --> route_after_evaluate
+    
+    state route_after_evaluate <<choice>>
+    route_after_evaluate --> rewrite: needs_reretrieval or needs_external\n(if rewrite_count < MAX)
+    route_after_evaluate --> generate: else
+    
+    generate --> END
+    END --> [*]
 ```
 
 ### 핵심 설계 결정
