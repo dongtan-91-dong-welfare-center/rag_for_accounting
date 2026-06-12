@@ -3,7 +3,7 @@ from unittest.mock import patch
 from src.db.ontology.builder import build_graph
 from src.db.ontology.edge_extractor import EdgeCandidate
 
-MD_PATH = "data/회계_sample.md"
+MD_PATH = "data/llm_parsed/회계_sample.md"
 
 
 def _mock_extract(subsection_id, title, content, candidates):

@@ -21,7 +21,6 @@ def test_subsection_node_defaults():
         content="6.4 금융자산이나...",
     )
     assert node.paragraphs == []
-    assert node.unresolved_refs == []
 
 
 def test_references_edge():

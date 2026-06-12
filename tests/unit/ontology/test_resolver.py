@@ -47,5 +47,4 @@ def test_resolve_failure_records_unresolved():
     )]
     resolved = resolve_edges(graph)
     assert resolved.edges[0].to_id == ""
-    src = next(n for n in resolved.nodes if n.id == "gaap-ch6-s1-최초인식")
-    assert "제8장 문단 8.2" in src.unresolved_refs
+    assert resolved.edges[0].unresolved_target == "제8장 문단 8.2"
