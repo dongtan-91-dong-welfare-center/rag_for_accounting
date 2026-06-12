@@ -29,10 +29,10 @@ EMBEDDING_MODEL: str = "nlpai-lab/KURE-v1"
 EMBEDDING_DIM: int = 1024   # KURE-v1(bge-m3 기반) 벡터 차원 수 → pgvector vector(1024)
 EMBEDDING_MAX_TOKENS: int = 8192    # KURE-v1 컨텍스트 한도 — 초과 청크는 IX-201로 스킵(부분 커밋)
 
-# gpt-5.4-mini 컨텍스트 윈도우(128K) 중 컨텍스트 입력에 할당할 안전 한도
+# gpt-5.4-mini 컨텍스트 윈도우(400K) 중 컨텍스트 입력에 할당할 안전 한도
 # o200k_base 토크나이저 기준 한국어 ~0.5 토큰/글자 (즉 1 토큰 ≈ 2~3 글자)
-# 128K - 최대 출력(16,384) - 시스템 프롬프트/쿼리 여유 ≈ 105,000 으로 설정
-MAX_CONTEXT_TOKENS: int = 105000
+# 400K - 최대 출력(128K) - 시스템 프롬프트/쿼리 여유 ≈ 270,000 으로 설정
+MAX_CONTEXT_TOKENS: int = 270000
 
 # 검색 대상 테이블명 — RetrievedChunk 스키마와 컬럼명을 통일
 CHUNKS_TABLE: str = "chunks"
