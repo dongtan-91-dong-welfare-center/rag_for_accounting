@@ -6,10 +6,10 @@ from psycopg import errors, sql
 
 from src.models.schemas import RetrievedChunk
 from src.utils.config import (
-    DENSE_WEIGHT,
-    SPARSE_WEIGHT,
+    RRF_K,
     CHUNKS_TABLE,
-    SEARCH_TIMEOUT_SECONDS
+    SEARCH_TIMEOUT_SECONDS,
+    EMBEDDING_MODEL
 )
 from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError
 from src.utils.embedding import embed_texts
@@ -149,23 +149,33 @@ def _execute_search_query(sql_query: str | sql.SQL | sql.Composed, params: list,
     return results
 
 
-def normalize_scores(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
-    """스코어를 [0, 1] 범위로 Min-Max 정규화한다."""
-    if not chunks:
-        return []
-        
-    scores = [c.score for c in chunks]
-    min_score, max_score = min(scores), max(scores)
+def reciprocal_rank_fusion(
+    result_lists: list[list[RetrievedChunk]], k: int = RRF_K
+) -> list[RetrievedChunk]:
+    """여러 검색 결과 리스트를 RRF(Reciprocal Rank Fusion)로 병합한다.
 
-    # 호출자가 보유한 원본 객체를 변형하지 않도록 model_copy로 새 객체를 반환한다.
-    # 모든 점수가 동일하거나 최대/최소가 같으면 1.0으로 통일
-    if max_score == min_score:
-        return [c.model_copy(update={"score": 1.0}) for c in chunks]
+    각 결과 리스트는 점수 내림차순으로 정렬되어 있다고 가정한다(DB 쿼리에서 ORDER BY로 보장).
+    동일 문서의 최종 점수는 각 리스트에서의 순위 기반 점수 합이다:
+        score(doc) = Σ 1 / (k + rank(doc))   (rank는 1부터 시작)
 
-    return [
-        c.model_copy(update={"score": (c.score - min_score) / (max_score - min_score)})
-        for c in chunks
-    ]
+    점수가 아닌 순위에 의존하므로 Min-Max 정규화와 달리 아웃라이어 점수에 영향받지 않고,
+    가중치 튜닝 없이 분포가 다른 Dense/Sparse 결과를 안정적으로 결합한다.
+    단일 리스트만 비어있지 않은 폴백 상황에서도 그대로 동작한다.
+    """
+    # 호출자가 보유한 원본 객체를 변형하지 않도록 model_copy로 새 객체를 사용한다.
+    fused: dict[str, RetrievedChunk] = {}
+
+    for results in result_lists:
+        for rank, chunk in enumerate(results, start=1):
+            rrf_score = 1.0 / (k + rank)
+            if chunk.chunk_id in fused:
+                fused[chunk.chunk_id].score += rrf_score
+            else:
+                merged_chunk = chunk.model_copy()
+                merged_chunk.score = rrf_score
+                fused[chunk.chunk_id] = merged_chunk
+
+    return sorted(fused.values(), key=lambda x: x.score, reverse=True)
 
 
 def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
@@ -197,7 +207,7 @@ def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = No
     return final_results
 
 def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadata_filter: dict | None) -> list[RetrievedChunk]:
-    """Dense + Sparse 검색을 독립 실행하고 가중 병합한다. 양쪽 모두 실패 시 DatabaseQueryError를 발생시킨다."""
+    """Dense + Sparse 검색을 독립 실행하고 RRF로 병합한다. 양쪽 모두 실패 시 DatabaseQueryError를 발생시킨다."""
     dense_results: list[RetrievedChunk] = []
     sparse_results: list[RetrievedChunk] = []
     dense_failed = False
@@ -225,22 +235,6 @@ def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadat
     else:
         logger.info("검색 모드: Dense + Sparse 하이브리드")
 
-    dense_results = normalize_scores(dense_results)
-    sparse_results = normalize_scores(sparse_results)
-
-    merged_map: dict[str, RetrievedChunk] = {}
-
-    for chunk in dense_results:
-        merged_chunk = chunk.model_copy()
-        merged_chunk.score = chunk.score * DENSE_WEIGHT
-        merged_map[chunk.chunk_id] = merged_chunk
-
-    for chunk in sparse_results:
-        if chunk.chunk_id in merged_map:
-            merged_map[chunk.chunk_id].score += chunk.score * SPARSE_WEIGHT
-        else:
-            merged_chunk = chunk.model_copy()
-            merged_chunk.score = chunk.score * SPARSE_WEIGHT
-            merged_map[chunk.chunk_id] = merged_chunk
-
-    return sorted(merged_map.values(), key=lambda x: x.score, reverse=True)
+    # Dense/Sparse 결과는 각 쿼리의 ORDER BY로 점수 내림차순 정렬되어 있으므로
+    # 리스트 내 위치가 곧 순위가 된다. RRF가 순위 기반으로 병합한다.
+    return reciprocal_rank_fusion([dense_results, sparse_results])
