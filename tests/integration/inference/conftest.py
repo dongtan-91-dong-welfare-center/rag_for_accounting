@@ -11,9 +11,13 @@ def mock_llm_agent():
     generate_response()는 실행 시점에 Agent를 생성하므로,
     LazyAppProxy로 지연 빌드하는 워크플로우에도 이 patch가 적용된다.
     generate_response 자체를 workflow 레벨에서 통째로 대체하는 테스트(happy_path 등)에는 문제가 없다
+
+    answer에 "[1]" 인용 마크업을 포함시키는 이유:
+        generate 노드의 GN-401 가드(generate.py)는 is_answerable=True인데 인용 근거가 하나도 없으면 LLMResponseFormatError를 발생시킨다.
+        chunk_map은 항상 인덱스 1부터 시작하므로 "[1]"이 있으면 최소 1건의 citation이 추출되어 GN-401 계약을 만족한다.
     """
     llm_response = LLMInternalResponse(
-        answer="테스트 답변입니다.",
+        answer="테스트 답변입니다. [1]",
         is_answerable=True,
         llm_self_score=0.9
     )
