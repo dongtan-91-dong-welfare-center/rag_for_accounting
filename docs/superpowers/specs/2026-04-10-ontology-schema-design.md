@@ -57,8 +57,7 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 | `id` | string | 고유 식별자. 예: `gaap-ch6`, `kifrs-1116` |
 | `name` | string | 기준서 이름. 예: "제6장 금융자산·금융부채" |
 | `type` | enum | `GAAP` \| `KIFRS` |
-| `chapter` | string | 장 번호 또는 기준서 번호. 예: `6`, `1116` |
-| `effective_date` | string | 시행일 |
+| `chapter` | string | 장 번호 또는 기준서 번호. 예: `6`, `1116`. 마크다운 헤딩(`## 제N장`)에서 자동 추출 |
 
 ### Section
 
@@ -69,6 +68,8 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 | `id` | string | 고유 식별자. 예: `gaap-ch6-s1` |
 | `title` | string | 절 제목. 예: "제1절 공통사항" |
 | `order` | int | 절 순서 |
+| `content` | string | Section 직속 문단 텍스트. 절 전체를 아우르는 서론 문단(예: 6.3)이 `###` Subsection 없이 `##` 바로 아래에 등장하는 경우 여기에 저장 |
+| `paragraphs` | string[] | Section 직속 문단 번호 목록. 예: `["6.3"]` |
 
 ### Subsection
 
@@ -102,11 +103,13 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 
 | 항목 | 내용 |
 |------|------|
-| From → To | Subsection → Standard \| Section \| Subsection |
+| From → To | Subsection \| Section → Standard \| Section \| Subsection |
 | 속성 | `paragraph` (string): 참조 출처 하위 항목 번호. 예: `"6.14⑵㈏"` |
 | 속성 | `source_text` (string): 참조가 등장한 원문 문장 |
 
-하나의 Subsection에서 여러 엣지가 나올 수 있으며, `paragraph` 속성으로 어느 하위 항목(⑴⑵㈎㈏ 등)에서 발생한 참조인지 구분한다.
+하나의 노드에서 여러 엣지가 나올 수 있으며, `paragraph` 속성으로 어느 하위 항목(⑴⑵㈎㈏ 등)에서 발생한 참조인지 구분한다.
+
+**Section이 출발 노드가 되는 경우:** Section 직속 문단(예: 6.3)이 다른 절을 참조할 때 Section 노드가 REFERENCES 엣지의 출발점이 된다. 예: `(제1절 공통사항 Section) -[REFERENCES]→ (제2절 Section)`
 
 **예시 — 6.14 "금융자산과 금융부채의 후속 측정":**
 ```
@@ -233,10 +236,84 @@ REFERENCES 대상이 그래프에 아직 없는 경우:
 
 ---
 
+## 7. 임베딩 전략
+
+### 7.1 기본: Title prepending
+
+Subsection의 `title`은 포함 문단들의 핵심 주제를 응축한다. 임베딩 입력은 다음 형식으로 구성한다.
+
+```
+[title]
+
+[content]
+```
+
+회계 기준서 소제목("금융상품의 최초인식", "위험회피회계 적용조건" 등)은 의미 응축도가 높아 prepending만으로도 검색 시 자연스럽게 중점화된다.
+
+### 7.2 고도화 옵션 (테스트 후 선택적 도입)
+
+eval에서 "title이 명확히 매칭되는 쿼리인데 검색 실패" 패턴이 보이면 도입 검토한다.
+
+**Title 반복**
+- `[title]\n[title]\n[content]` 형태로 2~3회 반복
+- 토큰 비용 증가하나 검색 정확도 향상 사례 보고됨
+
+**Dual embedding**
+- title과 content를 각각 임베딩해 저장, 쿼리 시 가중합으로 점수 산출
+  ```
+  score = α * sim(q, title_emb) + (1-α) * sim(q, content_emb)
+  ```
+- α는 0.3~0.5. 쿼리 유형별 동적 조정도 가능
+- 인덱스 크기 2배
+
+---
+
+## 8. 향후 도메인 개념 노드 도입 (조건부)
+
+§2에서 명시한 대로 현 스펙은 개념 노드(AccountingConcept)를 제외했다. 파이프라인 구축 및 eval 기반 실패 케이스 분석 이후, 다음 패턴이 빈번하면 단계적으로 도입한다.
+
+### 8.1 도입 트리거가 되는 실패 패턴
+
+- 동의어/유의어 쿼리에서 검색 실패
+- 같은 개념이 여러 조항에 분산되어 다중 홉 탐색 필요
+- 쿼리 범위 한정("공정가치 측정에 관한 조항만") 요구
+- 회계 용어 환각 답변
+
+### 8.2 활용 방향
+
+**1. Sparse 검색 텍스트 enrichment**
+
+- 개념 alias를 청크 텍스트에 결합해 BM25 매칭률 향상
+- 단순 alias 사전만으로 가능 (그래프 노드 도입 불필요)
+- 가장 먼저 시도 가능한 옵션
+
+**2. 메타데이터 필터링** (개념 노드 도입 필요)
+
+- Subsection에 `concept_ids` 속성 추가
+- 벡터/sparse 검색 결과를 개념군 기준으로 사전 필터링
+
+**3. 개념 계층 기반 쿼리 확장** (개념 노드 도입 필요)
+
+- `parent` 관계로 상·하위 개념 자동 확장
+- 예: "유가증권 측정" → 단기매매·매도가능·만기보유증권 모두 포함
+
+**4. 엔티티 링킹 + 그래프 진입점** (개념 노드 도입 필요)
+
+- 쿼리에서 개념 인식 → 직접 연결된 Subsection으로 도달
+- 다중 홉 추론 기반
+
+### 8.3 참고 자료
+
+`feature/document_parsing` 브랜치의 `docs/ontology/chapter_06_ontology_blueprint.md`는 Rule 노드 중심의 maximalist 설계를 담고 있다. 전면 도입이 아닌, 실패 케이스가 가리키는 부분만 선택적으로 채택한다.
+
+---
+
 ## 변경 이력
 
 | 날짜 | 내용 |
 |------|------|
 | 2026-04-10 | 초기 작성 |
 | 2026-04-10 | 추출 전략 개정: 정규식은 후보 탐지만, LLM이 자유 판별. 탐지 패턴 단순화 및 실문서 예시 추가. 자기참조 판별 기준 명확화 |
+| 2026-04-11 | Standard.chapter를 외부 파라미터 대신 마크다운 헤딩에서 자동 추출로 변경 |
+| 2026-05-25 | §7 임베딩 전략 추가 (title prepending 기본 + 반복·dual embedding 옵션), §8 도메인 개념 노드 조건부 도입 방안 추가 |
 | 2026-06-06 | §6 질의 처리 흐름에 청크→노드 진입점 매핑 단계(chunks_to_node_ids) 추가, 5단계로 재정렬 (#72) |
