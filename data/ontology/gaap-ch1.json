@@ -1,0 +1,93 @@
+{
+  "nodes": [
+    {
+      "id": "gaap-ch1",
+      "node_type": "Standard",
+      "name": "제1장 목적, 구성 및 적용",
+      "standard_type": "GAAP",
+      "chapter": "1",
+      "title": "",
+      "order": 0,
+      "content": "",
+      "paragraphs": []
+    },
+    {
+      "id": "gaap-ch1-목적",
+      "node_type": "Subsection",
+      "name": "",
+      "standard_type": "",
+      "chapter": "",
+      "title": "목적",
+      "order": 1,
+      "content": "#### 1.1\n일반기업회계기준은 ‘주식회사 등의 외부감사에 관한 법률’의 적용대상기업 중 한국채택국제회계기준에 따라 회계처리하지 아니하는 기업의 회계와 감사인의 감사에 통일성과 객관성을 부여하기 위하여 동 기업의 회계처리 및 보고에 관한 기준을 정함을 목적으로 한다.",
+      "paragraphs": [
+        "1.1"
+      ]
+    },
+    {
+      "id": "gaap-ch1-구성",
+      "node_type": "Subsection",
+      "name": "",
+      "standard_type": "",
+      "chapter": "",
+      "title": "구성",
+      "order": 2,
+      "content": "#### 1.2\n일반기업회계기준은 주제별로 별도의 장으로 구성되며, 각 장은 본문(적용보충기준 포함)과 부록(결론도출근거, 실무지침 및 적용사례)으로 구성된다. 일반기업회계기준의 적용 및 해석의 일관성을 위하여 필요한 경우에는 일반기업회계기준해석 등을 제정할 수 있다.",
+      "paragraphs": [
+        "1.2"
+      ]
+    },
+    {
+      "id": "gaap-ch1-적용",
+      "node_type": "Subsection",
+      "name": "",
+      "standard_type": "",
+      "chapter": "",
+      "title": "적용",
+      "order": 3,
+      "content": "#### 1.3\n일반기업회계기준은 ‘주식회사 등의 외부감사에 관한 법률’의 적용대상기업 중 한국채택국제회계기준에 따라 회계처리하지 아니하는 기업의 회계처리에 적용한다. 다만, 중요하지 않은 항목에 대해서는 이 기준을 적용하지 아니할 수 있다. 이 기준은 ‘주식회사의 외부감사에 관한 법률’의 적용대상이 아닌 기업의 회계처리에 준용할 수 있다.\n\n<!-- page 3 -->\n\n#### 1.4\n일반기업회계기준의 각 문단은 각 장의 목적, 기업회계기준 전문, 결론도출근거, 실무지침, 적용사례 및 재무회계개념체계를 배경으로 이해하여야 한다.",
+      "paragraphs": [
+        "1.3",
+        "1.4"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from_id": "gaap-ch1",
+      "to_id": "gaap-ch1-목적",
+      "edge_type": "CONTAINS",
+      "order": 1,
+      "paragraph": "",
+      "source_text": "",
+      "include": [],
+      "condition_text": "",
+      "to_paragraph": "",
+      "unresolved_target": ""
+    },
+    {
+      "from_id": "gaap-ch1",
+      "to_id": "gaap-ch1-구성",
+      "edge_type": "CONTAINS",
+      "order": 2,
+      "paragraph": "",
+      "source_text": "",
+      "include": [],
+      "condition_text": "",
+      "to_paragraph": "",
+      "unresolved_target": ""
+    },
+    {
+      "from_id": "gaap-ch1",
+      "to_id": "gaap-ch1-적용",
+      "edge_type": "CONTAINS",
+      "order": 3,
+      "paragraph": "",
+      "source_text": "",
+      "include": [],
+      "condition_text": "",
+      "to_paragraph": "",
+      "unresolved_target": ""
+    }
+  ]
+}

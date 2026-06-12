@@ -22,6 +22,7 @@ from src.retrieval.searcher import (
     search_chunks
 )
 from src.utils import config
+from src.utils.config import EMBEDDING_DIM
 
 # 테스트용 DB 행 데이터 (chunk_id, document_id, content, metadata, score)
 MOCK_DB_ROWS_DENSE = [
@@ -50,12 +51,10 @@ def mock_db_pool():
 
 @pytest.fixture
 def mock_embed():
-    """OpenAI 임베딩 API를 mock하는 픽스처"""
-    with patch("src.retrieval.searcher.client.embeddings.create") as mock_create:
-        mock_response = MagicMock()
-        mock_response.data = [MagicMock(embedding=[0.1] * 1536)]
-        mock_create.return_value = mock_response
-        yield mock_create
+    """KURE-v1 공유 임베딩 함수(embed_texts)를 mock하는 픽스처"""
+    with patch("src.retrieval.searcher.embed_texts") as mock_embed_texts:
+        mock_embed_texts.return_value = [[0.1] * EMBEDDING_DIM]
+        yield mock_embed_texts
 
 
 @pytest.mark.unit
@@ -66,7 +65,7 @@ class TestHybridSearchComponents:
         """Dense 검색이 list[RetrievedChunk] 반환 검증"""
         mock_db_pool.fetchall.return_value = MOCK_DB_ROWS_DENSE
         
-        results = dense_search([0.1]*1536, top_k=2)
+        results = dense_search([0.1]*EMBEDDING_DIM, top_k=2)
         
         assert len(results) == 2    # top_k 만큼 반환
         assert isinstance(results[0], RetrievedChunk)   # RetrievedChunk 타입
@@ -212,7 +211,7 @@ class TestHybridSearchIntegration:
         search_chunks("query", top_k=5, metadata_filter=metadata_filter)
         
         # 호출 인자 검증
-        mock_dense.assert_called_once_with(mock_embed().data[0].embedding, 5, metadata_filter)
+        mock_dense.assert_called_once_with(mock_embed.return_value[0], 5, metadata_filter)
         mock_sparse.assert_called_once_with("query", 5, metadata_filter)
 
     @patch("src.retrieval.searcher.dense_search")
@@ -237,7 +236,7 @@ class TestSearcherExceptions:
         mock_db_pool.execute.side_effect = errors.QueryCanceled("canceling statement due to statement timeout")
 
         with pytest.raises(SearchTimeoutError) as exc_info:
-            dense_search([0.1] * 1536, top_k=5)
+            dense_search([0.1] * EMBEDDING_DIM, top_k=5)
 
         assert "응답 시간 초과" in str(exc_info.value)  # SE-101
 
@@ -246,7 +245,7 @@ class TestSearcherExceptions:
         mock_db_pool.execute.side_effect = Exception("DB 에러")
 
         with pytest.raises(DatabaseQueryError) as exc_info:
-            dense_search([0.1] * 1536, top_k=5)
+            dense_search([0.1] * EMBEDDING_DIM, top_k=5)
 
         assert "데이터베이스 쿼리 실행 실패" in str(exc_info.value) # SE-102
 
@@ -257,14 +256,14 @@ class TestSearcherExceptions:
         # DatabaseQueryError가 아니라 원본 ProgrammingError가 그대로 올라와야
         # 검색 노드가 무의미한 CRAG 재탐색을 트리거하지 않는다.
         with pytest.raises(errors.ProgrammingError):
-            dense_search([0.1] * 1536, top_k=5)
+            dense_search([0.1] * EMBEDDING_DIM, top_k=5)
 
     def test_undefined_table_propagates_without_wrapping(self, mock_db_pool):
         """재시도 불가 SQL 오류(UndefinedTable)도 원본 그대로 전파"""
         mock_db_pool.execute.side_effect = errors.UndefinedTable("존재하지 않는 테이블")
 
         with pytest.raises(errors.UndefinedTable):
-            dense_search([0.1] * 1536, top_k=5)
+            dense_search([0.1] * EMBEDDING_DIM, top_k=5)
 
 
 @pytest.mark.unit
