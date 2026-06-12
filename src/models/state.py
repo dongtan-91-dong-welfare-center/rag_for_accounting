@@ -25,13 +25,19 @@ class GraphState(BaseModel):
     standard_filter:      Literal["GAAP", "KIFRS", "ALL"] = "ALL"  # UI에서 사용자가 선택한 기준서 범위
 
     # 의도 분류
-    is_accounting_query:  bool                   = True   # 회계 질의 여부. 비회계면 rewrite 노드에서 Bypass
+    is_accounting_query:  bool                   = True   # 회계 질의 여부. 비회계면 route_after_rewrite가 early_exit로 분기
+    classification_confidence: float             = 0.0    # [rewrite 노드] LLM이 보고한 회계/비회계 분류 신뢰도(0.0~1.0). early_exit가 FinalResponse.confidence_score로 전달
 
     # 질의 재작성 및 검색 관련
     # !TODO: 평가 임계치 미달로 CRAG 루프를 통해 재진입할 때 rewrite_query가 동일 전략을 반복할지, 전략을 교체할지(예: hyde→decompose→stepback) 결정 필요.
     #        classify_and_select는 질의가 바뀌지 않으므로 재진입 시 재호출 불필요 — 첫 호출 결과를 state에 보존하는 방안 검토.
     rewrite_count:        int                    = 0      # [rewrite 노드] CRAG 루프 진입 횟수 기록 (최대 MAX_REWRITE_COUNT)
     rewritten_query:      RewrittenQuery | None  = None   # [rewrite 노드] 검색에 최적화된 새로운 쿼리
+
+    # Human-in-the-Loop (HIL) 관련 — human_review 노드가 interrupt()로 사용자 확인을 받는다
+    human_feedback:       str | None             = None   # [human_review→rewrite] 사용자가 입력한 재작성 요청 사항. rewrite 노드가 프롬프트에 반영 후 초기화
+    human_approved:       bool                   = False  # [human_review 노드] 사용자가 현재 재작성 결과를 승인했는지 여부
+    hil_count:            int                    = 0      # [human_review 노드] HIL 재작성 요청 횟수 (최대 MAX_HIL_COUNT, CRAG 루프와 분리)
 
     # 문서 검색 및 재정렬 관련
     retrieved_chunks:     list[RetrievedChunk]   = []     # [search 노드] DB/벡터 검색된 원본 문서 청크 리스트

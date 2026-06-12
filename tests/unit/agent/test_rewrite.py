@@ -12,6 +12,12 @@ from src.agent.nodes.rewrite import (
 from src.models.state import GraphState
 
 
+def _last_user_content(mock_client) -> str:
+    """가장 최근 client.chat.completions.create 호출의 사용자 메시지 본문을 반환"""
+    call = mock_client.chat.completions.create.call_args
+    return call.kwargs["messages"][0]["content"]
+
+
 def _mock_resp(content: dict) -> MagicMock:
     # OpenAI 응답 객체를 흉내 낸 가짜 객체 생성
     # content 딕셔너리를 JSON 문자열로 변환해 resp.choices[0].message.content에 실제로 저장
@@ -57,7 +63,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": True, "strategy": "hyde"}
             )
-            is_acc, strategy = classify_and_select("영업권 손상차손 인식 기준은?")
+            is_acc, strategy, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
         assert is_acc is True
         assert strategy == "hyde"
 
@@ -66,7 +72,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": True, "strategy": "decompose"}
             )
-            is_acc, strategy = classify_and_select("유형자산과 무형자산의 감가상각 방법 차이는?")
+            is_acc, strategy, confidence = classify_and_select("유형자산과 무형자산의 감가상각 방법 차이는?")
         assert is_acc is True
         assert strategy == "decompose"
 
@@ -75,7 +81,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": True, "strategy": "stepback"}
             )
-            is_acc, strategy = classify_and_select("삼성전자 2023년 영업권 500억 손상 처리 기준은?")
+            is_acc, strategy, confidence = classify_and_select("삼성전자 2023년 영업권 500억 손상 처리 기준은?")
         assert is_acc is True
         assert strategy == "stepback"
 
@@ -84,21 +90,59 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": False, "strategy": "bypass"}
             )
-            is_acc, strategy = classify_and_select("오늘 날씨 어때?")
+            is_acc, strategy, confidence = classify_and_select("오늘 날씨 어때?")
         assert is_acc is False
         assert strategy == "bypass"
 
     def test_llm_failure_fallback(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("timeout")
-            is_acc, strategy = classify_and_select("영업권 손상차손 인식 기준은?")
+            is_acc, strategy, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
         assert is_acc is True
         assert strategy == "hyde"
+        assert confidence == 0.0   # 폴백 시 신뢰도 0.0
+
+    def test_confidence_parsed_from_response(self):
+        # LLM이 반환한 confidence 값이 그대로 파싱되어야 함
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": False, "strategy": "bypass", "confidence": 0.12}
+            )
+            is_acc, strategy, confidence = classify_and_select("오늘 날씨 어때?")
+        assert is_acc is False
+        assert confidence == 0.12
+
+    def test_confidence_missing_defaults_to_zero(self):
+        # confidence 키가 없으면 0.0으로 폴백
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": True, "strategy": "hyde"}
+            )
+            _, _, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
+        assert confidence == 0.0
+
+    def test_confidence_clamped_to_unit_range(self):
+        # 범위를 벗어난 값은 [0.0, 1.0]으로 클램프
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": True, "strategy": "hyde", "confidence": 1.7}
+            )
+            _, _, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
+        assert confidence == 1.0
+
+    def test_confidence_non_numeric_defaults_to_zero(self):
+        # 숫자로 변환 불가한 값은 0.0으로 폴백
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": True, "strategy": "hyde", "confidence": "high"}
+            )
+            _, _, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
+        assert confidence == 0.0
 
     def test_missing_keys_use_defaults(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp({})
-            is_acc, strategy = classify_and_select("영업권 손상차손 인식 기준은?")
+            is_acc, strategy, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
         assert is_acc is True
         assert strategy == "hyde"
 
@@ -107,7 +151,7 @@ class TestClassifyAndSelect:
         wrapped = "```json\n{\"is_accounting\": false, \"strategy\": \"bypass\"}\n```"
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_raw_resp(wrapped)
-            is_acc, strategy = classify_and_select("오늘 날씨 어때?")
+            is_acc, strategy, confidence = classify_and_select("오늘 날씨 어때?")
         assert is_acc is False
         assert strategy == "bypass"
 
@@ -117,7 +161,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": "False", "strategy": "bypass"}
             )
-            is_acc, strategy = classify_and_select("오늘 날씨 어때?")
+            is_acc, strategy, confidence = classify_and_select("오늘 날씨 어때?")
         assert is_acc is False
 
     def test_string_true_treated_as_true(self):
@@ -125,7 +169,7 @@ class TestClassifyAndSelect:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": "True", "strategy": "hyde"}
             )
-            is_acc, strategy = classify_and_select("영업권 손상차손 인식 기준은?")
+            is_acc, strategy, confidence = classify_and_select("영업권 손상차손 인식 기준은?")
         assert is_acc is True
 
 
@@ -260,12 +304,14 @@ class TestRewriteQuery:
     def test_non_accounting_sets_bypass(self):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
-                {"is_accounting": False, "strategy": "bypass"}
+                {"is_accounting": False, "strategy": "bypass", "confidence": 0.95}
             )
             state = rewrite_query(self._make_state("오늘 날씨 어때?"))
         assert state.is_accounting_query is False
         assert state.rewritten_query.strategy == "bypass"
         assert state.rewritten_query.search_queries == ["오늘 날씨 어때?"]
+        # 비회계 조기 종료 시 early_exit가 사용할 분류 신뢰도가 state에 기록되어야 함
+        assert state.classification_confidence == 0.95
 
     def test_accounting_hyde_strategy(self):
         with patch(self.PATCH) as mock_client:
@@ -304,7 +350,7 @@ class TestRewriteQuery:
         # 예외가 rewrite_query까지 전파되므로 error_logs에 기록됨
         # cf. test_all_llm_failure: 각 함수가 예외를 내부에서 삼키므로 outer except 미발동
         with patch("src.agent.nodes.rewrite.classify_and_select") as mock_classify:
-            mock_classify.return_value = (True, "unknown_strategy")
+            mock_classify.return_value = (True, "unknown_strategy", 0.8)
             state = rewrite_query(self._make_state("영업권 손상차손 인식 기준은?"))
         assert state.rewritten_query.strategy == "bypass"
         assert state.rewritten_query.search_queries == ["영업권 손상차손 인식 기준은?"]
@@ -342,3 +388,60 @@ class TestRewriteQuery:
             ]
             state = rewrite_query(GraphState(original_query=query))
         assert state.rewritten_query.original_query == query
+
+
+# ── HIL 피드백 주입 (apply_* / rewrite_query) ───────────────────────────────────
+
+@pytest.mark.unit
+class TestFeedbackInjection:
+    PATCH = "src.agent.nodes.rewrite.client"
+    FEEDBACK = "리스 회계처리를 강조해줘"
+
+    def test_apply_hyde_injects_feedback_into_prompt(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"hypothetical_answer": "..."}
+            )
+            apply_hyde("리스부채 최초 인식 방법은?", "ALL", feedback=self.FEEDBACK)
+        content = _last_user_content(mock_client)
+        assert self.FEEDBACK in content        # 피드백이 프롬프트에 포함
+        assert "[사용자 추가 요청]" in content   # 제약 문구 헤더 포함
+
+    def test_apply_hyde_without_feedback_omits_clause(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"hypothetical_answer": "..."}
+            )
+            apply_hyde("리스부채 최초 인식 방법은?", "ALL")
+        content = _last_user_content(mock_client)
+        assert "[사용자 추가 요청]" not in content   # 피드백 없으면 절 미포함
+
+    def test_apply_decompose_injects_feedback(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"sub_queries": ["a", "b"]}
+            )
+            apply_decompose("유형자산과 무형자산 차이는?", "ALL", feedback=self.FEEDBACK)
+        assert self.FEEDBACK in _last_user_content(mock_client)
+
+    def test_apply_stepback_injects_feedback(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"abstract_query": "..."}
+            )
+            apply_stepback("삼성전자 2023년 영업권 손상은?", "ALL", feedback=self.FEEDBACK)
+        assert self.FEEDBACK in _last_user_content(mock_client) 
+
+    def test_rewrite_query_passes_feedback_and_clears_it(self):
+        # state.human_feedback이 전략 프롬프트에 주입되고, 사용 후 None으로 초기화되어야 함
+        state = GraphState(original_query="리스부채 최초 인식 방법은?", human_feedback=self.FEEDBACK)
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.side_effect = [
+                _mock_resp({"is_accounting": True, "strategy": "hyde", "confidence": 0.9}),
+                _mock_resp({"hypothetical_answer": "리스부채는 현재가치로 측정합니다."}),
+            ]
+            result = rewrite_query(state)
+
+        strategy_call = mock_client.chat.completions.create.call_args_list[1] 
+        assert self.FEEDBACK in strategy_call.kwargs["messages"][0]["content"]  # 두 번째 호출(전략 프롬프트)에 피드백이 포함되었는지 검증
+        assert result.human_feedback is None    # 사용 후 초기화 (다음 루프 대비)

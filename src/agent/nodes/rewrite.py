@@ -38,15 +38,17 @@ def _standard_context(standard_filter: str) -> str:
     return _STANDARD_LABEL.get(standard_filter, _STANDARD_LABEL["ALL"])
 
 
-def _strip_markdown(content: str) -> str:
+def _strip_markdown(content: str | None) -> str:
+    if content is None:
+        return ""
     # LLM이 JSON을 마크다운 코드 블록(```json ... ```)으로 감싸 반환하는 경우 래퍼 제거
     # (?:json)? — "json" 언어 태그가 있어도 없어도 매칭 (```json / ``` 둘 다 처리)
     # (?:...) 는 비캡처 그룹으로, re.sub이 매칭된 전체(```json 포함)를 빈 문자열로 교체
     return re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
 
 
-def classify_and_select(query: str) -> tuple[bool, str]:
-    """회계 여부와 검색 전략을 단일 LLM 호출로 판단한다. 실패 시 (True, 'hyde')로 폴백."""
+def classify_and_select(query: str) -> tuple[bool, str, float]:
+    """회계 여부·검색 전략·분류 신뢰도를 단일 LLM 호출로 판단한다. 실패 시 (True, 'hyde', 0.0)로 폴백."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
@@ -54,26 +56,47 @@ def classify_and_select(query: str) -> tuple[bool, str]:
             response_format={"type": "json_object"},
             temperature=0,
         )
-        data = json.loads(_strip_markdown(resp.choices[0].message.content))
+        data = json.loads(_strip_markdown(resp.choices[0].message.content)) # LLM의 json 출력물을 딕셔너리로 변환
         raw = data.get("is_accounting", True)
         # LLM이 boolean 대신 문자열 "True"/"False"를 반환하는 경우 명시적 변환
         # str(raw).lower() == "true" → "true"면 True, 아니면 False 반환
         is_accounting = raw if isinstance(raw, bool) else str(raw).lower() == "true"
         strategy = data.get("strategy", "hyde")
-        return is_accounting, strategy
+        # LLM이 보고한 분류 신뢰도. 비회계 조기 종료 시 FinalResponse.confidence_score로 전달되어
+        # 운영 단계에서 분류 경계가 모호한(낮은 신뢰도) 케이스를 추출·분석하는 데 활용된다.
+        confidence = _coerce_confidence(data.get("confidence"))
+        return is_accounting, strategy, confidence
     except Exception:
         # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("classify_and_select failed: %s", e))
-        return True, "hyde"
+        return True, "hyde", 0.0
 
 
-def apply_hyde(query: str, standard_filter: str) -> list[str]:
+def _coerce_confidence(raw) -> float:
+    """LLM이 반환한 confidence 값을 0.0~1.0 범위의 float로 안전하게 변환한다. 실패 시 0.0."""
+    try:
+        return min(1.0, max(0.0, float(raw)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _feedback_clause(feedback: str | None) -> str:
+    """HIL 사용자 피드백을 프롬프트에 덧붙일 제약 문구로 변환한다. 피드백이 없으면 빈 문자열."""
+    if not feedback:
+        return ""
+    return (
+        f"\n\n[사용자 추가 요청]\n{feedback}\n"
+        "위 추가 요청을 반드시 반영하여 작성하세요."
+    )
+
+
+def apply_hyde(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
     """원문 + 가상 답변을 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "user", "content": HYDE_PROMPT.format(
                 query=query, standard_context=_standard_context(standard_filter)
-            )}],
+            ) + _feedback_clause(feedback)}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -86,14 +109,14 @@ def apply_hyde(query: str, standard_filter: str) -> list[str]:
     return [query]
 
 
-def apply_decompose(query: str, standard_filter: str) -> list[str]:
+def apply_decompose(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
     """원문 + 서브쿼리들을 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "user", "content": DECOMPOSE_PROMPT.format(
                 query=query, standard_context=_standard_context(standard_filter)
-            )}],
+            ) + _feedback_clause(feedback)}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -106,14 +129,14 @@ def apply_decompose(query: str, standard_filter: str) -> list[str]:
     return [query]
 
 
-def apply_stepback(query: str, standard_filter: str) -> list[str]:
+def apply_stepback(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
     """원문 + 추상화된 원칙 쿼리를 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "user", "content": STEPBACK_PROMPT.format(
                 query=query, standard_context=_standard_context(standard_filter)
-            )}],
+            ) + _feedback_clause(feedback)}],
             response_format={"type": "json_object"},
             temperature=0,
         )
@@ -139,9 +162,16 @@ def rewrite_query(state: GraphState) -> GraphState:
     #        - classify_and_select는 재호출 불필요 (질의·is_accounting 불변) → state 값 재사용
     #        - 전략 교체 여부: 동일 전략 재시도 vs. hyde→decompose→stepback 순 에스컬레이션
     #        - rewrite_count 증가 시점: 이 함수 진입 직후 state.rewrite_count += 1
+
+    # HIL 루프에서 주입된 사용자 피드백을 사용 즉시 회수·초기화한다.
+    # (다음 CRAG/HIL 루프에서 이전 피드백이 잘못 재사용되는 것을 방지)
+    feedback = state.human_feedback
+    state.human_feedback = None
+
     try:
-        is_accounting, strategy = classify_and_select(state.original_query)
+        is_accounting, strategy, confidence = classify_and_select(state.original_query)
         state.is_accounting_query = is_accounting
+        state.classification_confidence = confidence
 
         if not is_accounting:
             state.rewritten_query = RewrittenQuery(
@@ -151,7 +181,7 @@ def rewrite_query(state: GraphState) -> GraphState:
             )
             return state
 
-        queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter)
+        queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter, feedback)
         state.rewritten_query = RewrittenQuery(
             original_query=state.original_query,
             strategy=strategy,

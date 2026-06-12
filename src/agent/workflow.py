@@ -1,17 +1,22 @@
 # FUNC-009: LangGraph StateGraph 파이프라인 정의
 
+import uuid
 from datetime import datetime
 from functools import wraps
 from typing import Any, Literal
+from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import interrupt, Command
 from src.agent.nodes.generate import generate_response as generate
 from src.agent.nodes.evaluate import evaluate_context as evaluate
 from src.retrieval.searcher import search_chunks as _search_impl
 from src.retrieval.reranker import rerank_chunks as _rerank_impl
 from src.utils import config
-from src.utils.config import MAX_REWRITE_COUNT, KST, RERANK_THRESHOLD, TOP_K_RETRIEVAL
+from src.utils.config import MAX_REWRITE_COUNT, MAX_HIL_COUNT, KST, RERANK_THRESHOLD, TOP_K_RETRIEVAL
 from src.utils.exception import (
     AccountingRAGError,
     RerankFailureError,
@@ -64,10 +69,12 @@ def rewrite(state: GraphState) -> dict:
     """
     질의 재작성 노드 연결
     """
-    # 주의: 래퍼에서 rewrite_count를 증가시키므로, 
-    # _rewrite_impl 내부에서는 카운트를 증가시키지 않아야 한다는 계약을 유지합니다.
-    state.rewrite_count += 1
-    
+    # 주의: 래퍼에서 rewrite_count를 증가시키므로, _rewrite_impl 내부에서는 카운트를 증가시키지 않아야 한다는 계약을 유지합니다.
+    # 단, HIL 피드백으로 인한 재진입(human_feedback 존재)은 CRAG 재시도가 아니므로
+    # rewrite_count를 증가시키지 않는다. (CRAG 루프=rewrite_count, HIL 루프=hil_count로 분리)
+    if not state.human_feedback:
+        state.rewrite_count += 1
+
     # 실제 모듈을 통해 상태 변화 수행 (in-place mutation)
     # updated_state는 사실상 state와 동일한 객체입니다.
     updated_state = _rewrite_impl(state)
@@ -77,8 +84,108 @@ def rewrite(state: GraphState) -> dict:
         "rewrite_count": updated_state.rewrite_count,
         "rewritten_query": updated_state.rewritten_query,
         "is_accounting_query": updated_state.is_accounting_query,
+        "classification_confidence": updated_state.classification_confidence,
+        # rewrite_query가 사용 후 None으로 초기화한 값을 반드시 채널에 반영해야
+        # route_after_human_review가 다음 루프에서 잘못 rewrite로 분기하지 않는다.
+        "human_feedback": updated_state.human_feedback,
         "error_logs": updated_state.error_logs,
     }
+
+
+def early_exit(state: GraphState) -> dict:
+    """
+    비회계 질문 조기 종료 노드.
+
+    route_after_rewrite가 비회계 질의로 분기시킨 경우 검색·재정렬·평가·생성 파이프라인을
+    건너뛰고 안내 메시지를 담은 FinalResponse를 생성한 뒤 END로 종료한다.
+    confidence_score에는 rewrite 노드가 기록한 LLM 분류 신뢰도를 그대로 전달하여,
+    운영 단계에서 분류 경계가 모호한 케이스를 추출·분석할 수 있도록 한다.
+    """
+    return {
+        "final_response": FinalResponse(
+            answer="죄송합니다. 회계 관련 질문을 해 주세요.",
+            citations=[],
+            is_answerable=False,
+            confidence_score=state.classification_confidence,
+        )
+    }
+
+
+def route_after_rewrite(state: GraphState) -> Literal["early_exit", "human_review"]:
+    """
+    rewrite 노드 직후 분기 결정.
+
+    - 비회계 질의(is_accounting_query=False): early_exit 노드로 분기하여 안내 응답 후 종료.
+    - 회계 질의: human_review 노드로 진행한다. (HIL 적용 여부는 human_review 노드가 전략 기반으로 결정)
+    """
+    if not state.is_accounting_query:
+        return "early_exit"
+    return "human_review"
+
+
+# 조건부 HIL 트리거 전략: 복잡하거나 추상화가 필요해 사용자 확인 가치가 큰 전략만 중단한다.
+# 단순 hyde 전략은 중단 없이 search로 통과시킨다. (운영 데이터 축적 후 confidence 기반 조건 추가 검토)
+HIL_STRATEGIES: set[str] = {"decompose", "stepback"}
+
+
+def human_review(state: GraphState) -> dict:
+    """
+    조건부 Human-in-the-Loop 노드.
+
+    재작성 전략이 HIL_STRATEGIES(decompose/stepback)에 해당하고, 아직 승인되지 않았으며,
+    HIL 재작성 횟수가 MAX_HIL_COUNT 미만일 때에만 interrupt()로 워크플로우를 중단하여
+    사용자 확인을 받는다. 그 외(단순 hyde 전략·이미 승인·최대 횟수 도달)는 중단 없이 통과한다.
+
+    interrupt() 페이로드에는 구조화된 선택지(options)를 포함해 클라이언트가 UI로 렌더링하도록 한다.
+    재개 시 주입되는 값의 action에 따라 분기한다.
+      - action="rewrite": human_feedback 저장 + hil_count 증가 → route_after_human_review가 rewrite로 루프백
+      - 그 외(approve 등): human_approved=True 설정 → search로 진행
+    """
+    strategy = state.rewritten_query.strategy if state.rewritten_query else "hyde"
+
+    should_review = (
+        strategy in HIL_STRATEGIES
+        and not state.human_approved
+        and state.hil_count < MAX_HIL_COUNT
+    )
+    if not should_review:
+        # 통과: 상태 변경 없음
+        return {}
+
+    # interrupt: 워크플로우를 중단하고 사용자 확인을 받음
+    decision = interrupt({
+        "type": "human_review",
+        "strategy": strategy,
+        "original_query": state.original_query,
+        "search_queries": state.rewritten_query.search_queries if state.rewritten_query else [],
+        "hil_count": state.hil_count,
+        "max_hil_count": MAX_HIL_COUNT,
+        "options": [
+            {"action": "approve", "label": "이대로 검색을 진행합니다"},
+            {"action": "rewrite", "label": "재작성을 요청합니다 (피드백 입력)"},
+        ],
+    })
+
+    decision = decision or {}   # decision이 None이면 빈 딕셔너리로 초기화
+    if decision.get("action") == "rewrite":
+        return {
+            "human_feedback": decision.get("feedback", ""),
+            "hil_count": state.hil_count + 1,
+        }
+    # approve(기본): 현재 재작성 결과를 승인 처리
+    return {"human_approved": True}
+
+
+def route_after_human_review(state: GraphState) -> Literal["rewrite", "search"]:
+    """
+    human_review 노드 직후 분기 결정.
+
+    - human_feedback이 존재하면 사용자가 재작성을 요청한 것 → rewrite로 루프백.
+    - 그 외(승인 또는 통과)는 search로 진행.
+    """
+    if state.human_feedback:
+        return "rewrite"
+    return "search"
 
 def search(state: GraphState) -> dict:
     """하이브리드 검색 노드 — searcher.search_chunks() 호출"""
@@ -256,13 +363,20 @@ def route_after_evaluate(state: GraphState) -> str:
     # 검색된 컨텍스트가 충분히 유효하거나(needs_external=False), 이미 최대 재시도 횟수를 소진했다면 답변을 생성합니다.
     return "generate"
 
-def build_workflow() -> CompiledStateGraph:
+def build_workflow(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStateGraph:
     """
     LangGraph StateGraph를 구성하고 컴파일하여 반환합니다.
 
     노드 등록 및 조건부 엣지를 정의하여 StateGraph를 반환한다.
-    실행 순서: rewrite → search → rerank → evaluate → generate
+    실행 순서: rewrite → (회계 질의) human_review → search → rerank → evaluate → generate
+                       → (비회계 질의) early_exit → END
+    rewrite 이후 route_after_rewrite, human_review 이후 route_after_human_review,
     evaluate 이후 route_after_evaluate로 분기 처리.
+
+    Args:
+        checkpointer: HIL(interrupt/resume)을 위한 상태 저장소.
+        None이면 체크포인트 없이 컴파일되며 interrupt()를 호출할 수 없다(단순 단방향 실행 전용).
+        HIL을 사용하는 run_workflow/resume_workflow는 MemorySaver 싱글턴(_CHECKPOINTER)을 주입한다.
 
     return CompiledStateGraph : LangGraph로 빌드된 상태 그래프
     왜 CompiledGraph를 사용하는가? -> StateGraph보다 성능이 좋다. (동작 방식은 동일하지만 내부적으로 최적화됨)
@@ -273,6 +387,8 @@ def build_workflow() -> CompiledStateGraph:
 
     # 노드 추가
     workflow.add_node("rewrite", rewrite)
+    workflow.add_node("early_exit", early_exit)
+    workflow.add_node("human_review", human_review)
     workflow.add_node("search", search)
     workflow.add_node("rerank", rerank)
     workflow.add_node("evaluate", evaluate)
@@ -280,7 +396,28 @@ def build_workflow() -> CompiledStateGraph:
 
     # 엣지 연결 (고정 흐름)
     workflow.add_edge(START, "rewrite")
-    workflow.add_edge("rewrite", "search")
+
+    # rewrite 직후 조건부 분기: 비회계 질의는 early_exit로 조기 종료, 회계 질의는 human_review로 진행
+    workflow.add_conditional_edges(
+        "rewrite",
+        route_after_rewrite,
+        {
+            "early_exit": "early_exit",
+            "human_review": "human_review",
+        }
+    )
+    workflow.add_edge("early_exit", END)
+
+    # human_review 직후 조건부 분기: 사용자가 재작성 요청 시 rewrite로 루프백, 아니면 search로 진행
+    workflow.add_conditional_edges(
+        "human_review",
+        route_after_human_review,
+        {
+            "rewrite": "rewrite",
+            "search": "search",
+        }
+    )
+
     workflow.add_edge("search", "rerank")
     workflow.add_edge("rerank", "evaluate")
 
@@ -296,44 +433,103 @@ def build_workflow() -> CompiledStateGraph:
 
     workflow.add_edge("generate", END)
 
-    # 그래프 컴파일
-    return workflow.compile()
+    # 그래프 컴파일 (checkpointer가 주어지면 HIL interrupt/resume 지원)
+    return workflow.compile(checkpointer=checkpointer)
 
 
-def run_workflow(query: str, standard_filter: Literal["GAAP", "KIFRS", "ALL"] = "ALL") -> dict[str, Any]:
+# HIL(interrupt/resume) 상태를 run_workflow와 resume_workflow 호출 간 공유하기 위한 인메모리 체크포인터 싱글턴
+# MemorySaver는 체크포인트를 자신의 내부 저장소에 thread_id로 보관하므로
+# 매 호출마다 build_workflow로 그래프를 새로 컴파일하더라도 동일 인스턴스를 주입하면 중단된 세션을 정상적으로 재개할 수 있다.
+# !TODO: 실서비스 전환 시 AsyncPostgresSaver로 교체 (checkpointer 인터페이스 통일됨)
+_CHECKPOINTER: BaseCheckpointSaver = MemorySaver()
+
+
+def _run_config(thread_id: str) -> RunnableConfig:
+    """LangGraph invoke에 전달할 실행 설정. thread_id로 HIL 세션을 식별한다."""
+    return {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": MAX_REWRITE_COUNT * 5 + 5,
+    }
+
+
+def _recursion_fallback_response() -> FinalResponse:
+    return FinalResponse(
+        answer="너무 많은 재시도가 발생하여 답변을 생성하지 못했습니다. 질문을 구체화하여 다시 시도해주세요.",
+        citations=[],
+        is_answerable=False,
+        confidence_score=0.0,
+    )
+
+
+def run_workflow(
+    query: str,
+    standard_filter: Literal["GAAP", "KIFRS", "ALL"] = "ALL",
+    thread_id: str | None = None,
+) -> dict[str, Any]:
     """
     외부에서 워크플로우를 실행하기 위한 진입점 함수.
+
+    HIL을 지원하기 위해 MemorySaver 체크포인터를 주입하고 thread_id로 세션을 식별한다.
+    thread_id가 주어지지 않으면 새 UUID를 발급한다. 반환 dict에는 항상 thread_id가 포함되어,
+    워크플로우가 human_review에서 중단(`__interrupt__` 키 존재)된 경우 클라이언트가 이 값을
+    resume_workflow에 전달하여 재개할 수 있다.
     """
-    app = build_workflow()
-    
+    app = build_workflow(checkpointer=_CHECKPOINTER)
+
     # 노드별 30초 타임아웃 설정 (LangGraph CompiledStateGraph 속성)
     app.step_timeout = 30
-    
+
+    if thread_id is None:
+        thread_id = str(uuid.uuid4())
+
     initial_state = GraphState(original_query=query, standard_filter=standard_filter)
-    
+
     try:
-        # 정상 반환 시 LangGraph의 invoke()는 dict를 반환하며 값들은 Pydantic 객체를 유지합니다.
-        return app.invoke(
-            initial_state, 
-            config={
-                "recursion_limit": MAX_REWRITE_COUNT * 5 + 5
-            }
-        )
+        # 정상/중단 반환 시 LangGraph의 invoke()는 dict를 반환하며 값들은 Pydantic 객체를 유지합니다.
+        # human_review에서 interrupt가 발생하면 반환 dict에 "__interrupt__" 키가 포함됩니다.
+        result = app.invoke(initial_state, config=_run_config(thread_id))
+        result["thread_id"] = thread_id
+        return result
     except GraphRecursionError:
         # GraphRecursionError 발생 시 최선 답변 혹은 답변 불가 상태 반환
-        initial_state.final_response = FinalResponse(
-            answer="너무 많은 재시도가 발생하여 답변을 생성하지 못했습니다. 질문을 구체화하여 다시 시도해주세요.",
-            citations=[],
-            is_answerable=False,
-            confidence_score=0.0
-        )
-        # TODO: 예외 발생 시 error_logs 기록 및 우아한(graceful) 상태 반환 로직 정교화
-        # invoke() 결과와 동일한 직렬화 구조 유지를 위해, model_dump() 대신 
+        initial_state.final_response = _recursion_fallback_response()
+        # TODO: 예외 발생 시 error_logs 기록 및 상태 반환 로직 정교화
+        # invoke() 결과와 동일한 직렬화 구조 유지를 위해, model_dump() 대신
         # Pydantic 인스턴스를 값으로 유지하는 dict comprehension 방식을 사용합니다.
-        return {k: getattr(initial_state, k) for k in GraphState.model_fields}  # {<'original_query': QueryObject>, <'standard_filter': 'ALL'>, ...}
+        fallback = {k: getattr(initial_state, k) for k in GraphState.model_fields}  # 예시: {'original_query': '....', ...}
+        fallback["thread_id"] = thread_id
+        return fallback
     except TimeoutError:
         # 타임아웃 발생 시
-        # TODO: MVP 단계에서는 타임아웃 발생 시 호출자(API 라우터 등)가 예외를 처리하도록 재전파(re-raise)합니다. 
+        # TODO: MVP 단계에서는 타임아웃 발생 시 호출자(API 라우터 등)가 예외를 처리하도록 재전파(re-raise)합니다.
         # 추후 타임아웃 발생 시 안전한 GraphState 반환 및 error_logs 기록 로직 추가 필요.
         # traceback을 보존하기 위해 인수 없이 raise를 사용합니다.
+        raise
+
+
+def resume_workflow(thread_id: str, resume_value: dict[str, Any]) -> dict[str, Any]:
+    """
+    human_review에서 interrupt로 중단된 워크플로우를 재개한다.
+
+    thread_id로 체크포인터에 보관된 중간 상태를 복원하고, resume_value를 human_review 노드의 interrupt() 반환값으로 주입하여 실행을 이어간다.
+    resume_value는 구조화된 결정 dict이며, 예: {"action": "approve"} 또는 {"action": "rewrite", "feedback": "리스 회계처리를 강조해줘"}.
+
+    반환 dict에는 thread_id가 포함된다. 사용자가 다시 재작성을 요청하여 또 한 번 중단되면
+    반환 dict에 "__interrupt__" 키가 존재하므로, 동일 thread_id로 재차 resume_workflow를 호출한다.
+    """
+    app = build_workflow(checkpointer=_CHECKPOINTER)
+    app.step_timeout = 30
+
+    try:
+        result = app.invoke(Command(resume=resume_value), config=_run_config(thread_id))
+        result["thread_id"] = thread_id
+        return result
+    except GraphRecursionError:
+        # 재개 시점에는 initial_state가 없으므로 체크포인트에 보관된 현재 상태를 복원해 폴백을 구성한다.
+        snapshot = app.get_state(_run_config(thread_id))
+        fallback = dict(snapshot.values)
+        fallback["final_response"] = _recursion_fallback_response()
+        fallback["thread_id"] = thread_id
+        return fallback
+    except TimeoutError:
         raise

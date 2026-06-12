@@ -56,10 +56,10 @@ class TestRewriteNodeContract:
     @patch("src.agent.nodes.rewrite.classify_and_select")
     def test_rewrite_fallback_contract(self, mock_classify):
         """Fallback 동작 검증:
-        1. classify_and_select 패치를 통해 (True, "invalid_strategy") 반환.
+        1. classify_and_select 패치를 통해 (True, "invalid_strategy", 0.7) 반환.
         2. 발생하는 KeyError를 통해 strategy="bypass"로 폴백 및 error_logs 기록 검증.
         """
-        mock_classify.return_value = (True, "invalid_strategy")
+        mock_classify.return_value = (True, "invalid_strategy", 0.7)
 
         state = GraphState(
             original_query="영업권 손상차손 인식 기준은?",
