@@ -109,6 +109,7 @@ class TestScenarioNoContext:
         """특정 노드에서 예외 발생 시 파이프라인이 중단되지 않고,
         error_logs에 정확한 에러 정보를 기록한 뒤 안전하게 답변 불가로 종료되는지 검증"""
 
+        from contextlib import ExitStack    # 여러 컨텍스트를 한 번에 관리하기 위한 모듈
         from src.agent.workflow import handle_node_errors
 
         # 예외를 발생시키는 노드 함수 생성
@@ -123,7 +124,15 @@ class TestScenarioNoContext:
             "rerank": "src.agent.workflow.rerank",
         }[expected_node]
 
-        with patch(patch_target, side_effect=decorated):
+        with ExitStack() as stack:
+            # search가 에러 대상 노드가 아니면 실제 DB 접근(relation "chunks")을 막기 위해
+            # 가짜 청크로 모킹한다 (Phase 1 시스템 테스트는 외부 의존성이 없어야 한다).
+            if expected_node != "search":
+                stack.enter_context(
+                    patch("src.agent.workflow.search",
+                          return_value={"retrieved_chunks": make_retrieved_chunks()})
+                )
+            stack.enter_context(patch(patch_target, side_effect=decorated))
             state = GraphState(original_query="영업권 손상차손 인식 기준은?", standard_filter="ALL")
             final_state = mocked_app.invoke(state)
 
