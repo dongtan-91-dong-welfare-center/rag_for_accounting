@@ -5,9 +5,15 @@
 # KURE-v1은 BAAI/bge-m3를 한국어 검색에 파인튜닝한 모델로, 1024차원 벡터를 출력한다.
 # normalize_embeddings=True로 단위 벡터를 생성해 pgvector의 코사인 거리(<=>)와 정합을 맞춘다.
 
+import os
 import threading
 
-from src.utils.config import EMBEDDING_MODEL
+from src.utils.config import (
+    EMBEDDING_DEVICE,
+    EMBEDDING_ENCODE_BATCH_SIZE,
+    EMBEDDING_MODEL,
+    EMBEDDING_NUM_THREADS,
+)
 from src.utils.exception import LLMAPIConnectionError, NodeType
 from src.utils.logger import get_logger
 
@@ -17,20 +23,62 @@ _model = None               # SentenceTransformer 싱글톤 (최초 호출 시 1
 _lock = threading.Lock()    # 멀티스레드 환경에서 모델 이중 로드 방지
 
 
+def _resolve_device(setting: str) -> str:
+    """임베딩 실행 디바이스를 결정한다.
+
+    "auto"면 가용성에 따라 cuda → mps → cpu 순으로 고른다. 
+    Docker on Mac 컨테이너에는 MPS/Metal이 패스스루되지 않아 자동으로 cpu가 된다. 
+    "cpu"/"mps"/"cuda" 같은 명시값은 그대로 사용한다.
+    torch는 여기서 지연 임포트해 모듈 기동 비용을 늘리지 않는다.
+    """
+    if setting and setting != "auto":
+        return setting
+    import torch
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _resolve_thread_count() -> int:
+    """torch intra-op 스레드 상한을 결정한다.
+
+    EMBEDDING_NUM_THREADS>0이면 그 값을, 0(자동)이면 max(1, cpu_count-2)를 쓴다.
+    전 코어 점유로 인한 오버서브스크립션(관측된 1000%+ CPU)을 막아 발열·경합을 줄인다.
+    """
+    if EMBEDDING_NUM_THREADS > 0:
+        return EMBEDDING_NUM_THREADS
+    return max(1, (os.cpu_count() or 1) - 2)
+
+
 def _get_model():
     """SentenceTransformer 모델을 lazy 싱글톤으로 반환한다.
 
     - 지연 임포트: sentence_transformers는 torch를 끌고 오므로 모듈 import 시점이 아닌 최초 임베딩 시점에 로드하여, DB 전용 경로(예: sparse 검색)의 기동 비용을 막는다.
     - _lock으로 보호해 동시 호출 시 모델이 두 번 로드되지 않도록 한다.
+    - 디바이스·스레드 상한은 모델 로드 시점에 1회 적용한다.
     """
     global _model
     if _model is None:
         with _lock:
             if _model is None:
+                import torch
                 from sentence_transformers import SentenceTransformer
 
-                logger.info(f"임베딩 모델 로드 시작: {EMBEDDING_MODEL}")
-                _model = SentenceTransformer(EMBEDDING_MODEL)
+                threads = _resolve_thread_count()
+                torch.set_num_threads(threads)
+                device = _resolve_device(EMBEDDING_DEVICE)
+                if device == "mps":
+                    # 일부 연산이 MPS 미구현일 때 CPU로 폴백해 런타임 크래시를 막는다
+                    os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+                logger.info(
+                    f"임베딩 모델 로드 시작: {EMBEDDING_MODEL} "
+                    f"(device={device}, torch_threads={threads})"
+                )
+                _model = SentenceTransformer(EMBEDDING_MODEL, device=device)
                 logger.info("임베딩 모델 로드 완료")
     return _model
 
@@ -49,7 +97,13 @@ def embed_texts(texts: list[str], node: NodeType = "index") -> list[list[float]]
         return []
     try:
         model = _get_model()
-        vectors = model.encode(texts, normalize_embeddings=True)
+        # batch_size로 인코딩 1회 peak 메모리를 묶는다. sentence-transformers가 입력을 길이순
+        # 정렬해 이 크기로 미니배치를 만들므로 긴 노드 1개가 배치 전체를 끌어올리는 패딩 낭비도 준다.
+        vectors = model.encode(
+            texts,
+            normalize_embeddings=True,
+            batch_size=EMBEDDING_ENCODE_BATCH_SIZE,
+        )
         return [vector.tolist() for vector in vectors]
     except Exception as e:
         logger.error(f"임베딩 생성 실패: {e}")
