@@ -209,10 +209,10 @@ class TestHybridSearchIntegration:
         
         metadata_filter = {"standard_type": "K-GAAP"}
         search_chunks("query", top_k=5, metadata_filter=metadata_filter)
-        
-        # 호출 인자 검증
-        mock_dense.assert_called_once_with(mock_embed.return_value[0], 5, metadata_filter)
-        mock_sparse.assert_called_once_with("query", 5, metadata_filter)
+
+        # 호출 인자 검증 (collection은 기본값=운영 CHUNKS_TABLE이 그대로 전달됨)
+        mock_dense.assert_called_once_with(mock_embed.return_value[0], 5, metadata_filter, config.CHUNKS_TABLE)
+        mock_sparse.assert_called_once_with("query", 5, metadata_filter, config.CHUNKS_TABLE)
 
     @patch("src.retrieval.searcher.dense_search")
     @patch("src.retrieval.searcher.sparse_search")
