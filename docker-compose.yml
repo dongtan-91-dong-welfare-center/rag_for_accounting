@@ -35,6 +35,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-accounting_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounting_password}
       POSTGRES_DB: ${POSTGRES_DB:-accounting_db}
+    # [질의 화면(Streamlit) 포트 매핑]
+    # app.py(이슈 #148, 최소 질의 UI)를 `streamlit run app.py --server.port 8501`로 띄울 때
+    # 호스트 브라우저(http://localhost:8501)에서 컨테이너 내부 8501에 접근하기 위한 통로.
+    ports:
+      - "8501:8501"
     volumes:
       # [실시간 코드 동기화]
       # 로컬 PC의 현재 디렉토리 코드를 컨테이너의 /app 시스템으로 실시간 마운트시켜 놓습니다.
@@ -54,6 +59,12 @@ services:
       # 호스트의 `./`를 `/app`에 마운트하면 이미지 빌드 시 생성된 `/app/.venv` 폴더가 내 PC의 폴더 내용으로 덮어씌워집니다.
       # 아래와 같이 익명 볼륨(`/app/.venv`)을 명시하면, 컨테이너 내부의 `.venv`는 호스트의 영향을 받지 않고 이미지에 설치된 상태 그대로 유지됩니다.
       - /app/.venv
+      # [임베딩/리랭커 모델 캐시 영속화]
+      # KURE-v1·CrossEncoder는 Dockerfile에서 prefetch하지 않고 런타임에
+      # /root/.cache/huggingface로 다운로드된다. 이름 있는 볼륨으로 분리하면
+      # 컨테이너 재생성(docker compose up) 시에도 모델(~2GB)을 다시 받지 않는다.
+      # (볼륨이 비어 있는 최초 1회만 다운로드)
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       - database
     restart: unless-stopped
@@ -67,3 +78,4 @@ services:
 
 volumes:
   postgres_data:
+  hf_cache:
