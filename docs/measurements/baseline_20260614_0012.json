@@ -1,0 +1,944 @@
+{
+  "generated_at": "2026-06-14T00:12:41.176453+09:00",
+  "k": 10,
+  "indexed_chapters": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20",
+    "21",
+    "22",
+    "23",
+    "24",
+    "25",
+    "26",
+    "27",
+    "28",
+    "29",
+    "30",
+    "31",
+    "32",
+    "33"
+  ],
+  "summary": {
+    "n_measured": 14,
+    "generation_exact_hit@1": {
+      "hits": 3,
+      "rate": 0.2143
+    },
+    "generation_exact_hit@10": {
+      "hits": 7,
+      "rate": 0.5
+    },
+    "generation_prefix_hit@1": {
+      "hits": 3,
+      "rate": 0.2143
+    },
+    "generation_prefix_hit@10": {
+      "hits": 7,
+      "rate": 0.5
+    },
+    "retrieval_exact_hit@1": {
+      "hits": 1,
+      "rate": 0.0714
+    },
+    "retrieval_exact_hit@10": {
+      "hits": 7,
+      "rate": 0.5
+    },
+    "retrieval_prefix_hit@10": {
+      "hits": 7,
+      "rate": 0.5
+    },
+    "legacy_substring": {
+      "hits": 0,
+      "rate": 0.0
+    },
+    "is_answerable": {
+      "hits": 13,
+      "rate": 0.9286
+    },
+    "generation_exact_mrr_avg": 0.3155,
+    "retrieval_exact_mrr_avg": 0.2185
+  },
+  "cases": [
+    {
+      "case_id": "TEST-K-GAAP-001",
+      "chapter": "2",
+      "measurable": true,
+      "gold_paras": [
+        "2.6.5"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": false,
+        "retrieval_exact_mrr": 0.0,
+        "retrieval_exact_recall": 0.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": false,
+        "retrieval_prefix_mrr": 0.0,
+        "retrieval_prefix_recall": 0.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": false,
+        "generation_exact_mrr": 0.0,
+        "generation_exact_recall": 0.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": false,
+        "generation_prefix_mrr": 0.0,
+        "generation_prefix_recall": 0.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 2,
+        "needs_external": false,
+        "eval_reasoning": "청크 [1], [3], [4]에 현금흐름표의 영업활동현금흐름을 직접법/간접법으로 표시하는 방법과 간접법의 기본 구조(당기순이익에 현금 유출이 없는 비용 가산, 수익 차감, 자산·부채 변동 반영)가 포함되어 있어 주제는 직접 관련됩니다. 다만 질문의 핵심인 K-GAAP과 K-IFRS의 ‘차이’ 및 간접법에서 대손상각비·대손충당금 환입액을 어떻게 처리하는지에 ",
+        "retrieval_chapters": [
+          "2",
+          "6",
+          "4",
+          "2",
+          "6",
+          "3",
+          "4",
+          "22",
+          "2",
+          "6"
+        ],
+        "citation_paras": [
+          "2.63",
+          "2.64",
+          "2.65"
+        ],
+        "answer_head": "제공된 맥락만 보면, K-GAAP과 K-IFRS 모두 영업활동으로 인한 현금흐름은 직접법 또는 간접법으로 표시하고, 간접법은 당기순이익에 현금의 유출이 없는 비용을 가산하고 현금의 유입이 없는 수익을 차감한 뒤 영업활동 관련 자산·부채 변동을 가감하는 방식입니다 [1]. 따라서 질문하신 ‘간접법 계산의 기본 구조’ 자체는 이 맥락상 동일하게 이해할 수 있습",
+        "error_logs": [],
+        "elapsed_sec": 26.1
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-002",
+      "chapter": "18",
+      "measurable": true,
+      "gold_paras": [
+        "18.7"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": true,
+        "retrieval_exact_mrr": 0.3333,
+        "retrieval_exact_recall": 1.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": true,
+        "retrieval_prefix_mrr": 0.3333,
+        "retrieval_prefix_recall": 1.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": true,
+        "generation_exact_mrr": 0.25,
+        "generation_exact_recall": 1.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": true,
+        "generation_prefix_mrr": 0.25,
+        "generation_prefix_recall": 1.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 6,
+        "needs_external": false,
+        "eval_reasoning": "청크에는 특정차입금(18.6~18.8)과 일반차입금(18.9~18.12)의 자본화 산정 방법만 있고, 질문이 요구하는 ‘강제사항인지 선택사항인지’에 대한 명시적 규정이 없습니다. 또한 18.4의 ‘...자본원가로 회계처리 할 수 있다’는 표현만으로는 특정차입금·일반차입금 각각에 대한 의무/선택 여부를 단정할 수 없으므로, 답변에 필요한 핵심 기준이 누락되었",
+        "retrieval_chapters": [
+          "18",
+          "18",
+          "18",
+          "18",
+          "18",
+          "18",
+          "18",
+          "18",
+          "18",
+          "18"
+        ],
+        "citation_paras": [
+          "18.10",
+          "18.11",
+          "18.12",
+          "18.4",
+          "18.5",
+          "18.6",
+          "18.7",
+          "18.8",
+          "18.9"
+        ],
+        "answer_head": "차입원가는 원칙적으로 기간비용으로 처리하되, 적격자산의 취득을 위한 자금에 차입금이 포함되면 그 차입원가는 적격자산의 취득원가로 회계처리할 수 있습니다 [4]. 문언상 특정차입금과 일반차입금 모두에 대해 “할 수 있다”는 취지로 규정되어 있어, 자본화는 강제사항이 아니라 선택사항으로 해석됩니다 [1][2][3][4]. 다만 일단 차입원가를 자본화하는 경우에",
+        "error_logs": [],
+        "elapsed_sec": 7.1
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-003",
+      "chapter": "21",
+      "measurable": true,
+      "gold_paras": [
+        "21.10",
+        "21.8",
+        "21.9"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": true,
+        "retrieval_exact_mrr": 0.3333,
+        "retrieval_exact_recall": 1.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": true,
+        "retrieval_prefix_mrr": 0.3333,
+        "retrieval_prefix_recall": 1.0,
+        "generation_exact_hit@1": true,
+        "generation_exact_hit@10": true,
+        "generation_exact_mrr": 1.0,
+        "generation_exact_recall": 1.0,
+        "generation_prefix_hit@1": true,
+        "generation_prefix_hit@10": true,
+        "generation_prefix_mrr": 1.0,
+        "generation_prefix_recall": 1.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 2,
+        "needs_external": false,
+        "eval_reasoning": "청크에는 퇴직금제도의 기말 퇴직급여충당부채 산정액이 전년보다 감소했을 때 이를 ‘퇴직급여 환입(수익)’으로 처리할 수 있는지에 대한 직접 규정이 없습니다. 포함된 내용은 주로 제도 변경 시 감소분의 처리(예: 21.15, 21.9)와 확정급여형/확정기여형의 일반 처리에 관한 것으로, 질문의 핵심인 ‘기말 추계액 감소분의 환입 가능 여부’에 필요한 구체적 판",
+        "retrieval_chapters": [
+          "21",
+          "25",
+          "21",
+          "15",
+          "30",
+          "21",
+          "21",
+          "21",
+          "22",
+          "21"
+        ],
+        "citation_paras": [
+          "21.10",
+          "21.8",
+          "21.9"
+        ],
+        "answer_head": "네, 가능합니다. 일반기업회계기준에서는 보고기간말 현재 전종업원이 일시에 퇴직할 경우 지급하여야 할 퇴직금에 상당하는 금액을 퇴직급여충당부채로 측정하며, 급여규정 개정이나 급여 인상으로 소요액이 증가한 경우에는 당기분과 전기 이전분을 일괄하여 당기비용으로 인식하도록 하고 있습니다 [3]. 또한 확정급여형퇴직연금제도에서도 보험수리적 가정 변경이나 할인율 변경",
+        "error_logs": [],
+        "elapsed_sec": 8.2
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-004",
+      "chapter": "15",
+      "measurable": true,
+      "gold_paras": [
+        "15.15",
+        "15.16"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": false,
+        "retrieval_exact_mrr": 0.0,
+        "retrieval_exact_recall": 0.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": false,
+        "retrieval_prefix_mrr": 0.0,
+        "retrieval_prefix_recall": 0.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": false,
+        "generation_exact_mrr": 0.0,
+        "generation_exact_recall": 0.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": false,
+        "generation_prefix_mrr": 0.0,
+        "generation_prefix_recall": 0.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 2,
+        "needs_external": false,
+        "eval_reasoning": "청크에 전환사채 발행 시 부채요소와 자본요소를 별도로 분리 인식한다는 문단 15.18~15.20과, 자본요소를 기타자본잉여금으로 분류하고 전환 시 주식발행초과금으로 대체한다는 실15.6이 포함되어 있어 질문에 직접 답할 수 있습니다. 또한 예시 표([1], [3], [4], [6])가 전환사채와 전환권대가의 분리 인식 및 계정 대체를 보여주므로 외부 기준서",
+        "retrieval_chapters": [
+          "15",
+          "15",
+          "15",
+          "15",
+          "15",
+          "15",
+          "4",
+          "6",
+          "32",
+          "30"
+        ],
+        "citation_paras": [
+          "15.18",
+          "15.19",
+          "15.20",
+          "15.21",
+          "15.22",
+          "15.23"
+        ],
+        "answer_head": "네. 제공된 문맥에 따르면 전환사채는 발행 시 부채요소와 자본요소를 별도로 분리하여 인식하는 복합금융상품이며, 부채요소는 금융부채(사채)로, 자본요소는 전환권대가로 분류합니다 [2][5]. 또한 전환권대가는 발행 시 기타자본잉여금으로 분류한 후, 전환권이 행사되어 주식을 추가 발행하는 시점에 주식발행초과금으로 대체합니다 [5]. 따라서 질문하신 K-GAAP",
+        "error_logs": [],
+        "elapsed_sec": 6.7
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-005",
+      "chapter": "6",
+      "measurable": true,
+      "gold_paras": [
+        "6.33"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": false,
+        "retrieval_exact_mrr": 0.0,
+        "retrieval_exact_recall": 0.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": false,
+        "retrieval_prefix_mrr": 0.0,
+        "retrieval_prefix_recall": 0.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": false,
+        "generation_exact_mrr": 0.0,
+        "generation_exact_recall": 0.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": false,
+        "generation_prefix_mrr": 0.0,
+        "generation_prefix_recall": 0.0,
+        "legacy_substring": false,
+        "is_answerable": false
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 4,
+        "needs_external": false,
+        "eval_reasoning": "청크는 전환사채의 발행자 회계(부채요소·자본요소 분리, 전환권 대가, 재매입 등)와 내재파생상품 일반 분리요건을 담고 있을 뿐, 질문의 핵심인 ‘투자자(취득자) 입장에서 CB 내재 전환권을 주계약 채권과 분리하여 별도 파생금융자산으로 인식/표시해야 하는지’에 대한 직접 규정이 없습니다. 특히 발행자 기준 문단 15.18~15.23, 실15.3~실15.6만 ",
+        "retrieval_chapters": [
+          "15",
+          "6",
+          "15",
+          "6",
+          "6",
+          "15",
+          "6",
+          "6",
+          "6",
+          "6"
+        ],
+        "citation_paras": [
+          "15.18",
+          "15.19",
+          "15.20",
+          "15.21",
+          "15.22",
+          "15.23",
+          "6.36",
+          "6.37",
+          "6.38",
+          "6.39",
+          "6.40",
+          "6.41",
+          "6.42",
+          "6.43",
+          "6.44",
+          "6.45",
+          "6.46",
+          "6.47"
+        ],
+        "answer_head": "질의하신 경우처럼 당사가 전환사채(CB)를 ‘발행’한 것이 아니라 ‘투자(취득)’한 것이라면, 제시된 문맥만으로는 내재된 전환권을 주계약인 채권과 분리하여 별도의 파생금융상품(자산)으로 반드시 분류·표시해야 한다고 단정할 수는 없습니다. 제시 문언은 주로 발행자의 회계처리(부채요소와 자본요소의 분리)를 규정하고 있고, 내재파생상품의 분리요건은 주계약과 내재",
+        "error_logs": [],
+        "elapsed_sec": 8.4
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-006",
+      "chapter": "31",
+      "measurable": true,
+      "gold_paras": [
+        "31.8"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": false,
+        "retrieval_exact_mrr": 0.0,
+        "retrieval_exact_recall": 0.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": false,
+        "retrieval_prefix_mrr": 0.0,
+        "retrieval_prefix_recall": 0.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": false,
+        "generation_exact_mrr": 0.0,
+        "generation_exact_recall": 0.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": false,
+        "generation_prefix_mrr": 0.0,
+        "generation_prefix_recall": 0.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 2,
+        "needs_external": false,
+        "eval_reasoning": "질의는 ‘세법상 산식(정률법 등)’으로 계산한 감가상각비가 K-GAAP에서 허용되는지 여부이며, 청크 [2], [5]에 ‘유형자산의 감가상각방법은 자산의 경제적효익이 소멸되는 형태를 반영한 합리적인 방법이어야 한다’와 ‘감가상각방법에는 정액법, 체감잔액법(예를 들면, 정률법 등)… 감가상각방법은 해당 자산으로부터 예상되는 미래경제적효익의 소멸형태에 따라 선",
+        "retrieval_chapters": [
+          "10",
+          "10",
+          "11",
+          "16",
+          "10",
+          "20",
+          "10",
+          "32",
+          "22",
+          "10"
+        ],
+        "citation_paras": [
+          "10.32",
+          "10.33",
+          "10.34",
+          "10.35",
+          "10.36",
+          "10.37",
+          "10.38",
+          "10.39",
+          "10.40"
+        ],
+        "answer_head": "네. 제공된 문맥에 따르면 유형자산의 감가상각방법은 자산의 경제적효익 소멸 형태를 반영한 합리적인 방법이어야 하고, 정률법은 체감잔액법의 예시로 명시되어 있어 K-GAAP상 허용됩니다 [2]. 다만 감가상각방법은 해당 자산의 미래경제적효익의 소멸형태에 따라 선택해야 하며, 소멸형태가 변하지 않는 한 매기 계속 적용해야 합니다 [2]. 따라서 세법상 산식(정",
+        "error_logs": [],
+        "elapsed_sec": 6.4
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-007",
+      "chapter": "6",
+      "measurable": true,
+      "gold_paras": [
+        "6.30"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": true,
+        "retrieval_exact_mrr": 0.5,
+        "retrieval_exact_recall": 1.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": true,
+        "retrieval_prefix_mrr": 0.5,
+        "retrieval_prefix_recall": 1.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": true,
+        "generation_exact_mrr": 0.5,
+        "generation_exact_recall": 1.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": true,
+        "generation_prefix_mrr": 0.5,
+        "generation_prefix_recall": 1.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 5,
+        "needs_external": false,
+        "eval_reasoning": "청크 [1], [2], [4], [7]에 매도가능증권 채무증권의 유효이자율법 상각과 공정가치-상각후원가 차이를 기타포괄손익누계액으로 처리하는 예시가 이미 있어 질문 주제와 직접 관련됩니다. 다만 질문은 'K-GAAP'을 전제로 한 절차의 적정성 판정인데, 청크는 일반 규정과 예시만 제공할 뿐 질문의 정확한 적용 대상(K-GAAP인지, K-IFRS인지) 및 ",
+        "retrieval_chapters": [
+          "6",
+          "6",
+          "6",
+          "6",
+          "6",
+          "6",
+          "6",
+          "6",
+          "6",
+          "15"
+        ],
+        "citation_paras": [
+          "6.28",
+          "6.29",
+          "6.30",
+          "6.32",
+          "6.33"
+        ],
+        "answer_head": "네, 그 절차가 맞습니다. 매도가능증권으로 분류된 채무증권의 경우 할인 또는 할증차금을 유효이자율법으로 상각하여 이자수익을 먼저 인식한 뒤, 상각후원가와 공정가치의 차이인 미실현보유손익을 기타포괄손익누계액(자본)으로 처리합니다 [1][2][5]. 다만 공정가치 평가에 따른 미실현보유손실이 있더라도 손상차손이 발생한 경우에는 그 손상차손 관련 규정에 따라 먼",
+        "error_logs": [],
+        "elapsed_sec": 7.5
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-008",
+      "chapter": "10",
+      "measurable": true,
+      "gold_paras": [
+        "10.22"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": true,
+        "retrieval_exact_mrr": 0.1429,
+        "retrieval_exact_recall": 1.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": true,
+        "retrieval_prefix_mrr": 0.1429,
+        "retrieval_prefix_recall": 1.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": true,
+        "generation_exact_mrr": 0.3333,
+        "generation_exact_recall": 1.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": true,
+        "generation_prefix_mrr": 0.3333,
+        "generation_prefix_recall": 1.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 3,
+        "needs_external": false,
+        "eval_reasoning": "문단 10.26과 10.22, 10.6이 질문의 핵심인 재평가 빈도와 의무 여부를 직접 설명합니다. 특히 10.26은 \"매 3년이나 5년마다 재평가하는 것으로 충분\"하다고만 말해 5년 경과 시 무조건 의무 재평가라는 의미가 아님을 보여주며, 추가 외부 기준서 참조 지시도 청크 내에 없습니다.",
+        "retrieval_chapters": [
+          "10",
+          "22",
+          "5",
+          "32",
+          "10",
+          "11",
+          "10",
+          "29",
+          "20",
+          "22"
+        ],
+        "citation_paras": [
+          "10.22",
+          "10.24",
+          "10.25",
+          "10.26",
+          "10.27",
+          "10.28",
+          "10.29",
+          "10.30",
+          "10.31"
+        ],
+        "answer_head": "아닙니다. 문구상 ‘매 3년이나 5년마다 재평가하는 것으로 충분한 유형자산도 있다’는 뜻은, 공정가치 변동이 경미한 경우에는 그 정도 주기로 재평가해도 충분하다는 예시일 뿐이며, 5년이 지나면 무조건 의무적으로 재평가해야 한다는 의미는 아닙니다. 재평가의 빈도는 공정가치 변동에 따라 달라지고, 장부금액이 공정가치와 중요하게 차이가 나는 경우에는 추가 재평가",
+        "error_logs": [],
+        "elapsed_sec": 6.5
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-009",
+      "chapter": "10",
+      "measurable": true,
+      "gold_paras": [
+        "10.42"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": false,
+        "retrieval_exact_mrr": 0.0,
+        "retrieval_exact_recall": 0.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": false,
+        "retrieval_prefix_mrr": 0.0,
+        "retrieval_prefix_recall": 0.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": false,
+        "generation_exact_mrr": 0.0,
+        "generation_exact_recall": 0.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": false,
+        "generation_prefix_mrr": 0.0,
+        "generation_prefix_recall": 0.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 1,
+        "needs_external": false,
+        "eval_reasoning": "청크 [1]의 10.45가 유형자산 처분 시 재평가와 관련해 인식한 기타포괄손익누계액 잔액을 처분 시 당기손익으로 인식한다고 직접 규정하므로, 질문한 재평가잉여금의 recycling 여부를 청크만으로 답할 수 있습니다. 별도의 외부 기준서 참조 지시는 없고, K-GAAP 범위 내에서 필요한 조건과 처리방식이 모두 제시되어 있습니다.",
+        "retrieval_chapters": [
+          "10",
+          "20",
+          "10",
+          "23",
+          "10",
+          "15",
+          "10",
+          "19",
+          "10",
+          "10"
+        ],
+        "citation_paras": [
+          "10.44",
+          "10.45"
+        ],
+        "answer_head": "네. K-GAAP 문맥상 재평가모형을 적용한 유형자산을 처분할 때, 그 자산의 재평가와 관련하여 자본(기타포괄손익누계액)에 남아 있는 잔액은 해당 유형자산 제거 시 당기손익으로 인식합니다 [1]. 또한 유형자산의 제거손익 자체도 손익계산서에서 당기손익으로 인식하므로, 처분 시점에 재평가잉여금 잔액을 당기손익으로 재분류하는 취지로 이해할 수 있습니다 [1].",
+        "error_logs": [],
+        "elapsed_sec": 6.6
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-010",
+      "chapter": "6",
+      "measurable": true,
+      "gold_paras": [
+        "6.31"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": true,
+        "retrieval_exact_mrr": 0.25,
+        "retrieval_exact_recall": 1.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": true,
+        "retrieval_prefix_mrr": 0.25,
+        "retrieval_prefix_recall": 1.0,
+        "generation_exact_hit@1": true,
+        "generation_exact_hit@10": true,
+        "generation_exact_mrr": 1.0,
+        "generation_exact_recall": 1.0,
+        "generation_prefix_hit@1": true,
+        "generation_prefix_hit@10": true,
+        "generation_prefix_mrr": 1.0,
+        "generation_prefix_recall": 1.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 2,
+        "needs_external": false,
+        "eval_reasoning": "질문은 매도가능증권 중 지분상품을 처분할 때 기존 평가손익(기타포괄손익누계액)의 처리를 묻지만, 청크에는 ‘처분 시 일괄하여 당기손익에 반영’(6.31)이라는 일반 규정만 있고, 지분상품 처분의 구체적 회계분개나 평가손익 재분류 방법이 직접적으로 제시되어 있지 않습니다. 또한 처분손익 계산식·예외·적용 시점 등 질문 수준의 구체 조건이 누락되어 있어 이 청",
+        "retrieval_chapters": [
+          "6",
+          "6",
+          "8",
+          "6",
+          "31",
+          "8",
+          "23",
+          "6",
+          "8",
+          "29"
+        ],
+        "citation_paras": [
+          "6.31"
+        ],
+        "answer_head": "매도가능증권의 지분상품을 처분할 때는, 그 유가증권에 대해 누적되어 있던 기타포괄손익누계액을 처분 시점에 당기손익으로 일괄 반영합니다 [4]. 따라서 기존에 인식했던 평가손익은 처분손익으로 전환되어 당기손익에 포함됩니다 [4]. 또한 매도가능증권의 매도·상환 및 손상차손으로 실현된 이익이나 손실도 당기손익에 반영된다고 규정하고 있습니다 [2].",
+        "error_logs": [],
+        "elapsed_sec": 5.8
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-011",
+      "chapter": "2",
+      "measurable": true,
+      "gold_paras": [
+        "2.45"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": false,
+        "retrieval_exact_mrr": 0.0,
+        "retrieval_exact_recall": 0.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": false,
+        "retrieval_prefix_mrr": 0.0,
+        "retrieval_prefix_recall": 0.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": false,
+        "generation_exact_mrr": 0.0,
+        "generation_exact_recall": 0.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": false,
+        "generation_prefix_mrr": 0.0,
+        "generation_prefix_recall": 0.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 2,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 4,
+        "needs_external": false,
+        "eval_reasoning": "청크에는 외화환산손익의 인식·표시 원칙(23.10, 23.14)과 중간기간 표시 예시(실29.13, 사례 1)는 있으나, 질문의 핵심인 ‘외화환산이익과 손실을 상계하여 순액으로 손익계산서에 표시하는 것이 K-GAAP에서 허용되는지’에 대한 명시적 허용/금지 규정이 없습니다. 따라서 수익·비용은 총액 표시가 원칙이고 상계는 다른 장에서 요구/허용할 때만 가능",
+        "retrieval_chapters": [
+          "23",
+          "29",
+          "23",
+          "29",
+          "2",
+          "26",
+          "23",
+          "6",
+          "23",
+          "17"
+        ],
+        "citation_paras": [
+          "2.57",
+          "23.19"
+        ],
+        "answer_head": "K-GAAP상 수익과 비용은 총액으로 보고하는 것이 원칙이며, 다른 장에서 상계를 요구하거나 상계를 허용하는 경우에만 상계하여 표시할 수 있습니다 [5]. 외화환산손익에 대해서는 당기손익으로 인식한 외화환산손익과 외환차손익 금액을 공시하도록 되어 있고 [1], 중간기간 사례에서도 외화환산이익·손실을 누적금액과 기간별 차액으로 구분하여 표시하고 있어, 외화환",
+        "error_logs": [],
+        "elapsed_sec": 9.9
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-012",
+      "chapter": "21",
+      "measurable": true,
+      "gold_paras": [
+        "21.10",
+        "21.8"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": true,
+        "retrieval_exact_mrr": 0.5,
+        "retrieval_exact_recall": 1.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": true,
+        "retrieval_prefix_mrr": 0.5,
+        "retrieval_prefix_recall": 1.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": true,
+        "generation_exact_mrr": 0.3333,
+        "generation_exact_recall": 1.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": true,
+        "generation_prefix_mrr": 0.3333,
+        "generation_prefix_recall": 1.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 3,
+        "needs_external": false,
+        "eval_reasoning": "청크에 확정급여형퇴직연금제도의 부채 측정·표시 기준(문단 21.10, 21.11, 21.12, 결21.15)이 직접 포함되어 있어, 질문의 핵심인 사외적립자산을 차감한 순액표시와 기말 일시퇴직기준 추계액으로 퇴직급여충당부채를 설정하는 처리가 답변 가능하다. 특히 문단 21.10(1)은 종업원 미퇴직 시 보고기간말 현재 일시퇴직 시 지급액 상당을 퇴직급여충당",
+        "retrieval_chapters": [
+          "21",
+          "21",
+          "21",
+          "21",
+          "21",
+          "21",
+          "21",
+          "21",
+          "21",
+          "25"
+        ],
+        "citation_paras": [
+          "21.10",
+          "21.11",
+          "21.12",
+          "21.13",
+          "21.14",
+          "21.8",
+          "21.9"
+        ],
+        "answer_head": "아니요. K-GAAP에서도 확정급여형(DB)퇴직연금제도는 퇴직급여충당부채와 퇴직연금운용자산을 재무상태표에 표시하되, 퇴직연금운용자산은 퇴직급여충당부채 및 퇴직연금미지급금에서 차감하는 형식으로 표시하고, 그 구성내역을 주석으로 공시해야 합니다 [6][5]. 또한 확정급여형퇴직연금제도에서는 보고기간말 현재 종업원이 퇴직할 경우 지급하여야 할 퇴직일시금에 상당하",
+        "error_logs": [],
+        "elapsed_sec": 7.0
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-013",
+      "chapter": "6",
+      "measurable": true,
+      "gold_paras": [
+        "6.26"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": false,
+        "retrieval_exact_hit@10": false,
+        "retrieval_exact_mrr": 0.0,
+        "retrieval_exact_recall": 0.0,
+        "retrieval_prefix_hit@1": false,
+        "retrieval_prefix_hit@10": false,
+        "retrieval_prefix_mrr": 0.0,
+        "retrieval_prefix_recall": 0.0,
+        "generation_exact_hit@1": false,
+        "generation_exact_hit@10": false,
+        "generation_exact_mrr": 0.0,
+        "generation_exact_recall": 0.0,
+        "generation_prefix_hit@1": false,
+        "generation_prefix_hit@10": false,
+        "generation_prefix_mrr": 0.0,
+        "generation_prefix_recall": 0.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 3,
+        "needs_external": false,
+        "eval_reasoning": "질문은 K-GAAP 기업의 만기보유증권/장기성 채권에 대한 유효이자율법 적용 여부를 묻지만, 청크에는 ‘만기보유증권은 상각후원가로 평가… 장부금액과 만기액면금액의 차이를… 유효이자율법에 의하여 상각’(6.29)과 ‘모든 채무증권의 이자수익은 할인 또는 할증차금의 상각액을 가감하여 인식’(6.A7)만 있어 K-GAAP에서의 적용 범위·예외·질의에 대한 직접적",
+        "retrieval_chapters": [
+          "13",
+          "16",
+          "32",
+          "6",
+          "6",
+          "6",
+          "6",
+          "6",
+          "31",
+          "6"
+        ],
+        "citation_paras": [
+          "31.10",
+          "31.11",
+          "31.12",
+          "31.4",
+          "31.5",
+          "31.6",
+          "31.7",
+          "31.8",
+          "31.9",
+          "6.28",
+          "6.29",
+          "6.30"
+        ],
+        "answer_head": "아니요. 제공된 문맥에 따르면 만기보유증권은 상각후원가로 평가하며, 장부금액과 만기액면금액의 차이를 상환기간에 걸쳐 유효이자율법으로 상각하여 취득원가와 이자수익에 가감합니다 [4]. 또한 모든 채무증권의 이자수익은 할인 또는 할증차금의 상각액을 가감하여 인식한다고 되어 있어, K-GAAP에서도 채무증권의 이자수익 인식에 유효이자율법이 적용됩니다 [7]. 장",
+        "error_logs": [],
+        "elapsed_sec": 8.0
+      },
+      "error": null
+    },
+    {
+      "case_id": "TEST-K-GAAP-014",
+      "chapter": "21",
+      "measurable": true,
+      "gold_paras": [
+        "21.12"
+      ],
+      "metrics": {
+        "retrieval_exact_hit@1": true,
+        "retrieval_exact_hit@10": true,
+        "retrieval_exact_mrr": 1.0,
+        "retrieval_exact_recall": 1.0,
+        "retrieval_prefix_hit@1": true,
+        "retrieval_prefix_hit@10": true,
+        "retrieval_prefix_mrr": 1.0,
+        "retrieval_prefix_recall": 1.0,
+        "generation_exact_hit@1": true,
+        "generation_exact_hit@10": true,
+        "generation_exact_mrr": 1.0,
+        "generation_exact_recall": 1.0,
+        "generation_prefix_hit@1": true,
+        "generation_prefix_hit@10": true,
+        "generation_prefix_mrr": 1.0,
+        "generation_prefix_recall": 1.0,
+        "legacy_substring": false,
+        "is_answerable": true
+      },
+      "diag": {
+        "strategy": "hyde",
+        "rewrite_count": 1,
+        "n_retrieved": 10,
+        "n_reranked": 10,
+        "n_citations": 4,
+        "needs_external": false,
+        "eval_reasoning": "청크 [21.11], [21.12], [21.13], [21.14], [21.15]에 퇴직연금운용자산의 표시원칙, 퇴직급여충당부채에서 차감하는 형식, 초과액의 투자자산 표시, 그리고 병존하는 제도에서의 표시·상계 기준이 모두 제시되어 있어 질문의 분류 기준을 직접 추출할 수 있습니다. 외부 기준서 준용 지시가 보이지 않으며, 질문은 ‘일부를 장기금융상품, ",
+        "retrieval_chapters": [
+          "21",
+          "21",
+          "21",
+          "21",
+          "21",
+          "21",
+          "21",
+          "3",
+          "3",
+          "21"
+        ],
+        "citation_paras": [
+          "21.11",
+          "21.12",
+          "21.13",
+          "21.14"
+        ],
+        "answer_head": "확정급여형퇴직연금제도에서 운용되는 자산은 기업이 직접 보유하는 것으로 보아 회계처리하고, 재무상태표에는 이를 하나로 통합하여 ‘퇴직연금운용자산’으로 표시한 뒤 그 구성내역을 주석으로 공시합니다 [1][3]. 다만 재무상태표 본문에서 퇴직연금운용자산을 차감 표시할 때는 그 자산이 퇴직급여충당부채와 퇴직연금미지급금의 합계액을 초과하는지 여부가 기준이며, 초과하",
+        "error_logs": [],
+        "elapsed_sec": 6.8
+      },
+      "error": null
+    }
+  ]
+}
