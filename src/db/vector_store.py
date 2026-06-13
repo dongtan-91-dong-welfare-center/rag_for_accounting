@@ -227,8 +227,8 @@ def similarity_search(query_vector: list[float], top_k: int, collection: str) ->
 def delete_collection(collection: str) -> bool:
     """지정한 컬렉션의 모든 벡터를 삭제한다. 성공 시 True, 실패 시 False를 반환한다.
 
-    테이블 자체는 유지하고 행만 비운다(DELETE). 재인덱싱 시 _ensure_collection()을
-    다시 태울 필요가 없고, HNSW 인덱스 정의도 보존된다.
+    테이블 자체는 유지하고 행만 비운다(DELETE). 
+    재인덱싱 시 _ensure_collection()을 다시 태울 필요가 없고, HNSW 인덱스 정의도 보존된다.
     """
     try:
         with get_pool().connection() as conn:
