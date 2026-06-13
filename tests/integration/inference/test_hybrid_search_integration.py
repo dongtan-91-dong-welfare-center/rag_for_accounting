@@ -29,9 +29,12 @@ def setup_test_db():
     with pool.connection() as conn:
         with conn.cursor() as cur:
             # 테스트용 테이블 스키마 생성
+            # 프로덕션 스키마(src/db/vector_store.py)와 동일하게 chunk_id를 TEXT PRIMARY KEY로 둔다.
+            # CREATE TABLE IF NOT EXISTS는 인덱싱 경로가 이미 생성한 chunks 테이블 앞에서 no-op이 되므로,
+            # 테스트 INSERT도 프로덕션 스키마(chunk_id NOT NULL, 자동 증가 없음)에 맞춰 chunk_id를 명시한다.
             cur.execute(f"""
                 CREATE TABLE IF NOT EXISTS {CHUNKS_TABLE} (
-                    chunk_id SERIAL PRIMARY KEY,
+                    chunk_id TEXT PRIMARY KEY,
                     document_id TEXT,
                     content TEXT,
                     metadata JSONB,
@@ -43,14 +46,21 @@ def setup_test_db():
             # (실제 임베딩 벡터와 동일한 차원의 dummy vector 사용)
             dummy_vec_1 = f"[{','.join(['0.1']*EMBEDDING_DIM)}]"
             dummy_vec_2 = f"[{','.join(['0.2']*EMBEDDING_DIM)}]"
-            
+
+            # 재실행 멱등성: 기존 테스트 행이 남아 있어도 ON CONFLICT로 갱신한다.
+            # ON CONFLICT: 중복된 chunk_id가 있을 경우 업데이트하라는 의미이다.
             cur.execute(f"""
-                INSERT INTO {CHUNKS_TABLE} (document_id, content, metadata, embedding)
-                VALUES 
-                ('DOC-1', '유형자산 감가상각 인식 기준은 정액법을 기본으로 합니다.', '{{"standard_type": "K-GAAP"}}', %s::vector),
-                ('DOC-2', '재고자산의 단가산정방식은 선입선출법을 따른다.', '{{"standard_type": "K-IFRS"}}', %s::vector)
+                INSERT INTO {CHUNKS_TABLE} (chunk_id, document_id, content, metadata, embedding)
+                VALUES
+                ('TEST-CHUNK-1', 'DOC-1', '유형자산 감가상각 인식 기준은 정액법을 기본으로 합니다.', '{{"standard_type": "K-GAAP"}}', %s::vector),
+                ('TEST-CHUNK-2', 'DOC-2', '재고자산의 단가산정방식은 선입선출법을 따른다.', '{{"standard_type": "K-IFRS"}}', %s::vector)
+                ON CONFLICT (chunk_id) DO UPDATE SET
+                    document_id = EXCLUDED.document_id,
+                    content = EXCLUDED.content,
+                    metadata = EXCLUDED.metadata,
+                    embedding = EXCLUDED.embedding
             """, [dummy_vec_1, dummy_vec_2])
-            
+
             conn.commit()
             
     yield
