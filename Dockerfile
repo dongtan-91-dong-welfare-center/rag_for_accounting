@@ -7,9 +7,13 @@ FROM python:3.12-slim
     # 파이썬은 .py를 실행하기 전에 컴퓨터가 더 빨리 읽을 수 있는 이진 파일인 .pyc로 변환하여 컴파일한다.
     # 컨테이너 환경에서는 이미지가 빌드된 후 코드를 고정하므로, 런타임 중 소스코드가 수정될 일이 없어서 굳이 .pyc를 생성할 필요가 없다.
 # UV_COMPILE_BYTECODE=1: uv에서 패키지 설치 시 바이트코드를 미리 컴파일하여 초기 실행 속도를 높입니다.
+# UV_LINK_MODE=copy: .venv가 익명 볼륨(별도 파일시스템)이라 uv 캐시에서 하드링크가 불가능해
+#   매 `uv run`마다 "Failed to hardlink files ... falling back to full copy" 경고가 출력된다.
+#   복사 모드를 명시해 해당 경고를 제거한다(uv 공식 권장 우회).
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_COMPILE_BYTECODE=1
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
 # [PATH 경로 설정]
 # uv sync가 생성하는 가상환경(.venv)의 실행 파일 폴더를 시스템 PATH 최상단에 추가합니다.

@@ -10,15 +10,32 @@ logger = get_logger(__name__)
 
 # 모델 로드 실패 시에도 모듈 임포트가 NameError 없이 진행되도록 기본값을 선언한다.
 # (선언이 없으면 로드 실패 시 compute_relevance_scores의 None 체크가 NameError로 터진다)
+#
+# [지연 로딩] 모델은 import 시점이 아니라 compute_relevance_scores 최초 호출 시 1회만 로드한다.
+# USE_RERANKER=false(기본값)이면 rerank 노드가 compute_relevance_scores를 호출하지 않으므로
+# 모델(~수백 MB)을 받지 않는다 → 앱/워크플로 import 시 불필요한 다운로드·메모리·로드 로그를 제거한다.
 _cross_encoder = None
 _load_error = None
-try:
-    from sentence_transformers import CrossEncoder as _CrossEncoder
-    _cross_encoder = _CrossEncoder(RERANK_MODEL)
-    logger.info(f"Cross-Encoder 모델 로드 완료: {RERANK_MODEL}")
-except Exception as e:
-    _load_error = e
-    logger.warning(f"Cross-Encoder 모델 로드 실패 — compute_relevance_scores 호출 시 RerankFailureError 발생: {e}")
+_load_attempted = False
+
+
+def _ensure_model_loaded() -> None:
+    """Cross-Encoder 모델을 지연 로딩한다(프로세스당 1회 시도).
+
+    _cross_encoder 또는 _load_error 중 하나라도 이미 설정돼 있으면(성공/실패 확정,
+    또는 테스트가 직접 주입한 경우) 재시도하지 않고 즉시 반환한다.
+    """
+    global _cross_encoder, _load_error, _load_attempted
+    if _cross_encoder is not None or _load_error is not None or _load_attempted:
+        return
+    _load_attempted = True
+    try:
+        from sentence_transformers import CrossEncoder
+        _cross_encoder = CrossEncoder(RERANK_MODEL)
+        logger.info(f"Cross-Encoder 모델 로드 완료: {RERANK_MODEL}")
+    except Exception as e:
+        _load_error = e
+        logger.warning(f"Cross-Encoder 모델 로드 실패 — compute_relevance_scores 호출 시 RerankFailureError 발생: {e}")
 
 
 def rerank_chunks(original_query: str, chunks: list[RetrievedChunk]) -> list[RerankingResult]:
@@ -75,6 +92,7 @@ def compute_relevance_scores(query: str, contents: list[str]) -> list[float]:
     CrossEncoder.predict()는 쌍 리스트를 한 번의 forward pass로 처리하므로
     청크 수와 무관하게 모델 추론을 1회만 수행한다.
     """
+    _ensure_model_loaded()
     if _cross_encoder is None:
         raise RerankFailureError(f"Cross-Encoder 모델 로드 실패: {_load_error}")
     pairs = [(query, content) for content in contents]

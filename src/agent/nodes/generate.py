@@ -29,7 +29,9 @@ def generate_response(state: GraphState) -> dict:
     - 인용 근거를 포함한 FinalResponse를 state.final_response에 저장
     """
     # PydanticAI 에이전트 초기화
-    generator_agent = Agent(f"openai:{OPENAI_MODEL}", output_type=LLMInternalResponse)
+    # 접두사를 "openai-chat:"으로 고정한다. pydantic-ai v2.0부터 "openai:"는 Responses API로
+    # 해석되도록 바뀌어 DeprecationWarning이 발생하므로, 현행 Chat Completions 동작을 명시적으로 유지한다.
+    generator_agent = Agent(f"openai-chat:{OPENAI_MODEL}", output_type=LLMInternalResponse)
 
     # 검색 결과가 없으면 답변 불가능 처리
     if not state.reranked_chunks:
