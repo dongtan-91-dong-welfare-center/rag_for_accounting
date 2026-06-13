@@ -3,7 +3,7 @@
 > Docling + EdgeQuake + LangGraph 기반 회계기준서 RAG 시스템
 >
 > 작성일: 2026-03-21
-> 상태: 초기 설계 (반복 업데이트 예정)
+> 상태: ⚠️ SUPERSEDED — Apache AGE/EdgeQuake/GraphRAG 전제의 초기 설계. AGE는 v1.0에서 제거되고 **pgvector + BM25 하이브리드**로 대체되었습니다. 현행 아키텍처는 [architecture_overview.md](architecture_overview.md)를 참조하세요. 이 문서는 초기 설계 의도 기록용으로만 보존합니다.
 
 ---
 
