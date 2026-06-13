@@ -46,17 +46,17 @@ def _build_where_clause(metadata_filter: dict | None) -> tuple[str, list]:
     return " WHERE " + " AND ".join(conditions), params 
 
 
-def dense_search(query_embedding: list[float], top_k: int, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
-    """Bi-Encoder 임베딩 기반 Dense 검색 (pgvector ANN)"""
+def dense_search(query_embedding: list[float], top_k: int, metadata_filter: dict | None = None, collection: str = CHUNKS_TABLE) -> list[RetrievedChunk]:
+    """Bi-Encoder 임베딩 기반 Dense 검색 (pgvector ANN). collection으로 검색 대상 테이블을 지정한다(기본: 운영 CHUNKS_TABLE)."""
     where_clause, params = _build_where_clause(metadata_filter)
-    
+
     # query_embedding은 %s::vector 타입으로 캐스팅하여 비교
     # embedding <=> %s::vector: 두 벡터 간의 코사인 유사도를 계산 (0=동일, 2=정반대)
     # 1 - (코사인 거리) = 코사인 유사도 -> 점수로 사용하면 유사도가 높을수록 점수도 높음
     query_sql = f"""
         SELECT chunk_id, document_id, content, metadata,
                1 - (embedding <=> %s::vector) AS score
-        FROM {CHUNKS_TABLE}
+        FROM {collection}
         {where_clause}
         ORDER BY embedding <=> %s::vector
         LIMIT %s
@@ -66,8 +66,8 @@ def dense_search(query_embedding: list[float], top_k: int, metadata_filter: dict
     return _execute_search_query(query_sql, query_params, "Dense")
 
 
-def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
-    """PostgreSQL 내장 텍스트 검색 기능(BM25 유사)을 활용한 Sparse 검색"""
+def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None, collection: str = CHUNKS_TABLE) -> list[RetrievedChunk]:
+    """PostgreSQL 내장 텍스트 검색 기능(BM25 유사)을 활용한 Sparse 검색. collection으로 검색 대상 테이블을 지정한다(기본: 운영 CHUNKS_TABLE)."""
     # WHERE 조건이 있다면 AND로 연결, 없으면 WHERE로 시작
     filter_clause, filter_params = _build_where_clause(metadata_filter)
     
@@ -86,7 +86,7 @@ def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None) -
     query_sql = f"""
         SELECT chunk_id, document_id, content, metadata,
                ts_rank_cd(to_tsvector('simple', content), plainto_tsquery('simple', %s)) AS score
-        FROM {CHUNKS_TABLE}
+        FROM {collection}
         {where_sql}
         ORDER BY score DESC
         LIMIT %s
@@ -178,25 +178,27 @@ def reciprocal_rank_fusion(
     return sorted(fused.values(), key=lambda x: x.score, reverse=True)
 
 
-def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = None) -> list[RetrievedChunk]:
+def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = None, collection: str = CHUNKS_TABLE) -> list[RetrievedChunk]:
     """
     하이브리드 검색 (Dense + Sparse) 전략을 통해 청크를 검색한다.
     - Dense/Sparse 독립 장애 처리: 한쪽 실패 시 나머지 결과만 반환, 양쪽 실패 시 DatabaseQueryError
     - 초기 검색 0건 시 top_k × 2로 1회 재탐색
     - 재탐색 후에도 0건이면 NoContextFoundError 발생
+    - collection: 검색 대상 테이블명(기본: 운영 CHUNKS_TABLE). 테스트가 전용 컬렉션을 가리키게 해
+      운영 chunks 오염·소실 없이 격리하기 위한 주입점이다.
     """
     logger.info(f"하이브리드 검색 시작: query='{query[:30]}...', top_k={top_k}")
 
     query_vector = embed_query(query)
 
     # Dense 및 Sparse 검색 실행 (각각 top_k만큼 가져와서 병합 풀 확보)
-    merged = _search_and_merge(query, query_vector, top_k, metadata_filter)
+    merged = _search_and_merge(query, query_vector, top_k, metadata_filter, collection)
     final_results = merged[:top_k]
 
     if not final_results:
         retry_top_k = top_k * 2
         logger.info(f"검색 결과 0건, top_k={retry_top_k}로 재탐색")
-        merged = _search_and_merge(query, query_vector, retry_top_k, metadata_filter)
+        merged = _search_and_merge(query, query_vector, retry_top_k, metadata_filter, collection)
         final_results = merged[:top_k]
 
     if not final_results:
@@ -206,7 +208,7 @@ def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = No
     logger.info(f"하이브리드 검색 완료: {len(final_results)}건 반환")
     return final_results
 
-def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadata_filter: dict | None) -> list[RetrievedChunk]:
+def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadata_filter: dict | None, collection: str = CHUNKS_TABLE) -> list[RetrievedChunk]:
     """Dense + Sparse 검색을 독립 실행하고 RRF로 병합한다. 양쪽 모두 실패 시 DatabaseQueryError를 발생시킨다."""
     dense_results: list[RetrievedChunk] = []
     sparse_results: list[RetrievedChunk] = []
@@ -214,13 +216,13 @@ def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadat
     sparse_failed = False
 
     try:
-        dense_results = dense_search(query_vector, top_k, metadata_filter)
+        dense_results = dense_search(query_vector, top_k, metadata_filter, collection)
     except (SearchTimeoutError, DatabaseQueryError) as e:
         dense_failed = True
         logger.warning(f"Dense 검색 실패, Sparse 단독 진행: {e}")
 
     try:
-        sparse_results = sparse_search(query, top_k, metadata_filter)
+        sparse_results = sparse_search(query, top_k, metadata_filter, collection)
     except (SearchTimeoutError, DatabaseQueryError) as e:
         sparse_failed = True
         logger.warning(f"Sparse 검색 실패, Dense 단독 진행: {e}")
