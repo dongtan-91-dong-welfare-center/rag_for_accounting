@@ -17,6 +17,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# !TODO: 기준서 참조 신호에 대해 더 정교한 방식이 필요함
 # 외부 기준서 참조 지시를 나타내는 신호 문구.
 # reasoning에 다음 중 하나라도 포함되면 standard_filter 값과 무관하게 외부 참조로 판단한다.
 _EXTERNAL_REFERENCE_PHRASES: tuple[str, ...] = (
@@ -29,6 +30,19 @@ _EXTERNAL_REFERENCE_PHRASES: tuple[str, ...] = (
     "외부 기준서",
     "준용한다",
 )
+
+# 외부 참조 문구가 부정 문맥("… 필요하지 않습니다")에서 등장하면 외부 참조로 보지 않기 위한
+# 부정 종결 마커. 외부 참조 문구와 같은 문장에 이 마커가 있으면 그 신호는 무시한다.
+# 단순 substring 매칭이 "외부 기준서 … 필요하지 않습니다"를 외부 참조로 오탐해 needs_external을 강제 True로 만들고 CRAG 루프를 3배 공회전 방지
+_NEGATION_MARKERS: tuple[str, ...] = (
+    "않",       # …하지 않다 / 않습니다 / 않으며
+    "없",       # 필요 없다 / 없습니다
+    "불필요",
+    "아니",     # …가 아니라 …
+)
+
+# 부정 판정을 문장 단위로 한정해, 다른 문장의 부정이 외부 참조 신호를 잘못 무력화하지 않도록 한다.
+_SENTENCE_SPLIT = re.compile(r"[.!?\n]+")
 
 # NOTE:K-GAAP 같은 경우는 제 #### 호와 같은 형태가 아니라 제 ## 장인 것으로 알고 있음
 # 조항 번호 패턴: K-IFRS/K-GAAP 기준서 번호, 3자리 이상 호수, 조항 번호
@@ -180,16 +194,42 @@ def check_relevance(chunk: RerankingResult, query: str) -> bool:
     return chunk.rerank_score >= RERANK_THRESHOLD and len(chunk.chunk.content.strip()) > 0
 
 
+def _is_negated(sentence: str) -> bool:
+    """문장에 부정 종결 마커가 포함되어 있으면 True(외부 참조 신호를 무시해야 하는 문맥)."""
+    return any(marker in sentence for marker in _NEGATION_MARKERS)
+
+
+def _signals_external_reference(reasoning: str, standard_filter: str | None = None) -> bool:
+    """reasoning을 문장 단위로 보고, 부정 문맥이 아닌 외부 참조 신호가 하나라도 있으면 True.
+
+    - _EXTERNAL_REFERENCE_PHRASES(명시적 외부 참조 지시)는 standard_filter와 무관하게 신호로 본다.
+    - standard_filter가 단일 기준서(GAAP/KIFRS)면 같은 문장에 반대 기준서가 등장해도 신호로 본다.
+    - 외부 참조 문구가 부정 문맥("… 필요하지 않습니다")에 있는 문장은 신호에서 제외한다.
+    """
+    for sentence in _SENTENCE_SPLIT.split(reasoning):
+        if _is_negated(sentence):
+            continue
+        if any(phrase in sentence for phrase in _EXTERNAL_REFERENCE_PHRASES):
+            return True
+        if standard_filter == "GAAP" and "K-IFRS" in sentence:
+            return True
+        if standard_filter == "KIFRS" and "K-GAAP" in sentence:
+            return True
+    return False
+
+
 def check_external_reference(evaluation: EvaluationResult, standard_filter: str) -> bool:
     """
     평가 결과의 reasoning에서 외부 기준서 참조 필요 여부를 판단한다.
 
     판단 규칙:
-        1. _EXTERNAL_REFERENCE_PHRASES 중 하나라도 reasoning에 포함되면 True
+        1. _EXTERNAL_REFERENCE_PHRASES 중 하나가 (부정 문맥이 아닌) 문장에 포함되면 True
            (명시적 외부 참조 지시는 standard_filter와 무관하게 외부 참조로 본다)
         2. standard_filter가 "ALL"이면 IFRS·GAAP 키워드 단독으로는 True를 반환하지 않음
            (양쪽 기준서가 모두 검색 대상이므로 단순 키워드 등장은 외부 참조가 아님)
-        3. standard_filter가 단일 기준서(GAAP/KIFRS)일 때 반대 기준서가 reasoning에 등장하면 True
+        3. standard_filter가 단일 기준서(GAAP/KIFRS)일 때 반대 기준서가 (부정 문맥이 아닌)
+           문장에 등장하면 True
+        4. 외부 참조 문구가 부정 문맥("… 필요하지 않습니다")에서 등장하면 외부 참조로 보지 않는다.
 
     Args:
         evaluation: LLM이 산출한 평가 결과
@@ -198,20 +238,7 @@ def check_external_reference(evaluation: EvaluationResult, standard_filter: str)
     Returns:
         bool: 외부 참조 필요 여부
     """
-    reasoning = evaluation.reasoning
-
-    if any(phrase in reasoning for phrase in _EXTERNAL_REFERENCE_PHRASES):
-        return True
-
-    if standard_filter == "ALL":
-        return False
-
-    if standard_filter == "GAAP" and "K-IFRS" in reasoning:
-        return True
-    if standard_filter == "KIFRS" and "K-GAAP" in reasoning:
-        return True
-
-    return False
+    return _signals_external_reference(evaluation.reasoning, standard_filter)
 
 
 def validate_verdict(eval_result: EvaluationResult) -> None:
@@ -228,10 +255,10 @@ def validate_verdict(eval_result: EvaluationResult) -> None:
         )
     # needs_external=True이고 is_relevant=True이면 외부 참조가 필요하다.
     if eval_result.needs_external and eval_result.is_relevant:
-        # 외부 참조 지시어가 있는지 확인
-        has_external_signal = any(
-            phrase in eval_result.reasoning for phrase in _EXTERNAL_REFERENCE_PHRASES
-        )
+        # 외부 참조 지시어가 있는지 확인.
+        # check_external_reference와 동일한 부정-인지 판정을 공유해, 부정 문맥("… 필요하지 않습니다")의
+        # 외부 참조 문구를 신호로 오인하던 문제를 일관되게 차단한다.
+        has_external_signal = _signals_external_reference(eval_result.reasoning)
         # 외부 참조 지시어가 없으면 불일치
         if not has_external_signal:
             raise InconsistentVerdictError(

@@ -120,6 +120,24 @@ class TestCheckExternalReference:
         )
         assert check_external_reference(evaluation, "GAAP") is True # 기준서 필터로 인해 외부 참조로 판단
 
+    def test_negated_external_phrase_returns_false(self):
+        """외부 참조 문구가 부정 문맥("… 필요하지 않습니다")이면 외부 참조로 보지 않는다"""
+        evaluation = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.96,
+            reasoning="검색된 청크로 충분하며 외부 기준서 추가 검색이 필요하지 않습니다."
+        )
+        assert check_external_reference(evaluation, "ALL") is False
+        assert check_external_reference(evaluation, "GAAP") is False
+        assert check_external_reference(evaluation, "KIFRS") is False
+
+    def test_negated_sentence_does_not_suppress_positive_sentence(self):
+        """부정 문장이 있어도, 다른 문장의 (부정 아닌) 외부 참조 지시는 살아남아 True"""
+        evaluation = EvaluationResult(
+            is_relevant=False, needs_external=False, confidence=0.5,
+            reasoning="청크 본문만으로는 부족하지 않습니다. 다만 해당 항목은 타 기준서 준용이 필요합니다."
+        )
+        assert check_external_reference(evaluation, "ALL") is True
+
 
 @pytest.mark.unit
 class TestEvaluateContext:
@@ -215,6 +233,35 @@ class TestEvaluateContext:
         eval_result = result["evaluation"]
         assert eval_result.needs_external is False  # 추론 불필요, ALL 필터 적용
         assert eval_result.is_relevant is True  # LLM 응답 유지
+
+    def test_negated_external_reasoning_does_not_override(self):
+        """LLM이 needs_external=False + 부정 문맥 reasoning을 반환하면,
+        check_external_reference가 오버라이드하지 않아 needs_external=False가 보존된다.
+        substring 오탐으로 CRAG 루프가 MAX_REWRITE_COUNT까지 3배 공회전하던 회귀 방지
+        """
+        llm_eval = EvaluationResult(
+            is_relevant=True,
+            needs_external=False,
+            confidence=0.96,
+            reasoning="청크에 충분한 근거가 있어 외부 기준서 추가 검색이 필요하지 않습니다."
+        )
+        state = GraphState(
+            original_query="재고자산의 취득원가는 어떻게 측정하나요?",
+            standard_filter="ALL",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="취득원가 측정...", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_evaluator_agent(evaluation=llm_eval):
+            result = evaluate_context(state)
+
+        eval_result = result["evaluation"]
+        assert eval_result.needs_external is False  # 부정 문맥 → 오버라이드 안 함
+        assert eval_result.is_relevant is True      # LLM 응답 유지
+        assert "error_logs" not in result           # 일관성 위반 없음
 
     def test_llm_exception_propagates(self):
         """
@@ -433,6 +480,15 @@ class TestValidateVerdict:
             reasoning="관련 없는 내용입니다."
         )
         validate_verdict(eval_result)   # 예외 없이 통과해야 함
+
+    def test_needs_external_with_negated_phrase_raises_error(self):
+        """[#145] needs_external=True인데 외부 참조 문구가 부정 문맥이면 신호로 보지 않아 불일치"""
+        eval_result = EvaluationResult(
+            is_relevant=True, needs_external=True, confidence=0.8,
+            reasoning="외부 기준서 추가 검색은 필요하지 않습니다."   # 부정 문맥 → 외부 참조 신호 아님
+        )
+        with pytest.raises(InconsistentVerdictError):
+            validate_verdict(eval_result)
 
 
 @pytest.mark.unit
