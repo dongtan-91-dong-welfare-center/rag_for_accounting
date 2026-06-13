@@ -301,17 +301,27 @@ class TestRewriteQuery:
     def _make_state(self, query: str) -> GraphState:
         return GraphState(original_query=query)
 
-    def test_non_accounting_sets_bypass(self):
+    # 장문("오늘 날씨 어때?")과 단일 단어("날씨") 모두 비회계 분류 시 동일하게 bypass 처리되어야 함
+    # 단위 테스트에서 LLM이 모킹되므로 입력 길이와 무관하게 mock 분류 결과가 경로를 결정
+    @pytest.mark.parametrize("query", ["오늘 날씨 어때?", "날씨"])
+    def test_non_accounting_sets_bypass(self, query):
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"is_accounting": False, "strategy": "bypass", "confidence": 0.95}
             )
-            state = rewrite_query(self._make_state("오늘 날씨 어때?"))
+            state = rewrite_query(self._make_state(query))
         assert state.is_accounting_query is False
         assert state.rewritten_query.strategy == "bypass"
-        assert state.rewritten_query.search_queries == ["오늘 날씨 어때?"]
+        assert state.rewritten_query.search_queries == [query]
         # 비회계 조기 종료 시 early_exit가 사용할 분류 신뢰도가 state에 기록되어야 함
         assert state.classification_confidence == 0.95
+
+    @pytest.mark.parametrize("query", ["", "  "])
+    def test_rewrite_empty_string_raises_valueerror(self, query):
+        # 빈 문자열·공백 문자열 입력은 rewrite_query 진입부 가드에서 ValueError로 차단됨
+        # outer try보다 앞에서 raise하므로 error_logs로 흡수되지 않고 그대로 전파
+        with pytest.raises(ValueError):
+            rewrite_query(self._make_state(query))
 
     def test_accounting_hyde_strategy(self):
         with patch(self.PATCH) as mock_client:
@@ -388,6 +398,41 @@ class TestRewriteQuery:
             ]
             state = rewrite_query(GraphState(original_query=query))
         assert state.rewritten_query.original_query == query
+
+    def test_classify_fail_but_strategy_succeeds(self):
+        # 첫 호출(분류)은 예외 → classify_and_select 내부 폴백 (True, "hyde", 0.0)
+        # 두 번째 호출(전략-HyDE)은 성공 → [원문, 가상답변]
+        # 분류 실패가 함수 안에서 삼켜지므로 outer except 미발동 → error_logs 비어 있음
+        original_query = "리스부채 최초 인식 방법은?"
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.side_effect = [
+                Exception("timeout"),
+                _mock_resp({"hypothetical_answer": "fallback_ans"}),
+            ]
+            state = rewrite_query(self._make_state(original_query))
+        rq = state.rewritten_query
+        assert rq.strategy == "hyde"
+        assert rq.search_queries[1] == "fallback_ans"
+        assert rq.search_queries[0] == original_query     # 원문이 첫 번째 쿼리로 유지
+        assert rq.original_query == original_query         # 원문 필드 보존
+        assert state.error_logs == []
+
+    def test_classify_succeeds_but_strategy_fails(self):
+        # 첫 호출(분류)은 성공하여 "decompose" 할당
+        # 두 번째 호출(전략)은 예외 → apply_decompose 내부 폴백 [원문]
+        # 전략 실패가 함수 안에서 삼켜지므로 outer except 미발동 → error_logs 비어 있음
+        original_query = "유형자산과 무형자산의 감가상각 방법 차이는?"
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.side_effect = [
+                _mock_resp({"is_accounting": True, "strategy": "decompose"}),
+                Exception("timeout"),
+            ]
+            state = rewrite_query(self._make_state(original_query))
+        rq = state.rewritten_query
+        assert rq.strategy == "decompose"                  # 분류 성공 결과 유지
+        assert rq.search_queries == [original_query]       # 원문 보존
+        assert rq.original_query == original_query         # 원문 필드 보존
+        assert state.error_logs == []
 
 
 # ── HIL 피드백 주입 (apply_* / rewrite_query) ───────────────────────────────────
