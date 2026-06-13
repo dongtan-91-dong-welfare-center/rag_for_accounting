@@ -116,6 +116,7 @@ class DoclingParser:
         # ── 2단계: PDF 분석 ──
         # converter.convert()가 PDF를 읽고 AI 모델로 레이아웃을 분석합니다.
         # result.document에 분석 결과(텍스트, 표, 구조 정보)가 담깁니다.
+        # TODO(#139): converter.convert() / 아래 export_to_markdown() 실패를 DocumentParseError(CM-003, node="parse")로 감싸 raw 예외 전파를 차단할 것.
         converter = self._get_converter()
         result = converter.convert(str(file_path))
         doc = result.document
