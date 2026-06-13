@@ -1,7 +1,10 @@
 import math
+import sys
+import types
 
 import pytest
 from unittest.mock import patch, MagicMock
+from src.retrieval import reranker as reranker_module
 from src.retrieval.reranker import rerank_chunks, compute_relevance_scores
 from src.agent.workflow import rerank
 from src.models.schemas import RetrievedChunk, RerankingResult
@@ -217,3 +220,77 @@ class TestRerankNode:
         assert len(result["reranked_chunks"]) == len(sample_chunks)  # reranked_chunks의 길이가 1차 검색 결과와 같은지 확인
         assert "needs_reretrieval" in result  # needs_reretrieval이 존재하는지 확안
         assert result["needs_reretrieval"] is False  # needs_reretrieval이 False인지 확안
+
+
+@pytest.mark.unit
+class TestLazyModelLoadFailure:
+    """CrossEncoder 지연 로딩(_ensure_model_loaded)의 로드 실패 graceful 동작 검증.
+
+    기존 TestComputeRelevanceScores.test_model_load_failure_raises_rerank_failure_error는
+    '실패 상태(_cross_encoder=None, _load_error=설정)'를 직접 주입할 뿐, 
+    로드 자체가 실패하는 경로(_ensure_model_loaded 내부에서 CrossEncoder 생성이 예외를 던지는 케이스)는 검증하지 않는다.
+    여기서 그 경로를 모델 다운로드 실패로 시뮬레이션한다.
+    """
+
+    @staticmethod
+    def _failing_sentence_transformers(message: str) -> types.ModuleType:
+        """CrossEncoder() 생성이 예외를 던지는 가짜 sentence_transformers 모듈.
+
+        실제 torch/모델 로드 없이, _ensure_model_loaded 내부의
+        `from sentence_transformers import CrossEncoder`가 이 가짜를 집어가도록 한다.
+        """
+        fake = types.ModuleType("sentence_transformers")
+        fake.CrossEncoder = MagicMock(side_effect=RuntimeError(message))
+        return fake
+
+    def test_load_failure_is_graceful_then_raises_on_use(self):
+        """모델 로드(다운로드) 실패 시 _ensure_model_loaded는 예외를 삼켜 graceful하게 처리하고,
+        이후 compute_relevance_scores 호출 시 NameError가 아닌 RerankFailureError로 분기되는지 검증.
+        """
+        fake_st = self._failing_sentence_transformers("모델 다운로드 실패(캐시 부재)")
+
+        # 지연 로딩 상태를 초기화하여 _ensure_model_loaded가 실제 로드를 시도하도록 강제한다.
+        with patch.object(reranker_module, "_cross_encoder", None), \
+             patch.object(reranker_module, "_load_error", None), \
+             patch.object(reranker_module, "_load_attempted", False), \
+             patch.dict(sys.modules, {"sentence_transformers": fake_st}):
+            # 로드 시도 자체는 예외를 전파하지 않는다.
+            reranker_module._ensure_model_loaded()
+            assert reranker_module._cross_encoder is None
+            assert isinstance(reranker_module._load_error, RuntimeError)
+
+            # 실제 사용 시점에 RerankFailureError로 분기.
+            with pytest.raises(RerankFailureError, match="Cross-Encoder 모델 로드 실패"):
+                compute_relevance_scores("질의", ["문서1", "문서2"])
+
+    def test_load_attempted_once_no_retry_storm(self):
+        """로드는 프로세스당 1회만 시도되고, 실패해도 매 호출마다 재시도하지 않는지 검증.
+
+        _load_attempted 가드가 없으면 호출마다 모델 생성을 재시도해 다운로드/지연이 반복된다.
+        """
+        fake_st = self._failing_sentence_transformers("once")
+
+        with patch.object(reranker_module, "_cross_encoder", None), \
+             patch.object(reranker_module, "_load_error", None), \
+             patch.object(reranker_module, "_load_attempted", False), \
+             patch.dict(sys.modules, {"sentence_transformers": fake_st}):
+            reranker_module._ensure_model_loaded()
+            reranker_module._ensure_model_loaded()  # 두 번째 호출은 가드로 즉시 반환되어야 함
+
+            fake_st.CrossEncoder.assert_called_once()  # 모델 생성 시도는 1회뿐
+
+    def test_rerank_chunks_propagates_rerank_failure_on_load_failure(self, sample_chunks):
+        """로드 실패 상태에서 rerank_chunks(청크 2개 이상)가 RerankFailureError를 전파하는지 검증.
+
+        rerank() 노드는 이 RerankFailureError를 RR-201로 받아 1차 검색 결과 폴백으로 강등한다
+        (TestRerankNode.test_rerank_model_failure_records_error_log). 
+        즉 로드 실패가 파이프라인을 크래시시키지 않고 graceful 폴백으로 흡수되는 전체 경로의 진입점을 고정한다.
+        """
+        fake_st = self._failing_sentence_transformers("load fail")
+
+        with patch.object(reranker_module, "_cross_encoder", None), \
+             patch.object(reranker_module, "_load_error", None), \
+             patch.object(reranker_module, "_load_attempted", False), \
+             patch.dict(sys.modules, {"sentence_transformers": fake_st}):
+            with pytest.raises(RerankFailureError, match="Cross-Encoder 모델 로드 실패"):
+                rerank_chunks("질의", sample_chunks)
