@@ -163,6 +163,11 @@ def rewrite_query(state: GraphState) -> GraphState:
     #        - 전략 교체 여부: 동일 전략 재시도 vs. hyde→decompose→stepback 순 에스컬레이션
     #        - rewrite_count 증가 시점: 이 함수 진입 직후 state.rewrite_count += 1
 
+    # 빈 질의 가드: 공백만 있거나 빈 문자열이면 LLM 분류 호출이 무의미하므로 즉시 차단한다.
+    # outer try 블록보다 앞에 두어 ValueError가 error_logs로 흡수되지 않고 호출자에게 전파되도록 한다.
+    if not state.original_query.strip():
+        raise ValueError("original_query가 비어 있습니다.")
+
     # HIL 루프에서 주입된 사용자 피드백을 사용 즉시 회수·초기화한다.
     # (다음 CRAG/HIL 루프에서 이전 피드백이 잘못 재사용되는 것을 방지)
     feedback = state.human_feedback
