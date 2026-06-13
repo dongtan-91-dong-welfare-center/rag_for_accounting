@@ -1,58 +1,44 @@
 """
-[데이터 수집 파이프라인 통합 테스트]
+[데이터 수집 파이프라인 통합 테스트
 
-문서 파싱(Docling) → 온톨로지 그래프 구축(Apache AGE) → 벡터 인덱싱(pgvector)
-연쇄 동작에서 다양한 입력 조건(정상, 경계값, 예외)에 따른 데이터 전달 정합성과 상태 진화를 검증합니다.
+문서 파싱(Docling) → 온톨로지 그래프 → 청킹(FUNC-002/003) → 벡터 인덱싱(pgvector)
+연쇄 동작에서 데이터 전달 정합성과 상태 진화를 검증한다.
 
 설계 원칙:
-    - pytest.mark.parametrize로 문서 유형, 크기, 예외 상황을 다양하게 주입하여 Ingestion 파이프라인의 견고함을 검증합니다.
-    - 개별 스키마가 아닌, Parse → Chunk → Index 전체 흐름을 하나의 테스트에서 관통하며 데이터 손실 여부를 추적합니다.
+    - 외부 의존(파싱·임베딩·DB)만 모킹하고 실제 청킹·인덱싱 모듈을 그대로 관통한다.
+      청킹은 `src.db.ontology.chunker.chunk_graph`, 인덱싱은 `src.db.vector_store.index_documents`를 모킹 없이 호출하여, 시뮬레이션 헬퍼가 가렸던 실제 데이터 흐름의 정합성을 검증한다.
+    - 라이브 인프라(Docker/모델 다운로드) 없이 통과한다. 임베딩·DB·파서는 conftest 픽스처로 차단하고, 청킹 토큰 카운터는 모델 로드를 피하려고 가벼운 단어 수 함수를 주입한다.
+    - 온톨로지 그래프는 LLM 빌드(build_graph) 대신 git에 추적되는 `data/ontology/*.json`을 역직렬화해 입력한다. 이는 main.py의 기본 ingest 경로(미리 빌드된 온톨로지 JSON 적재)와 동일하다.
 """
+from contextlib import contextmanager
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
-from src.models.schemas import ParsedDocument, IndexingResult, RetrievedChunk
+
+from src.db.ontology.chunker import chunk_graph
+from src.db.ontology.models import OntologyGraph
+from src.db.vector_store import index_documents
+from src.models.schemas import ParsedDocument
+from src.parse.parser import DoclingParser
+
+# 온톨로지 JSON 디렉터리, 청킹 입력 그래프의 출처
+ONTOLOGY_DIR = Path(__file__).resolve().parents[2].parent / "data" / "ontology"
 
 
-# ── Mock 데이터 팩토리 ──
+def _word_count(text: str) -> int:
+    """모델 로드를 피하는 가벼운 토큰 카운터 — 공백 기준 단어 수.
 
-def make_parsed_document(
-    title: str,
-    sections: list[str],
-    tables: list[dict] | None = None,
-    metadata: dict | None = None,
-) -> ParsedDocument:
-    """테스트용 ParsedDocument 생성"""
-    return ParsedDocument(
-        title=title,
-        text="\n".join(sections),
-        tables=tables or [],
-        metadata=metadata or {"source": f"data/{title}.pdf"}
-    )
+    청킹의 토큰 한도 분할은 chunker 단위 테스트가 검증하므로,
+    통합 테스트에서는 KURE-v1 토크나이저 대신 이 함수를 주입해 인프라 없이 결정적으로 동작시킨다.
+    """
+    return len(text.split())
 
 
-def simulate_chunking(doc: ParsedDocument) -> list[RetrievedChunk]:
-    """ParsedDocument를 청크로 분할하는 시뮬레이션"""
-    return [
-        RetrievedChunk(
-            chunk_id=f"chunk-{i}",
-            document_id=f"DOC-{doc.title}",
-            content=section,
-            score=0.0,
-            metadata={"source": doc.metadata.get("source", "unknown")}
-        )
-        for i, section in enumerate(doc.text.split("\n"))
-        if section.strip()
-    ]
-
-
-def simulate_indexing(doc_id: str, chunk_count: int, *, force_status: str | None = None) -> IndexingResult:
-    """인덱싱 결과 시뮬레이션"""
-    if force_status:
-        status = force_status
-    elif chunk_count == 0:
-        status = "failed"
-    else:
-        status = "success"
-    return IndexingResult(document_id=doc_id, chunk_count=chunk_count, status=status)
+def _load_graph(chapter: str) -> OntologyGraph:
+    """data/ontology/<chapter>.json을 OntologyGraph로 역직렬화한다."""
+    path = ONTOLOGY_DIR / f"{chapter}.json"
+    return OntologyGraph.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 # ── 전체 Ingestion 파이프라인 ──
@@ -62,124 +48,135 @@ class TestIngestionPipeline:
     """Parse → Chunk → Index 연쇄 데이터 흐름의 상태 진화 검증"""
 
     @pytest.mark.parametrize(
-        "title, sections, tables, expected_chunk_count, expected_status",
+        "chapter, expected_status",
         [
-            # 케이스 1: 표준 문서 — 2개 섹션, 표 없음 → 정상 인덱싱
-            (
-                "일반기업회계기준_제10장",
-                ["10.1 유형자산의 정의: 영업활동에 사용할 목적으로 보유하는 자산",
-                 "10.22 재평가 주기: 3~5년 내 재평가 실시 권고"],
-                [],
-                2,
-                "success",
-            ),
-            # 케이스 2: 표 포함 문서 — 텍스트 3개 섹션 + 표 1개 → 정상 인덱싱
-            (
-                "일반기업회계기준_제6장",
-                ["6.1 적용 범위: 금융자산·금융부채의 인식과 측정",
-                 "6.2 금융자산의 분류: 당기손익인식, 매도가능, 만기보유, 대여금 및 수취채권",
-                 "6.3 최초 인식: 공정가치로 측정"],
-                [{"headers": ["구분", "내용"], "rows": [["유동", "1년 이내"]]}],
-                3,
-                "success",
-            ),
-            # 케이스 3: 대용량 문서 — 10개 섹션 → 정상 인덱싱
-            (
-                "일반기업회계기준_전체",
-                [f"제{i}장 내용: 회계 기준서의 제{i}장에 해당하는 상세 내용입니다." for i in range(1, 11)],
-                [],
-                10,
-                "success",
-            ),
-            # 케이스 4: 빈 본문 문서 — 섹션 0개 → 인덱싱 실패
-            (
-                "빈_문서",
-                [],
-                [],
-                0,
-                "failed",
-            ),
-            # 케이스 5: 본문은 없지만 표만 있는 문서 → 청크 0개, 인덱싱 실패
-            (
-                "표만_있는_문서",
-                [],
-                [{"headers": ["계정", "금액"], "rows": [["매출채권", "100,000"]]}],
-                0,
-                "failed",
-            ),
+            # gaap-ch1: content 노드 3개 → 청크 3개, 전량 적재 성공
+            ("gaap-ch1", "success"),
+            # gaap-ch6: content 노드 200개 → 다수 청크, 전량 적재 성공 (배치 분할 포함)
+            ("gaap-ch6", "success"),
         ],
-        ids=["standard_doc", "doc_with_tables", "large_doc", "empty_doc", "table_only_doc"]
+        ids=["small_chapter", "large_chapter"],
     )
     def test_parse_to_chunk_to_index_flow(
-        self, title, sections, tables, expected_chunk_count, expected_status
+        self, chapter, expected_status, mock_db_pool, mock_embedding
     ):
-        """문서의 유형과 크기에 따라 Parse → Chunk → Index 파이프라인이
-        데이터 손실 없이 올바르게 동작하는지 검증"""
+        """실제 온톨로지 JSON을 입력으로 Parse → Chunk → Index 파이프라인이 데이터 손실 없이(고아 청크 0건) 동작하는지 검증."""
 
-        # Parse 단계
-        doc = make_parsed_document(title=title, sections=sections, tables=tables)
-        assert doc.title == title
-        assert len(doc.tables) == len(tables)
+        # Parse 단계 — DoclingParser.parse를 모킹해 FUNC-001 출력 스펙(source_path)을 재현
+        source_path = f"data/raw/{chapter}.pdf"
+        with patch_parser(source_path):
+            parsed = DoclingParser().parse(source_path)
+        assert parsed.metadata["source_path"] == source_path
 
-        # Chunk 단계
-        chunks = simulate_chunking(doc)
-        assert len(chunks) == expected_chunk_count
+        # Chunk 단계 — 실제 chunk_graph 관통 (그래프는 JSON 역직렬화로 입력)
+        graph = _load_graph(chapter)
+        chunks = chunk_graph(
+            graph,
+            source_path=parsed.metadata["source_path"],
+            token_counter=_word_count,
+        )
+        assert len(chunks) > 0
 
-        # 데이터 무결성: 청크의 source 메타데이터가 원본 문서에서 전달됨
-        for chunk in chunks:
-            assert chunk.metadata.model_extra["source"] == doc.metadata["source"]
+        # 데이터 무결성: 고아 청크 0건 — 모든 청크가 ontology_node_id를 보유
+        assert all(c.metadata.ontology_node_id for c in chunks)
+        # source 메타데이터가 파싱 → 청크까지 전달됨 (spec: "source" → "source_path")
+        assert all(c.metadata.model_extra["source_path"] == source_path for c in chunks)
 
-        # Index 단계
-        result = simulate_indexing(f"DOC-{title}", len(chunks))
-        assert result.chunk_count == expected_chunk_count
+        # Index 단계 — 실제 index_documents 관통 (임베딩·DB는 모킹)
+        result = index_documents(chunks, collection="test_collection")
         assert result.status == expected_status
+        assert result.chunk_count == len(chunks)
+        assert result.document_id == chunks[0].document_id
 
+    def test_empty_graph_yields_failed_indexing(self, mock_db_pool, mock_embedding):
+        """content 노드가 없는 그래프 → 청크 0개 → 인덱싱 failed (실모듈 관통)."""
+        chunks = chunk_graph(
+            OntologyGraph(),
+            document_id="DOC-EMPTY",
+            token_counter=_word_count,
+        )
+        assert chunks == []
+
+        result = index_documents(chunks, collection="test_collection")
+        assert result.chunk_count == 0
+        assert result.status == "failed"
 
     @pytest.mark.parametrize(
-        "chunk_count, force_status",
+        "scenario, expected_status, expected_count",
         [
-            (25, "success"),
-            (10, "partial"),
-            (0, "failed"),
+            ("success", "success", 3),    # 모든 배치 성공
+            ("partial", "partial", 2),    # 중간 배치 1개만 DB 오류 → 부분 커밋
+            ("failed", "failed", 0),      # 빈 입력 → 적재 대상 없음
         ],
-        ids=["full_success", "partial_failure", "complete_failure"]
+        ids=["full_success", "partial_failure", "complete_failure"],
     )
-    def test_indexing_status_by_result(self, chunk_count, force_status):
-        """인덱싱 결과의 status가 청크 수와 처리 상태에 따라 올바르게 설정되는지 검증"""
+    def test_indexing_status_by_result(
+        self, scenario, expected_status, expected_count, mock_db_pool, mock_embedding
+    ):
+        """실제 index_documents의 success / partial / failed 3상태를 실동작 기반으로 검증.
 
-        result = simulate_indexing("DOC-TEST", chunk_count, force_status=force_status)
-        assert result.status == force_status
-        assert result.chunk_count == chunk_count
+        partial은 단위 테스트가 토큰 한도 스킵 케이스를 이미 검증하므로, 여기서는
+        배치 경계 케이스(배치 단위 부분 커밋) 1건으로 충분하다.
+        """
+        if scenario == "failed":
+            # 빈 입력은 DB 접근 없이 즉시 failed
+            result = index_documents([], collection="test_collection")
+            assert result.status == expected_status
+            assert result.chunk_count == expected_count
+            return
 
-        # partial이면 일부만 성공했으므로 chunk_count > 0
-        if force_status == "partial":
-            assert result.chunk_count > 0
-        # failed이면 인덱싱된 청크가 없어야 함
-        if force_status == "failed":
-            assert result.chunk_count == 0
+        chunks = chunk_graph(_load_graph("gaap-ch1"), token_counter=_word_count)
+        assert len(chunks) == 3
 
+        if scenario == "partial":
+            # 배치 크기 1 → 3개 배치 중 두 번째 배치만 DB 오류로 실패시킨다.
+            # 부분 커밋 정책상 1·3번째 배치는 유지되어 chunk_count=2, status=partial.
+            mock_db_pool.executemany.side_effect = [None, Exception("일시 장애"), None]
+            with patch("src.db.vector_store.BATCH_SIZE", 1):
+                result = index_documents(chunks, collection="test_collection")
+        else:
+            result = index_documents(chunks, collection="test_collection")
 
-    def test_metadata_propagation_through_pipeline(self):
-        """문서 메타데이터(source, standard, page_count)가 파이프라인 전체를 관통하여
-        최종 청크까지 보존되는지 검증"""
+        assert result.status == expected_status
+        assert result.chunk_count == expected_count
 
-        metadata = {
-            "source": "data/K-GAAP_제10장.pdf",
-            "standard": "K-GAAP",
-            "page_count": 42
-        }
-        doc = make_parsed_document(
-            title="메타데이터_테스트",
-            sections=["10.1 유형자산 정의", "10.2 감가상각"],
-            metadata=metadata
+    def test_metadata_propagation_through_pipeline(self, mock_db_pool, mock_embedding):
+        """문서 메타데이터(source_path)와 온톨로지 식별자(standard_type·chapter)가  파이프라인 전체를 관통하여 최종 청크까지 보존되는지 검증."""
+
+        source_path = "data/raw/K-GAAP_제6장.pdf"
+        with patch_parser(source_path):
+            parsed = DoclingParser().parse(source_path)
+
+        graph = _load_graph("gaap-ch6")
+        chunks = chunk_graph(
+            graph,
+            source_path=parsed.metadata["source_path"],
+            token_counter=_word_count,
         )
 
-        chunks = simulate_chunking(doc)
+        # 모든 청크에 원본 source_path 보존
+        assert all(c.metadata.model_extra["source_path"] == source_path for c in chunks)
+        # standard_type·chapter는 Standard 노드 기준으로 전 청크에 전파
+        assert all(c.metadata.standard_type == "GAAP" for c in chunks)
+        assert all(c.metadata.chapter == "6" for c in chunks)
+        # 같은 문서의 청크는 동일한 document_id (Standard 노드 id 기준)
+        assert {c.document_id for c in chunks} == {"gaap-ch6"}
 
-        # 모든 청크에 원본 메타데이터의 source가 보존
-        for chunk in chunks:
-            assert chunk.metadata.model_extra["source"] == metadata["source"]   # metadata.model_extra.source 명시 필드 검증
 
-        # document_id가 일관되게 부여
-        doc_ids = {chunk.document_id for chunk in chunks}
-        assert len(doc_ids) == 1  # 같은 문서의 청크는 동일한 document_id
+# ── 헬퍼 ──
+
+
+@contextmanager
+def patch_parser(source_path: str):
+    """DoclingParser.parse를 모킹해 ParsedDocument를 반환한다.
+
+    parser 실제 스펙(`src/parse/parser.py`)대로 metadata={"source_path": ...}를 싣는다.
+    """
+    parsed = ParsedDocument(
+        title=Path(source_path).stem,
+        text="(parsing mocked)",
+        tables=[],
+        metadata={"source_path": source_path},
+    )
+    with patch.object(DoclingParser, "parse", return_value=parsed):
+        yield
