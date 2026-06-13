@@ -34,11 +34,11 @@
 - 문단 번호(6.4, 6.5, ...)는 Subsection의 속성으로 저장 — 별도 노드 아님
 - 적용사례 텍스트는 해당 Subsection의 `content` 안에 포함, 별도 노드 없음
 
-### 개념 노드 미포함
+### 개념 노드 미포함 (현 단계 확정)
 
-AccountingConcept 같은 개념 노드는 포함하지 않는다.
+AccountingConcept 같은 개념 노드는 **현 단계 미포함으로 확정**한다. 운영 후 §8의 트리거 조건을 충족하는 경우에 한해 단계적 도입을 검토하는 **미래 옵션**으로 남겨둔다.
 
-**이유:** 주 질의 유형(사례 제시 → 회계처리 방법)은 벡터 검색으로 관련 Subsection을 찾고, 그래프로 참조/예외/조건을 탐색하는 구조로 충분히 처리된다. 개념 노드는 "공정가치 측정이 필요한 전체 경우" 같은 개념 중심 탐색에 유리하지만, 이 시스템의 주 사용 패턴과 거리가 있다. 필요 시 운영 중 추가한다.
+**이유:** 주 질의 유형(사례 제시 → 회계처리 방법)은 벡터 검색으로 관련 Subsection을 찾고, 그래프로 참조/예외/조건을 탐색하는 구조로 충분히 처리된다. 개념 노드는 "공정가치 측정이 필요한 전체 경우" 같은 개념 중심 탐색에 유리하지만, 이 시스템의 주 사용 패턴과 거리가 있다. 도입 여부와 트리거 조건은 §8에서 다룬다.
 
 ### 예시 텍스트 처리
 
@@ -56,7 +56,7 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 |------|------|------|
 | `id` | string | 고유 식별자. 예: `gaap-ch6`, `kifrs-1116` |
 | `name` | string | 기준서 이름. 예: "제6장 금융자산·금융부채" |
-| `type` | enum | `GAAP` \| `KIFRS` |
+| `standard_type` | enum | `GAAP` \| `KIFRS` |
 | `chapter` | string | 장 번호 또는 기준서 번호. 예: `6`, `1116`. 마크다운 헤딩(`## 제N장`)에서 자동 추출 |
 
 ### Section
@@ -81,8 +81,9 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 | `title` | string | 소제목. 예: "금융상품의 최초인식" |
 | `content` | string | 전체 텍스트 (문단 내 예시 포함) |
 | `paragraphs` | string[] | 포함된 문단 번호 목록. 예: `["6.4", "6.4의2"]` |
-| `unresolved_refs` | string[] | 연결하지 못한 참조 원문. 예: `["제8장 문단 8.2"]` |
 | `order` | int | Section 내 순서 |
+
+> 미해소 참조(연결하지 못한 참조 원문)는 더 이상 Subsection 속성으로 보관하지 않는다. `OntologyEdge.unresolved_target`으로 관리한다(§4 참조).
 
 ---
 
@@ -99,13 +100,15 @@ AccountingConcept 같은 개념 노드는 포함하지 않는다.
 
 ### REFERENCES
 
-조항 간 상호참조. 미연결 참조는 출발 노드의 `unresolved_refs` 속성에 기록한다.
+조항 간 상호참조. 미연결 참조는 엣지를 `to_id` 없이 생성하고 출발 노드가 아닌 엣지의 `unresolved_target` 속성에 원문을 기록한다.
 
 | 항목 | 내용 |
 |------|------|
 | From → To | Subsection \| Section → Standard \| Section \| Subsection |
 | 속성 | `paragraph` (string): 참조 출처 하위 항목 번호. 예: `"6.14⑵㈏"` |
+| 속성 | `to_paragraph` (string): 대상 Subsection 내 가리키는 구체적 문단 번호. resolver가 추출. 예: `"6.4"`, `"6.A13"`, `"실6.142"` (REFERENCES·EXCLUDES·HAS_CONDITION 공통) |
 | 속성 | `source_text` (string): 참조가 등장한 원문 문장 |
+| 속성 | `unresolved_target` (string): `to_id`가 빈 경우 LLM이 반환한 원문 참조 텍스트. 예: `"제8장 문단 8.2"`. resolver가 노드 ID 변환에 성공하면 `to_id`를 채우고 이 필드는 비운다 |
 
 하나의 노드에서 여러 엣지가 나올 수 있으며, `paragraph` 속성으로 어느 하위 항목(⑴⑵㈎㈏ 등)에서 발생한 참조인지 구분한다.
 
@@ -167,6 +170,16 @@ REFERENCES와 마찬가지로 하나의 Subsection에서 여러 EXCLUDES 엣지�
 - O: "다만, 다음에 해당하는 경우에는 [다른 절]을 적용한다"
 - X: "다음 요건을 모두 충족하는 경우 ⑴... ⑵... ⑶..." (조건 나열 → content 텍스트로 처리)
 
+### IS_DEFAULT_FOR
+
+이 소절이 다른 절·장의 보충원칙(fallback)임을 선언하는 관계. "제N절~제M절에서 정하지 않은 사항은 이 절에서 적용한다"처럼 이 소절이 다른 조항의 빈틈을 메워주는 경우에 사용한다. REFERENCES와 방향이 반대로, 출발 노드가 보충원칙을 제공하는 소절이고 도착 노드가 그 보충을 받는 대상 절·장이다.
+
+| 항목 | 내용 |
+|------|------|
+| From → To | Subsection → Section \| Standard \| Subsection |
+| 속성 | `paragraph` (string): 선언이 등장한 하위 항목 번호 |
+| 속성 | `source_text` (string): 해당 원문 문장 |
+
 ---
 
 ## 5. 추출 전략
@@ -188,18 +201,18 @@ REFERENCES와 마찬가지로 하나의 Subsection에서 여러 EXCLUDES 엣지�
 | `한하여` | 6.56 |
 
 **LLM 판별 항목:**
-- 엣지 타입: REFERENCES / EXCLUDES / HAS_CONDITION / 해당 없음
+- 엣지 타입: REFERENCES / EXCLUDES / HAS_CONDITION / IS_DEFAULT_FOR / 해당 없음
 - 대상 노드: 어느 Standard / Section / Subsection을 가리키는가
 - 자기 subsection 내 단순 언급이면 엣지 생성하지 않음
 - EXCLUDES이면 재포함(include[]) 항목이 있는가
-- REFERENCES 대상이 그래프에 없으면 `unresolved_refs`에 기록
+- REFERENCES 대상이 그래프에 없으면 엣지의 `unresolved_target`에 원문 기록
 
 ### 미연결 참조 처리
 
 REFERENCES 대상이 그래프에 아직 없는 경우:
-1. 엣지를 만들지 않는다
-2. 출발 Subsection의 `unresolved_refs` 배열에 원문 참조 텍스트를 기록
-3. 전체 인제스트 완료 후 일괄 재처리로 해소
+1. 엣지를 `to_id` 없이 생성한다
+2. 엣지의 `unresolved_target`에 원문 참조 텍스트를 기록
+3. 전체 인제스트 완료 후 resolver가 일괄 재처리로 `to_id`를 채워 해소
 
 ---
 
@@ -315,5 +328,6 @@ eval에서 "title이 명확히 매칭되는 쿼리인데 검색 실패" 패턴�
 | 2026-04-10 | 초기 작성 |
 | 2026-04-10 | 추출 전략 개정: 정규식은 후보 탐지만, LLM이 자유 판별. 탐지 패턴 단순화 및 실문서 예시 추가. 자기참조 판별 기준 명확화 |
 | 2026-04-11 | Standard.chapter를 외부 파라미터 대신 마크다운 헤딩에서 자동 추출로 변경 |
+| 2026-05-12 | Subsection.unresolved_refs 삭제(엣지 기반 unresolved_target으로 관리 전환), OntologyEdge.to_paragraph 추가, IS_DEFAULT_FOR 엣지 타입 추가, Standard.type → standard_type 정정 |
 | 2026-05-25 | §7 임베딩 전략 추가 (title prepending 기본 + 반복·dual embedding 옵션), §8 도메인 개념 노드 조건부 도입 방안 추가 |
 | 2026-06-06 | §6 질의 처리 흐름에 청크→노드 진입점 매핑 단계(chunks_to_node_ids) 추가, 5단계로 재정렬 (#72) |
