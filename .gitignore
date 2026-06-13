@@ -42,3 +42,8 @@ Thumbs.db
 
 # 개인 학습 노트
 *개인용*.md
+
+# 벤치마크 측정 산출물 — 실행 시마다 누적되므로 추적 제외.
+# 비회귀 기준값 tests/integration/benchmark_floor.json 은 추적한다.
+docs/measurements/benchmark_result_*.md
+docs/measurements/baseline_*.json
