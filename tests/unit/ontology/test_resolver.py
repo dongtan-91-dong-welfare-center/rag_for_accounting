@@ -1,3 +1,4 @@
+import pytest
 from src.db.ontology.models import OntologyGraph, OntologyNode, OntologyEdge
 from src.db.ontology.resolver import build_lookup, resolve_edges, _expand_range_target
 
@@ -12,22 +13,26 @@ def _make_graph() -> OntologyGraph:
     ])
 
 
+@pytest.mark.unit
 def test_lookup_chapter():
     lookup = build_lookup(_make_graph())
     assert lookup.get("제6장") == "gaap-ch6"
 
 
+@pytest.mark.unit
 def test_lookup_section():
     lookup = build_lookup(_make_graph())
     assert lookup.get("제2절") == "gaap-ch6-s2"
 
 
+@pytest.mark.unit
 def test_lookup_paragraph():
     lookup = build_lookup(_make_graph())
     assert lookup.get("6.4") == "gaap-ch6-s1-최초인식"
     assert lookup.get("문단6.4") == "gaap-ch6-s1-최초인식"
 
 
+@pytest.mark.unit
 def test_resolve_success():
     graph = _make_graph()
     graph.edges = [OntologyEdge(
@@ -39,6 +44,7 @@ def test_resolve_success():
     assert resolved.edges[0].unresolved_target == ""
 
 
+@pytest.mark.unit
 def test_resolve_section_does_not_set_to_paragraph():
     """절로 해소된 엣지는 norm에 문단 패턴이 섞여 있어도 to_paragraph를 비워둔다.
 
@@ -55,6 +61,7 @@ def test_resolve_section_does_not_set_to_paragraph():
     assert resolved.edges[0].to_paragraph == ""
 
 
+@pytest.mark.unit
 def test_resolve_subsection_sets_to_paragraph():
     """Subsection으로 해소된 엣지는 to_paragraph를 정상적으로 채운다."""
     graph = _make_graph()
@@ -67,6 +74,7 @@ def test_resolve_subsection_sets_to_paragraph():
     assert resolved.edges[0].to_paragraph == "6.4"
 
 
+@pytest.mark.unit
 def test_resolve_failure_records_unresolved():
     graph = _make_graph()
     graph.edges = [OntologyEdge(
@@ -82,18 +90,21 @@ def test_resolve_failure_records_unresolved():
 # start/end의 prefix(실·결·사례)가 다르면 확장하지 않고 None을 반환해
 # 존재하지 않는 문단 번호(예: "실6.67")가 만들어지는 것을 막는다.
 
+@pytest.mark.unit
 def test_expand_range_same_prefix_expands_inclusive():
     # 같은 종류(본문)의 연속 범위는 끝 번호까지 포함해 확장한다.
     paras = ["6.8의2", "6.9", "6.10", "6.11"]
     assert _expand_range_target("문단 6.8의2~6.11", paras) == paras
 
 
+@pytest.mark.unit
 def test_expand_range_practice_prefix_expands():
     # 실무지침(실) prefix가 양쪽 모두 일치하면 정상 확장한다.
     paras = ["실6.66", "실6.67"]
     assert _expand_range_target("문단 실6.66~실6.67", paras) == paras
 
 
+@pytest.mark.unit
 def test_expand_range_prefix_mismatch_returns_none():
     # 시작은 "실6.66", 끝은 prefix 없는 "6.67"인 경우.
     # start prefix를 그대로 끌어다 "실6.67"을 만들면 안 되므로 None을 반환한다.
@@ -101,6 +112,7 @@ def test_expand_range_prefix_mismatch_returns_none():
     assert _expand_range_target("문단 실6.66~6.67", paras) is None
 
 
+@pytest.mark.unit
 def test_resolve_range_prefix_mismatch_keeps_unresolved():
     # _expand_range_target가 None이면 resolver는 원문을 그대로 남겨 수동 확인이 가능하게 하고
     # 잘못된 부분의 매핑 엣지를 만들지 않는다.
@@ -120,6 +132,7 @@ def test_resolve_range_prefix_mismatch_keeps_unresolved():
     assert resolved.edges[0].unresolved_target == "문단 실6.66~6.67"
 
 
+@pytest.mark.unit
 def test_resolve_range_splits_into_multiple_edges():
     # 동일 prefix 범위는 paragraph마다 개별 REFERENCES 엣지로 분리된다.
     graph = OntologyGraph(nodes=[

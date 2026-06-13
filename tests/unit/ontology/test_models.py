@@ -1,6 +1,8 @@
+import pytest
 from src.db.ontology.models import OntologyNode, OntologyEdge, OntologyGraph
 
 
+@pytest.mark.unit
 def test_standard_node():
     node = OntologyNode(
         id="gaap-ch6",
@@ -13,6 +15,7 @@ def test_standard_node():
     assert node.chapter == "6"
 
 
+@pytest.mark.unit
 def test_subsection_node_defaults():
     node = OntologyNode(
         id="gaap-ch6-s1-최초인식",
@@ -23,6 +26,7 @@ def test_subsection_node_defaults():
     assert node.paragraphs == []
 
 
+@pytest.mark.unit
 def test_references_edge():
     edge = OntologyEdge(
         from_id="gaap-ch6-s1-후속측정",
@@ -35,6 +39,7 @@ def test_references_edge():
     assert edge.include == []
 
 
+@pytest.mark.unit
 def test_excludes_edge_with_include():
     edge = OntologyEdge(
         from_id="gaap-ch6-적용범위",
@@ -46,6 +51,7 @@ def test_excludes_edge_with_include():
     assert len(edge.include) == 2
 
 
+@pytest.mark.unit
 def test_unresolved_edge():
     edge = OntologyEdge(
         from_id="gaap-ch6-s1-최초인식",
@@ -57,6 +63,7 @@ def test_unresolved_edge():
     assert edge.unresolved_target == "제8장 문단 8.2"
 
 
+@pytest.mark.unit
 def test_is_default_for_edge():
     edge = OntologyEdge(
         from_id="gaap-ch6-s1-공통원칙",
@@ -67,6 +74,7 @@ def test_is_default_for_edge():
     assert edge.edge_type == "IS_DEFAULT_FOR"
 
 
+@pytest.mark.unit
 def test_ontology_graph_defaults():
     graph = OntologyGraph()
     assert graph.nodes == []

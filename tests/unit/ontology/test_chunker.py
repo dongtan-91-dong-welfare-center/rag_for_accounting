@@ -75,12 +75,14 @@ def _sample_graph() -> OntologyGraph:
     return graph
 
 
+@pytest.mark.unit
 def test_returns_retrieved_chunks():
     """결과물이 RetrievedChunk 타입인지 확인"""
     chunks = chunk_graph(_sample_graph(), token_counter=_word_count)
     assert all(isinstance(c, RetrievedChunk) for c in chunks)
 
 
+@pytest.mark.unit
 def test_only_content_nodes_become_chunks():
     """content 있는 노드만 청크가 되는지 확인"""
     # content 있는 노드: Section 1 + Subsection 2 = 3개. Standard·빈 Section은 제외.
@@ -90,6 +92,7 @@ def test_only_content_nodes_become_chunks():
     assert node_ids == {"gaap-ch6-s1", "gaap-ch6-s1-최초인식", "gaap-ch6-s2-측정"}
 
 
+@pytest.mark.unit
 def test_no_orphan_chunks():
     """모든 청크가 ontology_node_id를 보유하는지 확인 (고아 0건)"""
     chunks = chunk_graph(_sample_graph(), token_counter=_word_count)
@@ -97,12 +100,14 @@ def test_no_orphan_chunks():
     assert all(c.metadata.ontology_node_id for c in chunks)
 
 
+@pytest.mark.unit
 def test_score_is_zero():
     """모든 청크의 score가 0.0인지 확인"""
     chunks = chunk_graph(_sample_graph(), token_counter=_word_count)
     assert all(c.score == 0.0 for c in chunks)
 
 
+@pytest.mark.unit
 def test_unsplit_chunk_id_equals_node_id():
     """분할되지 않은 노드는 chunk_id == node.id (노드 ↔ 청크 1:1)인지 확인"""
     chunks = chunk_graph(_sample_graph(), token_counter=_word_count)
@@ -110,18 +115,21 @@ def test_unsplit_chunk_id_equals_node_id():
         assert c.chunk_id == c.metadata.ontology_node_id
 
 
+@pytest.mark.unit
 def test_document_id_defaults_to_standard_id():
     """document_id가 없으면 Standard 노드의 id를 사용"""
     chunks = chunk_graph(_sample_graph(), token_counter=_word_count)
     assert all(c.document_id == "gaap-ch6" for c in chunks)
 
 
+@pytest.mark.unit
 def test_document_id_override():
     """document_id를 지정하면 해당 id를 사용"""
     chunks = chunk_graph(_sample_graph(), document_id="custom-doc", token_counter=_word_count)
     assert all(c.document_id == "custom-doc" for c in chunks)
 
 
+@pytest.mark.unit
 def test_metadata_propagation():
     """metadata 전파 테스트 - standard_type·chapter·source_path"""
     chunks = chunk_graph(
@@ -137,17 +145,20 @@ def test_metadata_propagation():
     assert sample.metadata.model_extra.get("source_path") == "data/회계_sample.pdf"
 
 
+@pytest.mark.unit
 def test_source_path_omitted_when_not_given():
     """source_path가 주어지지 않으면 extra에 포함되지 않음"""
     chunks = chunk_graph(_sample_graph(), token_counter=_word_count)
     assert "source_path" not in (chunks[0].metadata.model_extra or {})
 
 
+@pytest.mark.unit
 def test_empty_graph_returns_empty_list():
     """빈 그래프는 빈 리스트를 반환"""
     assert chunk_graph(OntologyGraph(), token_counter=_word_count) == []
 
 
+@pytest.mark.unit
 def test_graph_without_content_nodes_returns_empty_list():
     """content 노드가 없는 그래프는 빈 리스트를 반환"""
     # Standard 노드만 있고 content 노드가 없는 경우 → 빈 리스트 (에러 아님).
@@ -158,6 +169,7 @@ def test_graph_without_content_nodes_returns_empty_list():
     assert chunk_graph(graph, token_counter=_word_count) == []
 
 
+@pytest.mark.unit
 def test_missing_standard_raises_when_document_id_absent():
     """content 노드는 있는데 Standard도 없고 document_id도 안 주면 식별자를 못 정한다."""
     graph = OntologyGraph()
@@ -168,6 +180,7 @@ def test_missing_standard_raises_when_document_id_absent():
         chunk_graph(graph, token_counter=_word_count)
 
 
+@pytest.mark.unit
 def test_missing_standard_ok_when_document_id_given():
     """Standard가 없어도 document_id가 있으면 chunk_graph가 정상 동작"""
     graph = OntologyGraph()
@@ -182,6 +195,7 @@ def test_missing_standard_ok_when_document_id_given():
     assert chunks[0].metadata.chapter is None
 
 
+@pytest.mark.unit
 def test_oversized_node_is_split_by_paragraph():
     """노드가 토큰 한도를 초과하면 문단 단위로 분할되는지 확인"""
     # max_tokens=5(단어 5개) 한도. 4문단 × 단어 4개씩 = 분할 발생.
@@ -215,6 +229,7 @@ def test_oversized_node_is_split_by_paragraph():
     assert all(_word_count(c.content) <= 5 for c in chunks)
 
 
+@pytest.mark.unit
 def test_split_preserves_no_data_loss():
     """분할 후에도 전체 단어가 보존되어야 한다 (손실 없음)"""
     graph = OntologyGraph()
@@ -230,6 +245,7 @@ def test_split_preserves_no_data_loss():
     assert recombined == words
 
 
+@pytest.mark.unit
 def test_hard_split_when_single_unit_exceeds_limit():
     """줄·문장으로 못 나누는 한 덩어리(공백 없는 긴 문자열)는 문자 단위로 강제 분할"""
     graph = OntologyGraph()
@@ -248,6 +264,7 @@ def test_hard_split_when_single_unit_exceeds_limit():
     assert "".join(c.content for c in chunks) == long_text
 
 
+@pytest.mark.unit
 def test_chunk_id_determinism():
     """동일 입력 재실행 → 동일 chunk_id (upsert 멱등성의 전제) 확인"""
     first = chunk_graph(_sample_graph(), token_counter=_word_count)
