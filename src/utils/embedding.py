@@ -20,8 +20,7 @@ _lock = threading.Lock()    # 멀티스레드 환경에서 모델 이중 로드 
 def _get_model():
     """SentenceTransformer 모델을 lazy 싱글톤으로 반환한다.
 
-    - 지연 임포트: sentence_transformers는 torch를 끌고 오므로 모듈 import 시점이 아닌
-      최초 임베딩 시점에 로드하여, DB 전용 경로(예: sparse 검색)의 기동 비용을 막는다.
+    - 지연 임포트: sentence_transformers는 torch를 끌고 오므로 모듈 import 시점이 아닌 최초 임베딩 시점에 로드하여, DB 전용 경로(예: sparse 검색)의 기동 비용을 막는다.
     - _lock으로 보호해 동시 호출 시 모델이 두 번 로드되지 않도록 한다.
     """
     global _model
