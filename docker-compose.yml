@@ -1,9 +1,8 @@
 services:
   database:
     # [데이터베이스 맞춤형(커스텀) 빌드]
-    # 공식 이미지를 바로 사용하지 않고 db.Dockerfile을 참조하여,
-      # 공식 이미지는 그래프 DB(AGE)나 벡터 검색(pgvector) 기능이 포함되어 있지 않다.
-    # pgvector(벡터 검색)와 apache-age(그래프 DB) 확장이 포함된 전용 커스텀 DB 컨테이너 이미지를 즉석에서 빌드합니다.
+    # 공식 이미지를 바로 사용하지 않고 db.Dockerfile을 참조하여, 공식 이미지는 벡터 검색(pgvector) 기능이 포함되어 있지 않다.
+    # pgvector(벡터 검색) 확장이 포함된 전용 커스텀 DB 컨테이너 이미지를 즉석에서 빌드합니다.
     build:
       context: .
       dockerfile: db.Dockerfile
@@ -23,11 +22,6 @@ services:
       # 컨테이너가 재시작되거나 파괴되어도 데이터베이스 내부의 테이블, 인덱스 등의 실제 데이터가 유실되지 않도록
       # 로컬에 이름 있는 볼륨(postgres_data)으로 연결하여 영구 보존합니다.
       - postgres_data:/var/lib/postgresql/data
-      
-    # [Apache AGE 메모리 강제 로딩]
-    # Apache AGE의 그래프 통신 및 연산 기능을 활성화하기 위해, DB 프로세스가 기동할 때 postgresql.conf 설정을 오버라이드 합니다.
-    # '-c shared_preload_libraries=age' 옵션을 통해 제일 먼저 메모리에 age 관련 로직을 할당하도록 강제합니다.
-    command: ["postgres", "-c", "shared_preload_libraries=age"]
     restart: unless-stopped
 
   app:
@@ -41,7 +35,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-accounting_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounting_password}
       POSTGRES_DB: ${POSTGRES_DB:-accounting_db}
-      AGE_GRAPH_NAME: ${AGE_GRAPH_NAME:-accounting_graph}
     volumes:
       # [실시간 코드 동기화]
       # 로컬 PC의 현재 디렉토리 코드를 컨테이너의 /app 시스템으로 실시간 마운트시켜 놓습니다.
