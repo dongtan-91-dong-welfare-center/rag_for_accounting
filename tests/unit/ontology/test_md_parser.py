@@ -1,3 +1,4 @@
+import pytest
 from src.db.ontology.md_parser import parse_markdown
 from src.db.ontology.models import OntologyGraph
 
@@ -22,11 +23,13 @@ SAMPLE_MD = """# 제 6 장 금융자산 · 금융부채
 """
 
 
+@pytest.mark.unit
 def test_parse_returns_graph():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     assert isinstance(graph, OntologyGraph)
 
 
+@pytest.mark.unit
 def test_standard_node_created():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     standards = [n for n in graph.nodes if n.node_type == "Standard"]
@@ -35,12 +38,14 @@ def test_standard_node_created():
     assert "금융자산" in standards[0].name
 
 
+@pytest.mark.unit
 def test_standard_chapter_extracted_from_markdown():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     standard = next(n for n in graph.nodes if n.node_type == "Standard")
     assert standard.chapter == "6"
 
 
+@pytest.mark.unit
 def test_section_node_created():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     sections = [n for n in graph.nodes if n.node_type == "Section"]
@@ -48,6 +53,7 @@ def test_section_node_created():
     assert "공통사항" in sections[0].title
 
 
+@pytest.mark.unit
 def test_subsection_nodes_created():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     subsections = [n for n in graph.nodes if n.node_type == "Subsection"]
@@ -56,18 +62,21 @@ def test_subsection_nodes_created():
     assert "금융상품의 최초인식" in titles
 
 
+@pytest.mark.unit
 def test_subsection_paragraphs():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     sub = next(n for n in graph.nodes if n.node_type == "Subsection" and n.title == "적용범위")
     assert "6.2" in sub.paragraphs
 
 
+@pytest.mark.unit
 def test_subsection_content_not_empty():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     sub = next(n for n in graph.nodes if n.node_type == "Subsection" and n.title == "금융상품의 최초인식")
     assert "6.4" in sub.content
 
 
+@pytest.mark.unit
 def test_contains_edges_exist():
     graph = parse_markdown(SAMPLE_MD, standard_id="gaap-ch6", standard_type="GAAP")
     contains = [e for e in graph.edges if e.edge_type == "CONTAINS"]

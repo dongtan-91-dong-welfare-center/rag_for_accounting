@@ -1,4 +1,5 @@
 """LLM 호출을 모킹하여 파이프라인 구조를 검증한다."""
+import pytest
 from unittest.mock import patch
 from src.db.ontology.builder import build_graph
 from src.db.ontology.edge_extractor import EdgeCandidate
@@ -15,6 +16,7 @@ def _mock_extract(subsection_id, title, content, candidates):
     return []
 
 
+@pytest.mark.system
 def test_graph_has_all_node_types():
     with patch("src.db.ontology.builder.extract_edges", side_effect=_mock_extract):
         graph = build_graph(MD_PATH, "gaap-ch6", "GAAP")
@@ -24,12 +26,14 @@ def test_graph_has_all_node_types():
     assert "Subsection" in types
 
 
+@pytest.mark.system
 def test_graph_has_contains_edges():
     with patch("src.db.ontology.builder.extract_edges", side_effect=_mock_extract):
         graph = build_graph(MD_PATH, "gaap-ch6", "GAAP")
     assert any(e.edge_type == "CONTAINS" for e in graph.edges)
 
 
+@pytest.mark.system
 def test_save_reload(tmp_path):
     from src.db.ontology.builder import save_graph
     from src.db.ontology.models import OntologyGraph
