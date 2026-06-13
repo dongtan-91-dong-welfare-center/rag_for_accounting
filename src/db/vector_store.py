@@ -10,6 +10,8 @@
 #     (전체 롤백 대신 부분 커밋을 택한 이유: 수천 청크 인덱싱 중 일시 장애로
 #      전부 버리는 것보다 partial 상태를 드러내고 재시도하는 쪽이 운영상 단순하다)
 
+import ctypes
+import gc
 import json
 
 from psycopg import errors, sql
@@ -66,6 +68,23 @@ def _ensure_collection(collection: str) -> None:
     except Exception as e:
         logger.error(f"컬렉션 생성 실패: collection={collection}, {e}")
         raise DatabaseQueryError(f"컬렉션 생성 실패: {e}", node="index")
+
+
+def _release_heap() -> None:
+    """배치 처리 후 해제된 힙을 OS에 돌려줘 장시간 적재의 RSS 누적을 줄인다.
+
+    torch 텐서는 refcount로 즉시 해제되지만 glibc malloc은 free된 영역을 아레나에 보유해 RSS가 계단식으로 증가한다(컨테이너 OOM의 주 원인).
+    gc 수집 후 malloc_trim(0)으로 빈 영역을 커널에 반환한다.
+    malloc_trim은 Linux glibc 전용이라 그 외 플랫폼(예: macOS, musl)에서는 조용히 건너뛴다.
+
+    NOTE: 누적 메모리의 근본 차단은 워커 재기동(프로세스 단위 적재 분할)이며, 더 큰 변경이라 별도 이슈로 분리한다.
+    이 함수는 인프로세스 범위의 완화책이다.
+    """
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
 
 
 def _upsert_batch(collection: str, batch: list[RetrievedChunk], vectors: list[list[float]]) -> None:
@@ -155,6 +174,9 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
             # CM-002(임베딩)·SE-102(DB) 등 배치 단위 실패 — 부분 커밋 정책에 따라 다음 배치 계속
             logger.error(f"[{e.error_type}] 배치 인덱싱 실패 (chunks[{start}:{start + len(batch)}]): {e.message}")
             continue
+        finally:
+            # 배치마다 해제 힙을 OS에 반환해 누적 RSS 증가를 완화한다
+            _release_heap()
 
     if success_count == len(chunks):
         status = "success"

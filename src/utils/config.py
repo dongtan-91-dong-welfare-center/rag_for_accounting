@@ -1,3 +1,4 @@
+import os
 from datetime import timezone, timedelta
 
 # 파이프라인 전역 설정값
@@ -28,6 +29,17 @@ SEARCH_TIMEOUT_SECONDS: int = 5
 EMBEDDING_MODEL: str = "nlpai-lab/KURE-v1"
 EMBEDDING_DIM: int = 1024   # KURE-v1(bge-m3 기반) 벡터 차원 수 → pgvector vector(1024)
 EMBEDDING_MAX_TOKENS: int = 8192    # KURE-v1 컨텍스트 한도 — 초과 청크는 IX-201로 스킵(부분 커밋)
+
+# 임베딩 실행 자원 설정 — 대량 적재 시 CPU 포화·메모리 누적 OOM 완화용. 모두 env로 override.
+#   - EMBEDDING_DEVICE: "auto"면 _get_model()이 cuda → mps → cpu 순으로 가용 디바이스를 고른다.
+#     Docker on Mac 컨테이너에는 MPS/Metal이 패스스루되지 않아 자동으로 cpu가 된다. 호스트 네이티브
+#     실행 시 mps로 잡혀 CPU 부하를 GPU로 넘긴다. "cpu"/"mps"/"cuda"로 강제 지정도 가능.
+#   - EMBEDDING_NUM_THREADS: torch intra-op 스레드 상한. 0이면 max(1, cpu_count-2)로 자동 산정해 전 코어 점유(오버서브스크립션, 관측된 1000%+ CPU)를 막는다.
+#   - EMBEDDING_ENCODE_BATCH_SIZE: model.encode 미니배치 크기. 작을수록 인코딩 1회 peak 메모리가 준다
+#     (sentence-transformers는 길이순 정렬 후 이 크기로 쪼개 패딩 낭비도 함께 줄인다).
+EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "auto")
+EMBEDDING_NUM_THREADS: int = int(os.getenv("EMBEDDING_NUM_THREADS", "0"))
+EMBEDDING_ENCODE_BATCH_SIZE: int = int(os.getenv("EMBEDDING_ENCODE_BATCH_SIZE", "16"))
 
 # gpt-5.4-mini 컨텍스트 윈도우(400K) 중 컨텍스트 입력에 할당할 안전 한도
 # o200k_base 토크나이저 기준 한국어 ~0.5 토큰/글자 (즉 1 토큰 ≈ 2~3 글자)
