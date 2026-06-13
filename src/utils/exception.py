@@ -1,6 +1,5 @@
 from datetime import datetime
 from typing import Literal
-from pathlib import Path
 
 # src.models.state의 ErrorLog 타입 참조 (타입 힌팅용)
 from src.models.state import ErrorLog
@@ -69,49 +68,25 @@ class LLMAPIConnectionError(AccountingRAGError):
 class DocumentParseError(AccountingRAGError):
     """
     [CM-003] 문서 파일 파싱에 실패했을 때 발생하는 예외입니다.
-    Windows 파일 경로 호환을 위해 pathlib.Path를 사용한 추가 정보를 지원합니다.
+    착지점: src/parse/parser.py DoclingParser.parse() (converter.convert() /
+    export_to_markdown() 실패 변환). raise 사이트 도입 전까지는 미배선 상태.
     """
-    def __init__(self, message: str, node: NodeType, file_path: Path | None = None):
-        msg = f"{message} (File: {file_path})" if file_path else message
-        super().__init__(message=msg, node=node, error_type="CM-003", is_retryable=False)
+    def __init__(self, message: str, node: NodeType):
+        super().__init__(message=message, node=node, error_type="CM-003", is_retryable=False)
 
 
 # ==========================================
 # 2. Parse Exceptions (PS) -> node: "parse"
 # ==========================================
-
-class DocumentNotFoundError(AccountingRAGError):
-    """
-    [PS-001] 지정된 경로에 문서 파일이 존재하지 않을 때 발생하는 예외입니다.
-    """
-    def __init__(self, message: str):
-        super().__init__(message=message, node="parse", error_type="PS-001", is_retryable=False)
-
-class UnsupportedFormatError(AccountingRAGError):
-    """
-    [PS-002] 시스템에서 지원하지 않는 파일 형식일 때 발생하는 예외입니다.
-    """
-    def __init__(self, message: str):
-        super().__init__(message=message, node="parse", error_type="PS-002", is_retryable=False)
+# PS-001(DocumentNotFoundError) / PS-002(UnsupportedFormatError)는 검증 로직
+# 미구현·사용처 0건으로 제거. 파서가 파일 부재/포맷 검증을 실제로 구현하는 시점에 필요한 것만 raise 사이트와 함께 재도입한다(YAGNI).
 
 
 # ==========================================
 # 3. Ontology Exceptions (OT) -> node: "ontology"
 # ==========================================
-
-class CircularReferenceError(AccountingRAGError):
-    """
-    [OT-101] 조항 간의 참조 관계가 순환을 형성했을 때 발생하는 예외입니다.
-    """
-    def __init__(self, message: str):
-        super().__init__(message=message, node="ontology", error_type="OT-101", is_retryable=False)
-
-class DuplicateNodeError(AccountingRAGError):
-    """
-    [OT-102] 동일한 조항 번호가 중복으로 정의되었을 때 발생하는 예외입니다.
-    """
-    def __init__(self, message: str):
-        super().__init__(message=message, node="ontology", error_type="OT-102", is_retryable=False)
+# OT-101(CircularReferenceError, 순환참조) / OT-102(DuplicateNodeError, 중복노드)는 청커에 해당 검증이 없고 사용처 0건이라 #139에서 제거
+# 순환/중복 검증 구현 시 검증 로직과 함께 재정의한다. 실사용은 OT-103뿐이다.
 
 class OntologyParsingError(AccountingRAGError):
     """
