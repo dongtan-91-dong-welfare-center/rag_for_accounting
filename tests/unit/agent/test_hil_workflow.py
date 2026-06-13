@@ -45,7 +45,7 @@ def hil_app():
 
 @pytest.fixture
 def hil_disabled_workflow():
-    """checkpointer 없이 컴파일해 HIL을 비활성화한 단발성 실행 워크플로우 (단위 테스트용, #92).
+    """checkpointer 없이 컴파일해 HIL을 비활성화한 단발성 실행 워크플로우
 
     checkpointer가 없으면 build_workflow가 human_review를 hil_enabled=False로 바인딩하므로
     decompose/stepback 질의도 interrupt 없이 search로 통과한다.
@@ -248,7 +248,7 @@ class TestRunResumeWorkflow:
         assert resumed["final_response"] is not None # 최종 응답 생성 확인
 
 
-# ── HIL 비활성화 경로 (#92): 단위 테스트용 단발성 실행 ──────────────────────────
+# ── HIL 비활성화 경로: 단위 테스트용 단발성 실행 ──────────────────────────
 
 @pytest.mark.unit
 class TestHumanReviewHILDisabled:
