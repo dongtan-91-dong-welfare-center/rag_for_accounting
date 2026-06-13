@@ -20,14 +20,44 @@ uv 사용을 권장합니다.
 uv sync
 ```
 
+### 2. 데이터베이스 기동
+
+pgvector 확장이 포함된 PostgreSQL을 docker-compose로 기동합니다.
+접속 정보는 `.env`(템플릿: `.env.example`)에서 읽습니다.
+
+```bash
+docker compose up -d database
+```
+
 ### 3. 실행
 
-에이전트 워크플로우를 실행합니다.
+진입점 `src/main.py`는 적재(`ingest`)와 질의(`query`) 두 경로를 제공합니다.
 
-<!-- 현재 구현되어 있지 않습니다. -->
+#### 문서 적재 (ingest)
+
+미리 빌드된 온톨로지 그래프(`data/ontology/*.json`)를 청킹·임베딩하여 pgvector에 적재합니다.
+
 ```bash
-uv run python src/main.py
+# data/ontology 전체 장을 적재 (검색기와 동일한 chunks 테이블에 저장)
+uv run python -m src.main ingest
+
+# 컬렉션을 비우고 새로 적재
+uv run python -m src.main ingest --reset
+
+# 단일 PDF에서 파싱 → 온톨로지 빌드 → 청킹·적재까지 전체 경로
+uv run python -m src.main ingest --pdf data/raw/제6장.pdf --standard-id gaap-ch6 --standard-type GAAP
 ```
+
+#### 질의 (query)
+
+적재된 데이터를 기반으로 워크플로(rewrite → search → rerank → evaluate → generate)를 실행해 답변과 인용을 출력합니다.
+
+```bash
+uv run python -m src.main query "금융자산의 최초 인식 시점은?"
+uv run python -m src.main query "리스 회계처리" --standard GAAP
+```
+
+> 컨테이너(`app`) 안에서 실행하려면 `docker compose exec app uv run python -m src.main ...` 형태로 호출합니다.
 
 ## 📂 프로젝트 구조
 
