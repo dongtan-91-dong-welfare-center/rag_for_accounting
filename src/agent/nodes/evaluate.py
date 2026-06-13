@@ -82,7 +82,9 @@ def evaluate_context(state: GraphState) -> dict:
     )
 
     # PydanticAI Agent로 EvaluationResult 직접 파싱
-    evaluator_agent = Agent(f"openai:{OPENAI_MODEL}", output_type=EvaluationResult)
+    # 접두사를 "openai-chat:"으로 고정한다. pydantic-ai v2.0부터 "openai:"는 Responses API로
+    # 해석되도록 바뀌어 DeprecationWarning이 발생하므로, 현행 Chat Completions 동작을 명시적으로 유지한다.
+    evaluator_agent = Agent(f"openai-chat:{OPENAI_MODEL}", output_type=EvaluationResult)
 
     try:
         result = evaluator_agent.run_sync(prompt)
