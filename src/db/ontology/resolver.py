@@ -29,10 +29,9 @@ def _para_prefix(p: str) -> str:
 def _expand_range_target(target: str, paragraphs_in_order: list[str]) -> list[str] | None:
     """범위 표기 unresolved_target을 그래프의 paragraphs에 맞춰 개별 paragraph 번호 목록으로 확장.
 
-    예: "문단 6.8의2~6.11" → ["6.8의2", "6.9", "6.10", "6.11"]
-    같은 종류(본문/실무지침/결론/사례) 안에서만 확장한다. 시작·끝의 prefix가 다르거나
-    그래프에서 찾을 수 없으면 None 반환. None 반환 시 resolver는 unresolved_target을
-    원문 그대로 유지해 수동 확인이 가능하게 한다.
+    예: "문단 6.8의2~6.11" → ["6.8의2", "6.9", "6.10", "6.11"] 같은 종류(본문/실무지침/결론/사례) 안에서만 확장한다. 
+    시작·끝의 prefix가 다르거나 그래프에서 찾을 수 없으면 None 반환
+    None 반환 시 resolver는 unresolved_target을 원문 그대로 유지해 수동 확인이 가능하게 한다.
     """
     cleaned = re.sub(r'^문단\s*', '', target.strip())
     parts = _RANGE_SEP_RE.split(cleaned)
