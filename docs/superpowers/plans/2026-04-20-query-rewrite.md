@@ -38,8 +38,6 @@ classify_and_select (LLM 1회)
 | `src/agent/prompts.py` | Modify | `CLASSIFY_STRATEGY_PROMPT` / `HYDE_PROMPT` / `DECOMPOSE_PROMPT` / `STEPBACK_PROMPT` 추가 |
 | `src/agent/nodes/rewrite.py` | Rewrite | `classify_and_select` + 전략별 LLM 호출 + 예외처리 |
 | `tests/unit/agent/test_rewrite.py` | Create | 단위 테스트 (30 케이스) |
-| `tests/integration/test_rewrite_integration.py` | Create | K-GAAP 실무 질의 18건 통합 테스트 |
-| `docs/superpowers/plans/llm_rewrite.md` | Auto-generated | 통합 테스트 실행 결과 스냅샷 |
 
 ---
 
@@ -257,32 +255,13 @@ uv run pytest tests/unit/agent/test_rewrite.py -v
 
 ---
 
-## Task 6: 통합 테스트 추가
+## Task 6: 통합 테스트 (단위 테스트 모킹으로 전환됨, #58)
 
-- [x] **Step 1: `tests/integration/test_rewrite_integration.py` 작성**
+초기에는 실제 LLM을 호출하는 통합 테스트(`tests/integration/inference/test_scenario_rewrite_llm.py`)로 K-GAAP 실무 질의 18건의 전략 분류와 `search_queries` 생성을 검증하고, 그 실행 결과를 스냅샷 파일로 저장했다.
 
-K-GAAP 실무 질의 18건을 실제 LLM에 입력하여 전략 분류와 `search_queries` 생성을 검증한다. 결과는 `docs/superpowers/plans/llm_rewrite.md`에 스냅샷으로 저장된다.
+이후 #58에서 외부 LLM 의존성과 비결정성을 제거하기 위해 해당 통합 테스트를 삭제하고, LLM 응답을 모킹한 단위 테스트로 전환했다. 검증 항목(회계 분류, 유효 전략, `search_queries[0] == query`, `original` 일치)은 Task 5의 단위 테스트(`tests/unit/agent/test_rewrite.py`)가 동일하게 커버한다.
 
-```bash
-uv run pytest tests/integration/test_rewrite_integration.py -v
-# 1 passed in 54.48s
-```
-
-**검증 항목:**
-- `is_accounting_query is True` — 모든 회계 질의가 회계로 분류됨
-- `strategy in {"hyde", "decompose", "stepback"}` — 유효한 전략만 반환됨
-- `search_queries[0] == query` — 원문이 항상 첫 번째에 위치함
-- `rewritten_query.original == query` — original 필드가 원문과 일치함
-
-**전략 분포 결과 (18건):**
-
-| 전략 | 건수 | 예시 질의 |
-|------|------|-----------|
-| `hyde` | 15 | 일반 K-GAAP 회계처리 원칙 질의 |
-| `stepback` | 2 | 삼성전자 + 특정 날짜 + 금액 포함 질의 |
-| `decompose` | 2 | 복수의 독립적 회계 주제를 동시에 묻는 질의 |
-
-> 상세 실행 결과: [`llm_rewrite.md`](./llm_rewrite.md)
+다만 스냅샷에 담긴 회계사 작성 실무 질의 18건과 전략별 산출물은 레퍼런스로 가치가 있어, 자동 생성 흔적을 다듬어 가이드라인 문서 [`docs/kgaap-query-rewrite-samples.md`](../../kgaap-query-rewrite-samples.md)로 보존했다(#115).
 
 ---
 
@@ -294,3 +273,4 @@ uv run pytest tests/integration/test_rewrite_integration.py -v
 | 2026-04-24 | GraphState 중복 필드(`query_strategy`, `search_queries`) 제거 |
 | 2026-04-25 | `INTENT_CLASSIFY_PROMPT` 제거, `CLASSIFY_STRATEGY_PROMPT`로 통합 |
 | 2026-04-26 | `classify_intent + select_strategy` → `classify_and_select` 단일 호출로 리팩토링 / `_strip_markdown` 헬퍼 추가 / 단위 테스트 30건 작성 / 통합 테스트 추가 |
+| 2026-06-13 | #58 후속 정리(#115) — File Map·Task 6의 stale 참조 갱신, 고아 스냅샷 `llm_rewrite.md`를 가이드라인 문서 `docs/kgaap-query-rewrite-samples.md`로 정리·이동 |
