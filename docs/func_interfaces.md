@@ -29,7 +29,7 @@
 - **입력**: 마크다운 경로 또는 `ParsedDocument`
 - **출력**: `OntologyGraph`(노드 `Standard`/`Section`/`Subsection` + edges) → `RetrievedChunk[]`(score=0.0, metadata.ontology_node_id)
 - **진입**: `build_graph(md_path, standard_id, standard_type)` → `chunk_graph(graph, source_path)`
-- **에러**: OT-101(순환참조), OT-102(중복노드), OT-103(구조파싱실패)
+- **에러**: OT-103(구조파싱실패). OT-101(순환참조)/OT-102(중복노드)는 검증 미구현으로 클래스 제거됨(#139) — 검증 로직 도입 시 재정의.
 
 ## FUNC-003 — 인덱싱 (`src/db/vector_store.py`, `src/utils/embedding.py`)
 - **입력**: `list[RetrievedChunk]`, collection(기본 `chunks`)
@@ -84,9 +84,8 @@
 |---|---|---|---|
 | CM-001 | * | 설정/환경변수 누락 | ✗ |
 | CM-002 | * | LLM API 호출 실패 | ✓ |
-| CM-003 | * | 문서 파싱 실패 | ✗ |
-| PS-001/002 | parse | 파일 없음 / 미지원 포맷 | ✗ |
-| OT-101/102/103 | ontology | 순환참조 / 중복노드 / 구조파싱 | ✗ |
+| CM-003 | * | 문서 파싱 실패 (클래스 존재, 미배선 — 착지점 `DoclingParser.parse`) | ✗ |
+| OT-103 | ontology | 구조파싱실패 | ✗ |
 | SE-101/102/103 | search/index | 타임아웃 / DB / 결과없음 | ✓/✓/✗ |
 | RR-201/202 | rerank | 모델실패 / 임계미달 | ✓/✗ |
 | IX-201 | index | 임베딩 토큰 한도 초과 | ✗ |
@@ -94,3 +93,5 @@
 | GN-401/402 | generate | 응답포맷 / 컨텍스트길이 | ✓/✗ |
 
 > `ErrorLog`(timestamp KST, node, error_type, message)로 `GraphState.error_logs`에 누적.
+>
+> #139에서 제거된 미사용 분류: PS-001(파일 없음)/PS-002(미지원 포맷), OT-101(순환참조)/OT-102(중복노드). 검증 로직을 실제 구현하는 시점에 raise 사이트와 함께 재도입한다.
