@@ -39,6 +39,34 @@ def test_resolve_success():
     assert resolved.edges[0].unresolved_target == ""
 
 
+def test_resolve_section_does_not_set_to_paragraph():
+    """절로 해소된 엣지는 norm에 문단 패턴이 섞여 있어도 to_paragraph를 비워둔다.
+
+    문단 9.9는 어떤 Subsection에도 없으므로 문단 우선(시도2) 매칭이 실패하고
+    절 패턴(시도3)으로 폴백 해소된다. 이때 to_paragraph가 "9.9"로 잘못 채워지면 안 된다.
+    """
+    graph = _make_graph()
+    graph.edges = [OntologyEdge(
+        from_id="gaap-ch6-s1-최초인식", to_id="",
+        edge_type="REFERENCES", unresolved_target="제2절 문단 9.9",
+    )]
+    resolved = resolve_edges(graph)
+    assert resolved.edges[0].to_id == "gaap-ch6-s2"
+    assert resolved.edges[0].to_paragraph == ""
+
+
+def test_resolve_subsection_sets_to_paragraph():
+    """Subsection으로 해소된 엣지는 to_paragraph를 정상적으로 채운다."""
+    graph = _make_graph()
+    graph.edges = [OntologyEdge(
+        from_id="gaap-ch6-s2", to_id="",
+        edge_type="REFERENCES", unresolved_target="문단 6.4",
+    )]
+    resolved = resolve_edges(graph)
+    assert resolved.edges[0].to_id == "gaap-ch6-s1-최초인식"
+    assert resolved.edges[0].to_paragraph == "6.4"
+
+
 def test_resolve_failure_records_unresolved():
     graph = _make_graph()
     graph.edges = [OntologyEdge(

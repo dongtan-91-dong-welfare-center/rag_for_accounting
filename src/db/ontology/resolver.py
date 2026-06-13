@@ -103,6 +103,9 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
       4. 실패 시 장 번호(제N장) 패턴만 추출해서 재시도 (최후 수단)
     """
     lookup = build_lookup(graph)
+    # to_paragraph는 Subsection으로 해소된 경우에만 설정한다.
+    # 해소된 노드의 node_type을 확인하기 위한 매핑.
+    node_type_map = {node.id: node.node_type for node in graph.nodes}
     # 그래프의 모든 paragraphs를 등장 순서대로 수집 (범위 확장에 사용)
     paragraphs_in_order: list[str] = []
     for node in graph.nodes:
@@ -171,10 +174,11 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
 
         if target_id:
             # 성공: to_id 채우고 unresolved_target 비우기.
-            # norm에서 문단 번호를 추출해 to_paragraph에 저장한다.
-            # 절·장으로만 해소된 경우 _PARA_RE가 매칭되지 않으므로 to_paragraph는 빈 문자열이 된다.
+            # to_paragraph는 Subsection으로 해소됐을 때만 norm에서 문단 번호를 추출해 저장한다.
+            # 절·장으로 해소된 경우, norm에 문단 패턴("6.4")이 섞여 있어도
+            # (예: "제2절 문단 6.4") 그 Section/Standard에 해당 문단이 없을 수 있으므로 빈 문자열로 남긴다.
             m = _PARA_RE.search(norm)
-            to_para = m.group(1) if m else ""
+            to_para = m.group(1) if (m and node_type_map.get(target_id) == "Subsection") else ""
             resolved.append(edge.model_copy(update={
                 "to_id": target_id,
                 "unresolved_target": "",
