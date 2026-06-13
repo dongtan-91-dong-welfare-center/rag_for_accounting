@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from functools import wraps
+from functools import wraps, partial
 from typing import Any, Literal
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphRecursionError
@@ -128,7 +128,7 @@ def route_after_rewrite(state: GraphState) -> Literal["early_exit", "human_revie
 HIL_STRATEGIES: set[str] = {"decompose", "stepback"}
 
 
-def human_review(state: GraphState) -> dict:
+def human_review(state: GraphState, *, hil_enabled: bool = True) -> dict:
     """
     조건부 Human-in-the-Loop 노드.
 
@@ -140,11 +140,17 @@ def human_review(state: GraphState) -> dict:
     재개 시 주입되는 값의 action에 따라 분기한다.
       - action="rewrite": human_feedback 저장 + hil_count 증가 → route_after_human_review가 rewrite로 루프백
       - 그 외(approve 등): human_approved=True 설정 → search로 진행
+
+    hil_enabled=False이면 어떤 전략이든 interrupt 없이 통과한다(단위 테스트용 HIL 비활성화 경로)
+    build_workflow가 checkpointer 부재 시 이 값을 False로 바인딩한다. interrupt()는 checkpointer 없이는
+    호출할 수 없으므로, checkpointer가 없는 단발성 그래프에서 decompose/stepback 질의가 런타임 에러를
+    일으키지 않고 search로 통과하도록 보장한다. (프로덕션 기본값은 True로 동작 불변)
     """
     strategy = state.rewritten_query.strategy if state.rewritten_query else "hyde"
 
     should_review = (
-        strategy in HIL_STRATEGIES
+        hil_enabled
+        and strategy in HIL_STRATEGIES
         and not state.human_approved
         and state.hil_count < MAX_HIL_COUNT
     )
@@ -376,6 +382,8 @@ def build_workflow(checkpointer: BaseCheckpointSaver | None = None) -> CompiledS
     Args:
         checkpointer: HIL(interrupt/resume)을 위한 상태 저장소.
         None이면 체크포인트 없이 컴파일되며 interrupt()를 호출할 수 없다(단순 단방향 실행 전용).
+        이때 human_review 노드는 HIL 비활성화(hil_enabled=False)로 바인딩되어 decompose/stepback
+        질의도 interrupt 없이 search로 통과한다.
         HIL을 사용하는 run_workflow/resume_workflow는 MemorySaver 싱글턴(_CHECKPOINTER)을 주입한다.
 
     return CompiledStateGraph : LangGraph로 빌드된 상태 그래프
@@ -385,10 +393,14 @@ def build_workflow(checkpointer: BaseCheckpointSaver | None = None) -> CompiledS
     """
     workflow = StateGraph(GraphState)
 
+    # checkpointer가 없으면 interrupt()를 호출할 수 없으므로 HIL을 비활성화한다.
+    # human_review 노드는 state만 받으므로 partial로 hil_enabled를 바인딩해 주입한다.
+    hil_enabled = checkpointer is not None
+
     # 노드 추가
     workflow.add_node("rewrite", rewrite)
     workflow.add_node("early_exit", early_exit)
-    workflow.add_node("human_review", human_review)
+    workflow.add_node("human_review", partial(human_review, hil_enabled=hil_enabled))
     workflow.add_node("search", search)
     workflow.add_node("rerank", rerank)
     workflow.add_node("evaluate", evaluate)

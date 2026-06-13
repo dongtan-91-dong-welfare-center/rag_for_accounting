@@ -43,6 +43,16 @@ def hil_app():
     return build_workflow(checkpointer=MemorySaver())
 
 
+@pytest.fixture
+def hil_disabled_workflow():
+    """checkpointer 없이 컴파일해 HIL을 비활성화한 단발성 실행 워크플로우
+
+    checkpointer가 없으면 build_workflow가 human_review를 hil_enabled=False로 바인딩하므로
+    decompose/stepback 질의도 interrupt 없이 search로 통과한다.
+    """
+    return build_workflow(checkpointer=None)
+
+
 def _decompose_state_query():
     """rewrite가 decompose 전략으로 분류되도록 강제하는 patch 컨텍스트 헬퍼용 질의"""
     return "유형자산과 무형자산의 감가상각 방법 차이는?"
@@ -236,3 +246,60 @@ class TestRunResumeWorkflow:
         assert resumed["thread_id"] == "run-int-1" # thread_id 유지 확인
         assert "__interrupt__" not in resumed   # interrupt 발생하지 않음
         assert resumed["final_response"] is not None # 최종 응답 생성 확인
+
+
+# ── HIL 비활성화 경로: 단위 테스트용 단발성 실행 ──────────────────────────
+
+@pytest.mark.unit
+class TestHumanReviewHILDisabled:
+    """human_review 노드 단위 — hil_enabled=False면 HIL 트리거 전략도 통과한다."""
+
+    @pytest.mark.parametrize("strategy", ["decompose", "stepback"])
+    def test_hil_disabled_passes_through(self, strategy):
+        """hil_enabled=False면 decompose/stepback도 interrupt 없이 빈 dict 반환(통과)"""
+        state = GraphState(
+            original_query="q",
+            rewritten_query=RewrittenQuery(original_query="q", strategy=strategy, search_queries=["q"]),
+        )
+        assert human_review(state, hil_enabled=False) == {}    # 비활성화 시 전략 무관 통과
+
+
+@pytest.mark.unit
+class TestHILDisabledGraph:
+    """checkpointer 없는 그래프(E2E) — HIL 트리거 전략이 interrupt 없이 끝까지 완료된다."""
+
+    def _invoke(self, app, strategy: str, config=None):
+        """주어진 전략으로 분류되도록 강제하여 워크플로우를 invoke.
+
+        checkpointer 없는 그래프는 config 없이, checkpointer 있는 그래프는 thread_id config로 호출한다.
+        """
+        with patch(
+            "src.agent.nodes.rewrite.classify_and_select",
+            return_value=(True, strategy, 0.8),
+        ), patch("src.agent.nodes.rewrite.client") as mock_client:
+            # decompose(sub_queries)·stepback(abstract_query) 양쪽 키를 모두 담아 전략 무관 대응
+            mock_client.chat.completions.create.return_value = _mock_resp({
+                "sub_queries": ["유형자산 감가상각은?", "무형자산 상각은?"],
+                "abstract_query": "감가상각의 일반 원칙은?",
+            })
+            return app.invoke(GraphState(original_query=_decompose_state_query()), config=config)
+
+    @pytest.mark.parametrize("strategy", ["decompose", "stepback"])
+    def test_hil_strategy_completes_without_interrupt(self, hil_disabled_workflow, mock_searcher, strategy):
+        """비활성화 그래프에서는 decompose/stepback도 interrupt 없이 search→generate까지 완료된다"""
+        result = self._invoke(hil_disabled_workflow, strategy)
+
+        assert "__interrupt__" not in result    # interrupt 발생하지 않음 (단발성 완료)
+        mock_searcher.assert_called()                 # HIL을 통과해 search 노드 진입
+        assert result["final_response"] is not None  # 최종 응답 생성 확인
+        assert result["human_approved"] is False     # 승인 절차 없이 통과 (상태 변경 없음)
+
+    @pytest.mark.parametrize("strategy", ["decompose", "stepback"])
+    def test_hil_enabled_graph_interrupts_same_input(self, hil_app, strategy):
+        """대조(회귀 방지): HIL 활성 그래프에서는 동일 입력이 human_review에서 interrupt된다"""
+        config = {"configurable": {"thread_id": f"hil-enabled-{strategy}"}}
+        result = self._invoke(hil_app, strategy, config=config)
+
+        assert "__interrupt__" in result    # 활성 그래프는 동일 입력에서 중단
+        assert result["__interrupt__"][0].value["strategy"] == strategy
+        assert result.get("final_response") is None # 조기 중단되어 응답 미생성
