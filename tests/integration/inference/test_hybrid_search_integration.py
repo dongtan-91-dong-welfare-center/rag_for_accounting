@@ -64,19 +64,22 @@ def setup_test_db():
         ),
     ]
 
-    # index_documents 내부의 토큰 카운터·임베딩을 mock해 KURE-v1 로드 없이 결정적으로 적재한다.
-    # embed_texts는 valid_chunks 순서대로 벡터를 매핑하므로 [K-GAAP, K-IFRS] 순으로 반환한다.
-    with (
-        patch("src.db.vector_store.count_tokens", return_value=10),
-        patch("src.db.vector_store.embed_texts", return_value=[_KGAAP_VEC, _KIFRS_VEC]),
-    ):
-        result = index_documents(chunks, collection=TEST_COLLECTION)
-    assert result.status == "success", f"테스트 데이터 적재 실패: {result.status}"
+    # 적재가 부분 실패하더라도 teardown 정리가 누락되지 않도록 try/finally로 감싼다(자매 test_chunk_node_mapping 패턴).
+    try:
+        # index_documents 내부의 토큰 카운터·임베딩을 mock해 KURE-v1 로드 없이 결정적으로 적재한다.
+        # embed_texts는 valid_chunks 순서대로 벡터를 매핑하므로 [K-GAAP, K-IFRS] 순으로 반환한다.
+        with (
+            patch("src.db.vector_store.count_tokens", return_value=10),
+            patch("src.db.vector_store.embed_texts", return_value=[_KGAAP_VEC, _KIFRS_VEC]),
+        ):
+            result = index_documents(chunks, collection=TEST_COLLECTION)
+        assert result.status == "success", f"테스트 데이터 적재 실패: {result.status}"
 
-    yield
-
-    # 종료 시 행만 비운다(테이블·인덱스 보존). 운영 chunks는 건드리지 않는다.
-    delete_collection(TEST_COLLECTION)
+        yield
+    finally:
+        # 종료 시 행만 비운다(테이블·인덱스 보존).
+        # 운영 chunks는 건드리지 않는다.
+        delete_collection(TEST_COLLECTION)
 
 
 @pytest.mark.system

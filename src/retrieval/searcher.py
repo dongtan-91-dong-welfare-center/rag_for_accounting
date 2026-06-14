@@ -53,14 +53,16 @@ def dense_search(query_embedding: list[float], top_k: int, metadata_filter: dict
     # query_embedding은 %s::vector 타입으로 캐스팅하여 비교
     # embedding <=> %s::vector: 두 벡터 간의 코사인 유사도를 계산 (0=동일, 2=정반대)
     # 1 - (코사인 거리) = 코사인 유사도 -> 점수로 사용하면 유사도가 높을수록 점수도 높음
-    query_sql = f"""
+    # 테이블명은 sql.Identifier로 인용해 식별자 안전성을 보장한다(vector_store와 동일 규약).
+    # where_clause/%s 플레이스홀더는 sql.SQL 조각으로 그대로 전달되어 execute 시 params로 바인딩된다.
+    query_sql = sql.SQL("""
         SELECT chunk_id, document_id, content, metadata,
                1 - (embedding <=> %s::vector) AS score
-        FROM {collection}
-        {where_clause}
+        FROM {table}
+        {where}
         ORDER BY embedding <=> %s::vector
         LIMIT %s
-    """
+    """).format(table=sql.Identifier(collection), where=sql.SQL(where_clause))
     query_params = [query_embedding] + params + [query_embedding, top_k]
 
     return _execute_search_query(query_sql, query_params, "Dense")
@@ -83,14 +85,15 @@ def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None, c
     # 'simple' 설정은 한국어 형태소 분석을 지원하지 않으므로 정확한 단어 일치 검색만 수행됨
     # ts_rank_cd(to_tsvector, query): 인자로 주어진 두 텍스트에 대한 순위 점수를 반환 (0~1)
     # ts_rank_cd가 반환하는 점수: 두 텍스트의 관련성을 0~1 사이 점수로 반환 -> 유사도가 높을수록 점수도 높음
-    query_sql = f"""
+    # 테이블명은 sql.Identifier로 인용(식별자 안전성). where_sql의 %s는 sql.SQL 조각으로 그대로 전달된다.
+    query_sql = sql.SQL("""
         SELECT chunk_id, document_id, content, metadata,
                ts_rank_cd(to_tsvector('simple', content), plainto_tsquery('simple', %s)) AS score
-        FROM {collection}
-        {where_sql}
+        FROM {table}
+        {where}
         ORDER BY score DESC
         LIMIT %s
-    """
+    """).format(table=sql.Identifier(collection), where=sql.SQL(where_sql))
     query_params = [query] + filter_params + [query, top_k]
 
     return _execute_search_query(query_sql, query_params, "Sparse")
@@ -208,7 +211,7 @@ def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = No
     logger.info(f"하이브리드 검색 완료: {len(final_results)}건 반환")
     return final_results
 
-def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadata_filter: dict | None, collection: str = CHUNKS_TABLE) -> list[RetrievedChunk]:
+def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadata_filter: dict | None, collection: str) -> list[RetrievedChunk]:
     """Dense + Sparse 검색을 독립 실행하고 RRF로 병합한다. 양쪽 모두 실패 시 DatabaseQueryError를 발생시킨다."""
     dense_results: list[RetrievedChunk] = []
     sparse_results: list[RetrievedChunk] = []
