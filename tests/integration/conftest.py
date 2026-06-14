@@ -28,49 +28,68 @@ def check_integration_env():
         pytest.skip(f"인프라 준비 상태에 문제가 있어 테스트를 건너뜁니다: {infra_error}")
 
 
-def _chunks_rowcount() -> int | None:
-    """운영 chunks 테이블의 행수를 반환한다. 테이블이 없거나 DB에 접근할 수 없으면 None.
+def _read_chunks_state() -> tuple[bool, int] | None:
+    """운영 chunks 상태를 (테이블_존재, 행수)로 반환한다. DB에 접근할 수 없으면 None.
 
-    세션 종료 시점엔 일부 모듈 픽스처가 close_pool()로 풀을 닫았을 수 있으므로,
-    멱등인 init_pool()로 필요 시 풀을 다시 연 뒤 조회한다.
+    to_regclass로 '테이블 없음(DROP됨)'과 '일시적 DB 불가'를 구분한다 
+    전자만 가드가 실패로 다뤄야 하고, 후자(teardown 중 커넥션 일시 장애 등)는 판단 불가이므로 거짓 양성을 피하려 None으로 보고한다.
+    세션 종료 시 일부 모듈 픽스처가 close_pool()했을 수 있어 멱등 init_pool()로 필요 시 재연결하며, 
+    DB 미가동 환경에서 오래 매달리지 않도록 짧은 타임아웃으로 커넥션을 얻는다.
     """
     try:
         from src.db.connection import get_pool, init_pool
 
         init_pool()
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection(timeout=5) as conn, conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('chunks')")
+            if cur.fetchone()[0] is None:
+                return (False, 0)  # 테이블이 존재하지 않음
             cur.execute("SELECT COUNT(*) FROM chunks")
-            return int(cur.fetchone()[0])
+            return (True, int(cur.fetchone()[0]))
     except Exception:
-        return None
+        return None  # DB 접근 불가 — 존재 여부 판단 불가
 
 
 @pytest.fixture(scope="session", autouse=True)
 def protect_production_chunks(check_integration_env):
     """통합 테스트 세션이 운영 chunks 테이블을 소실/축소시키지 않았는지 검증한다.
 
-    과거 한 통합 테스트의 tear-down이 운영 chunks를 DROP해, 1회 실행으로 전체 코퍼스가 소실되고 서비스가 즉시 다운된 사고가 있었다.
-    검색·적재는 collection 파라미터로 전용 테스트 컬렉션에 격리되므로 정상 테스트는 운영 chunks를 건드리지 않는다. 
-    이 가드는 향후 회귀를 메커니즘(DROP/TRUNCATE/DELETE 등)과 무관하게 세션 종료 시 즉시 실패로 드러낸다.
+    과거 한 통합 테스트의 tear-down이 운영 chunks를 DROP해, 1회 실행으로 전체 코퍼스가 소실되고 서비스가 즉시 다운된 사고가 있었다. 
+    검색·적재는 collection 파라미터로 전용 테스트 컬렉션에 격리되므로 정상 테스트는 운영 chunks를 건드리지 않는다.
+    이 가드는 향후 회귀(DROP/TRUNCATE/DELETE)를 세션 종료 시 실패로 드러내는 탐지형 안전망이다(예방이 아닌 탐지).
 
-    세션 시작 시 운영 chunks 행수를 스냅샷하 종료 시 비교한다. 
-    시작 시점에 chunks가 없거나(미적재) DB에 접근할 수 없으면 보호 대상이 없으므로 조용히 무동작한다.
+    세션 시작 시 운영 chunks 상태(존재·행수)를 스냅샷하고 종료 시 비교한다. 
+    시작 시점에 chunks가 없거나(미적재) DB에 접근할 수 없으면 보호 대상이 없으므로 무동작한다.
+    teardown 시점에 상태를 읽지 못하면(일시적 DB 불가) DROP과 구분할 수 없어 판단을 보류한다(거짓 양성 회피).
     check_integration_env에 의존해 POSTGRES_HOST(localhost) 보정 이후에 스냅샷한다.
-    """
-    before = _chunks_rowcount()
-    yield
-    if before is None:
-        return  # 세션 시작 시 보호 대상(적재된 운영 chunks)이 없었음 → 검증 생략
+    라이브 인프라가 없는 ingestion 트랙은 자식 conftest에서 이 픽스처를 무력화한다.
 
-    after = _chunks_rowcount()
-    if after is None:
-        pytest.fail(
-            f"운영 chunks 테이블을 더 이상 읽을 수 없습니다 "
-            f"(세션 시작 {before}행 → DROP되었거나 접근 불가). 통합 테스트가 운영 chunks를 "
-            f"직접 건드렸을 수 있습니다. 테스트는 전용 collection을 쓰고 delete_collection으로 정리하십시오."
-        )
-    if after < before:
-        pytest.fail(
-            f"운영 chunks 행수가 {before} → {after}로 감소했습니다. "
-            f"통합 테스트가 운영 데이터를 삭제했습니다. 운영 chunks 대신 전용 collection을 사용하십시오."
-        )
+    주의: 행수 '감소'는 외부 재적재(ingest --reset)가 세션과 겹쳐도 트리거될 수 있다.
+    """
+    before = _read_chunks_state()
+    try:
+        yield
+    finally:
+        try:
+            # 시작 시 보호 대상(존재하며 적재된 chunks)이 없었으면 검증 생략
+            if before is not None and before[0]:
+                after = _read_chunks_state()
+                # after가 None이면 teardown 중 DB 접근 불가 — DROP과 구분 불가하므로 판단 보류
+                if after is not None:
+                    if not after[0]:
+                        pytest.fail(
+                            f"운영 chunks 테이블이 세션 중 DROP되었습니다 "
+                            f"(시작 {before[1]}행 → 테이블 없음). 통합 테스트가 운영 chunks를 직접 건드렸습니다. "
+                            f"테스트는 전용 collection을 쓰고 delete_collection으로 정리하십시오."
+                        )
+                    if after[1] < before[1]:
+                        pytest.fail(
+                            f"운영 chunks 행수가 {before[1]} → {after[1]}로 감소했습니다. "
+                            f"통합 테스트가 운영 데이터를 삭제했거나, 외부 재적재(ingest --reset)가 세션과 겹쳤습니다. "
+                            f"전자라면 전용 collection을 사용하십시오."
+                        )
+        finally:
+            # 가드가 teardown에서 (재)연 풀을 누수 없이 닫는다(미반환 커넥션·ResourceWarning 방지)
+            from src.db.connection import close_pool
+
+            close_pool()

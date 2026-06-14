@@ -25,6 +25,17 @@ def check_integration_env():
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def protect_production_chunks():
+    """상위 conftest의 운영 chunks 소실 가드를 무력화하는 동명 오버라이드.
+
+    트랙 B는 DB를 모킹(src.db.vector_store.get_pool)하고 라이브 인프라 없이 통과하는 계약이므로 보호할 운영 chunks가 없다. 
+    부모 가드를 그대로 두면 src.db.connection으로 실 DB 연결을 시도
+    (미가동 시 커넥션 타임아웃만큼 세션 시작이 지연)하므로 동명 오버라이드로 비활성화한다.
+    """
+    yield
+
+
 @pytest.fixture
 def mock_db_pool():
     """psycopg3 커넥션 풀과 커서를 mock한다.
