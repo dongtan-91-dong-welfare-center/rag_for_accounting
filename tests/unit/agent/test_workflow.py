@@ -11,7 +11,7 @@ from src.agent.workflow import (
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
 from src.models.schemas import EvaluationResult, FinalResponse
-from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError
+from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError, LLMAPIConnectionError
 
 @pytest.fixture(autouse=True)
 def mock_searcher():
@@ -337,6 +337,22 @@ class TestSearchNode:
         assert result["retrieved_chunks"] == []         # 빈 결과 반환
         assert result["needs_reretrieval"] is False     # 재시도 무의미 → 루프 재진입 없음
         assert result["error_logs"][-1]["error_type"] == "SE-103"   # 에러 타입 기록
+
+    @patch("src.agent.workflow._search_impl")
+    def test_embed_connection_error_triggers_reretrieval(self, mock_search):
+        """CM-002: embed_query 일시 장애(LLMAPIConnectionError, is_retryable=True)
+        → needs_reretrieval=True, retrieved_chunks=[], error_logs 기록
+
+        embed_query 실패는 SE-101/102와 달리 일반 AccountingRAGError 분기로 떨어지지만,
+        is_retryable=True인 일시 장애이므로 SE-103(결과없음)과 구분해 CRAG 루프로 재진입해야 한다.
+        """
+        mock_search.side_effect = LLMAPIConnectionError("임베딩 API 연결 실패", node="search")
+
+        result = search(self._make_state())
+
+        assert result["retrieved_chunks"] == []         # 빈 결과 반환
+        assert result["needs_reretrieval"] is True       # 일시 장애 → CRAG 루프 재진입 신호
+        assert result["error_logs"][-1]["error_type"] == "CM-002"   # 에러 타입 기록
 
     @patch("src.agent.workflow._search_impl")
     def test_system_exception_propagates(self, mock_search):
