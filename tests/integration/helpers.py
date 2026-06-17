@@ -38,6 +38,8 @@ def run_workflow_to_completion(
             (HIL 루프가 종료되지 않는 회귀를 테스트에서 즉시 검출).
     """
     result = run_workflow(query, standard_filter=standard_filter, **kwargs)
+    # run/resume 트레이스가 동일 케이스 메타데이터를 공유하도록 resume 호출에도 그대로 전달한다.
+    metadata = kwargs.get("metadata")
     guard = 0
     while "__interrupt__" in result:
         guard += 1
@@ -48,5 +50,5 @@ def run_workflow_to_completion(
             )
         thread_id = result.get("thread_id")
         assert thread_id, "interrupt 상태에 thread_id 가 없음 (#79 계약 위반)"
-        result = resume_workflow(thread_id, {"action": "approve"})
+        result = resume_workflow(thread_id, {"action": "approve"}, metadata=metadata)
     return result

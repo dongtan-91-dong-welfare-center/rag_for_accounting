@@ -458,12 +458,21 @@ def build_workflow(checkpointer: BaseCheckpointSaver | None = None) -> CompiledS
 _CHECKPOINTER: BaseCheckpointSaver = MemorySaver()
 
 
-def _run_config(thread_id: str) -> RunnableConfig:
-    """LangGraph invoke에 전달할 실행 설정. thread_id로 HIL 세션을 식별한다."""
-    return {
+def _run_config(thread_id: str, metadata: dict[str, Any] | None = None) -> RunnableConfig:
+    """LangGraph invoke에 전달할 실행 설정. thread_id로 HIL 세션을 식별한다.
+
+    metadata가 주어지면 RunnableConfig.metadata로 전달한다.
+    LangSmith 트레이싱이 활성(LANGCHAIN_TRACING_V2=true)일 때 케이스 ID·gold 조항 등이 트레이스에 부착되어 분석 시 필터 키로 쓰인다.
+    트레이싱 비활성 시에는 무해하게 무시되므로(LangGraph가 config.metadata를 항상 허용)
+    키 부재 환경에서도 동일하게 정상 동작한다.
+    """
+    run_config: RunnableConfig = {
         "configurable": {"thread_id": thread_id},
         "recursion_limit": MAX_REWRITE_COUNT * 5 + 5,
     }
+    if metadata:
+        run_config["metadata"] = metadata
+    return run_config
 
 
 def _recursion_fallback_response() -> FinalResponse:
@@ -479,6 +488,7 @@ def run_workflow(
     query: str,
     standard_filter: Literal["GAAP", "KIFRS", "ALL"] = "ALL",
     thread_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     외부에서 워크플로우를 실행하기 위한 진입점 함수.
@@ -487,6 +497,10 @@ def run_workflow(
     thread_id가 주어지지 않으면 새 UUID를 발급한다. 반환 dict에는 항상 thread_id가 포함되어,
     워크플로우가 human_review에서 중단(`__interrupt__` 키 존재)된 경우 클라이언트가 이 값을
     resume_workflow에 전달하여 재개할 수 있다.
+
+    metadata는 LangSmith 트레이스에 부착할 케이스 식별 정보(예: {"case_id", "gold"})로,
+    _run_config를 통해 RunnableConfig.metadata로 전달된다. 
+    트레이싱 비활성 시 무시된다.
     """
     app = build_workflow(checkpointer=_CHECKPOINTER)
 
@@ -501,7 +515,7 @@ def run_workflow(
     try:
         # 정상/중단 반환 시 LangGraph의 invoke()는 dict를 반환하며 값들은 Pydantic 객체를 유지합니다.
         # human_review에서 interrupt가 발생하면 반환 dict에 "__interrupt__" 키가 포함됩니다.
-        result = app.invoke(initial_state, config=_run_config(thread_id))
+        result = app.invoke(initial_state, config=_run_config(thread_id, metadata))
         result["thread_id"] = thread_id
         return result
     except GraphRecursionError:
@@ -521,7 +535,11 @@ def run_workflow(
         raise
 
 
-def resume_workflow(thread_id: str, resume_value: dict[str, Any]) -> dict[str, Any]:
+def resume_workflow(
+    thread_id: str,
+    resume_value: dict[str, Any],
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     human_review에서 interrupt로 중단된 워크플로우를 재개한다.
 
@@ -530,12 +548,15 @@ def resume_workflow(thread_id: str, resume_value: dict[str, Any]) -> dict[str, A
 
     반환 dict에는 thread_id가 포함된다. 사용자가 다시 재작성을 요청하여 또 한 번 중단되면
     반환 dict에 "__interrupt__" 키가 존재하므로, 동일 thread_id로 재차 resume_workflow를 호출한다.
+
+    metadata는 run_workflow와 동일한 케이스 식별 정보를 재개 실행 트레이스에도 부착하기 위한 것으로,
+    호출자가 run_workflow에 넘긴 값을 그대로 전달하면 한 케이스의 run/resume 트레이스가 동일 메타데이터를 공유한다.
     """
     app = build_workflow(checkpointer=_CHECKPOINTER)
     app.step_timeout = 30
 
     try:
-        result = app.invoke(Command(resume=resume_value), config=_run_config(thread_id))
+        result = app.invoke(Command(resume=resume_value), config=_run_config(thread_id, metadata))
         result["thread_id"] = thread_id
         return result
     except GraphRecursionError:

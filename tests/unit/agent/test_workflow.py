@@ -7,6 +7,8 @@ from src.agent.workflow import (
     early_exit,
     search,
     run_workflow,
+    resume_workflow,
+    _run_config,
 )
 from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT
@@ -404,4 +406,74 @@ class TestRunWorkflow:
 
         with pytest.raises(TimeoutError):
             run_workflow("영업권 손상차손 인식 기준은?")
+
+
+@pytest.mark.unit
+class TestRunConfigMetadata:
+    """LangSmith 트레이스용 케이스 메타데이터 주입 경로 단위 테스트"""
+
+    def test_run_config_without_metadata_omits_key(self):
+        """metadata 미지정 시 RunnableConfig에 metadata 키가 없고 기존 키는 유지된다"""
+        cfg = _run_config("tid-1")
+        assert cfg["configurable"]["thread_id"] == "tid-1"
+        assert cfg["recursion_limit"] == MAX_REWRITE_COUNT * 5 + 5
+        assert "metadata" not in cfg
+
+    def test_run_config_attaches_metadata(self):
+        """metadata 지정 시 RunnableConfig.metadata로 그대로 전달된다"""
+        meta = {"case_id": "K-001", "gold": ["1015-10", "1015-12"]}
+        cfg = _run_config("tid-2", meta)
+        assert cfg["metadata"] == meta
+        # thread_id·recursion_limit는 메타데이터와 무관하게 유지
+        assert cfg["configurable"]["thread_id"] == "tid-2"
+
+    def test_run_config_empty_metadata_omits_key(self):
+        """빈 metadata({})는 부착하지 않는다(불필요한 빈 키 방지)"""
+        assert "metadata" not in _run_config("tid-3", {})
+
+    @patch("src.agent.workflow.build_workflow")
+    def test_run_workflow_forwards_metadata_to_config(self, mock_build_workflow):
+        """run_workflow가 metadata를 invoke config로 전달한다"""
+        mock_app = MagicMock()
+        mock_app.invoke.return_value = {"original_query": "q"}
+        mock_build_workflow.return_value = mock_app
+
+        meta = {"case_id": "K-007", "gold": ["1116-9"]}
+        run_workflow("리스 부채 측정", thread_id="t-meta", metadata=meta)
+
+        sent_config = mock_app.invoke.call_args.kwargs["config"]
+        assert sent_config["metadata"] == meta
+
+    @patch("src.agent.workflow.build_workflow")
+    def test_resume_workflow_forwards_metadata_to_config(self, mock_build_workflow):
+        """resume_workflow가 metadata를 invoke config로 전달한다(run/resume 트레이스 일관성)"""
+        mock_app = MagicMock()
+        mock_app.invoke.return_value = {"final_response": "done"}
+        mock_build_workflow.return_value = mock_app
+
+        meta = {"case_id": "K-007", "gold": ["1116-9"]}
+        resume_workflow("t-meta", {"action": "approve"}, metadata=meta)
+
+        sent_config = mock_app.invoke.call_args.kwargs["config"]
+        assert sent_config["metadata"] == meta
+
+    @patch("src.agent.workflow.build_workflow")
+    def test_metadata_path_independent_of_tracing_env(self, mock_build_workflow, monkeypatch):
+        """트레이싱 env 부재(graceful OFF)에서도 메타데이터 주입·정상 완료 — 회귀 가드.
+
+        활성화는 LANGCHAIN_TRACING_V2 환경변수가 전담하며 우리 코드는 이를 읽지 않는다.
+        따라서 트레이싱이 꺼진 환경(키 없음)에서도 파이프라인은 동일하게 완료되고 metadata는 config에 그대로 실린다.
+        """
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
+        monkeypatch.delenv("LANGCHAIN_API_KEY", raising=False)
+
+        mock_app = MagicMock()
+        mock_app.invoke.return_value = {"original_query": "q", "final_response": "ok"}
+        mock_build_workflow.return_value = mock_app
+
+        meta = {"case_id": "K-001", "gold": ["1015-10"]}
+        result = run_workflow("수익 인식 5단계", metadata=meta)
+
+        assert result["final_response"] == "ok"
+        assert mock_app.invoke.call_args.kwargs["config"]["metadata"] == meta
 
