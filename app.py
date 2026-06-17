@@ -18,6 +18,7 @@ import streamlit as st
 
 from src.agent.workflow import resume_workflow, run_workflow
 from src.db.connection import init_pool
+from src.ui.clauses import build_clause_rows
 
 STANDARD_OPTIONS = ["ALL", "GAAP", "KIFRS"]
 
@@ -53,8 +54,29 @@ def _apply(result: dict) -> None:
     st.session_state.stage = "interrupted" if _is_interrupt(result) else "done"
 
 
+def _render_retrieved_clauses(result: dict) -> None:
+    """검색된 조항을 답변보다 먼저 노출한다(NFR-002: 조항 검색 1순위).
+
+    노출 점수는 chunk.score(RRF 하이브리드)다. 
+    USE_RERANKER=false에서는 rerank_score가 no-op(1.0)이라 변별력이 없기 때문이며, 리랭커를 켜면 점수 출처/라벨을 전환한다.
+    """
+    rows = build_clause_rows(result.get("reranked_chunks"))
+    st.markdown(f"### 검색된 조항 (상위 {len(rows)}건)")
+    if not rows:
+        st.caption("검색된 조항 없음")
+        return
+    st.caption("질의와 가장 관련 높은 회계기준 조항입니다. 아래 답변은 이 조항을 참고해 생성됩니다.")
+    for r in rows:
+        label = f"[{r.rank}] {r.chapter}장"
+        if r.node_id:
+            label += f" · {r.node_id}"
+        label += f"  ·  검색점수 {r.score:.3f}"
+        with st.expander(label):
+            st.write(r.content)
+
+
 def _render_response(result: dict) -> None:
-    """FinalResponse를 답변·신뢰도·인용으로 렌더링한다."""
+    """검색된 조항(1순위) → 답변 → 인용 순으로 렌더링한다."""
     response = result.get("final_response")
     if response is None:
         st.warning("답변을 생성하지 못했습니다.")
@@ -64,6 +86,9 @@ def _render_response(result: dict) -> None:
         st.success("답변 가능")
     else:
         st.warning("제공된 회계기준 문서에서 충분한 근거를 찾지 못했습니다.")
+
+    # NFR-002: 조항 검색이 1순위이므로 답변보다 먼저 노출한다.
+    _render_retrieved_clauses(result)
 
     st.markdown("### 답변")
     st.markdown(response.answer)
