@@ -20,6 +20,9 @@ class BenchmarkCase:
     query: str                  # 사용자 질의
     expected_answer: str        # 기대 정답 요약
     references: list[str] = field(default_factory=list)  # 근거 문헌 목록
+    # 핵심(core) 조항 문단번호. 비어 있으면 references 전체를 핵심으로 간주한다.
+    # 멀티조항 gold에서 '핵심⊊전체'인 경우에만 명시하여 검색 적합도 판정에 사용한다.
+    core_paras: list[str] = field(default_factory=list)
 
 
 def load_benchmark(path: Path = BENCHMARK_PATH) -> list[BenchmarkCase]:

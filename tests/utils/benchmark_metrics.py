@@ -32,6 +32,9 @@ from tests.utils.benchmark_loader import BenchmarkCase
 # NFR-002 정확도 목표(리포트 갭 표기용, 하드게이트 아님)
 NFR_002_TARGET = 0.90
 
+# 검색 통과 기준: 핵심 조항이 검색 Top-N 안에 있으면 통과
+RETRIEVAL_PASS_TOP_N = 5
+
 
 # ════════════════════════════════ 조항키 유틸 ════════════════════════════════
 # 청크 본문의 문단 헤더:  "#### 21.8", "#### 2.6.5", "#### 6.13의2"
@@ -141,6 +144,19 @@ def legacy_substring_hit(references: list[str], citations) -> bool:
     return any(ref in joined for ref in references)
 
 
+def resolve_core_paras(case: BenchmarkCase, gold_paras: set[str]) -> set[str]:
+    """핵심(core) 문단집합을 정규화해 반환한다. case.core_paras 미지정 시 gold 전체를 핵심으로 간주."""
+    return {_normalize_para(p) for p in case.core_paras} or gold_paras
+
+
+def retrieval_pass(
+    search_contents: list[str], core_paras: set[str], top_n: int = RETRIEVAL_PASS_TOP_N
+) -> bool:
+    """핵심 조항이 검색 결과 상위 top_n 안에 있으면 검색 통과(True)."""
+    fh, _ = rank_hit(search_contents, core_paras, "exact")
+    return fh is not None and fh <= top_n
+
+
 # ════════════════════════════════ 코퍼스 상태 ════════════════════════════════
 def get_indexed_chapters() -> set[str]:
     """현재 pgvector chunks 테이블에 적재된 chapter 집합을 조회한다."""
@@ -212,9 +228,12 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
             )
     metrics["legacy_substring"] = legacy_substring_hit(case.references, citations)
     metrics["is_answerable"] = bool(fr.is_answerable) if fr else False
+    # 핵심(core) 조항이 검색 Top-5 안에 있으면 통과
+    metrics["retrieval_pass"] = retrieval_pass(search_contents, resolve_core_paras(case, gold_paras))
     res.metrics = metrics
 
-    # 진단 정보 (오답 분석용)
+    # 진단 정보(오답 분석용) + 회계사 검토·content 판정용 전문 영속화
+    # answer/eval_reasoning/expected_answer/citations 전문을 저장해 사람·LLM judge가 검토 가능하게 한다.
     rq = state.get("rewritten_query")
     ev = state.get("evaluation")
     res.diag = {
@@ -224,10 +243,13 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         "n_reranked": len(reranked),
         "n_citations": len(citations),
         "needs_external": getattr(ev, "needs_external", None),
-        "eval_reasoning": (getattr(ev, "reasoning", "") or "")[:200],
+        "eval_reasoning": (getattr(ev, "reasoning", "") or ""),
         "retrieval_chapters": [r.chunk.metadata.chapter for r in reranked][:10],
         "citation_paras": sorted({p for c in citations for p in extract_chunk_paras(c.content)}),
-        "answer_head": (fr.answer[:200] if fr else ""),
+        "query": case.query,
+        "expected_answer": case.expected_answer,
+        "answer": (fr.answer if fr else ""),
+        "citations": cite_contents,
         "error_logs": state.get("error_logs") or [],
     }
     return res
@@ -248,6 +270,7 @@ def aggregate(results: list[CaseResult], k: int) -> dict:
         "retrieval_exact_hit@1",        # 진단: 검색이 최상단에 정답을 올렸나
         f"retrieval_exact_hit@{k}",
         f"retrieval_prefix_hit@{k}",
+        "retrieval_pass",               # 검색 통과(핵심 Top-5)
         "legacy_substring",             # 대조군(현행 결함)
         "is_answerable",                # 가드레일
     ]
@@ -268,6 +291,7 @@ def _summary_rows(k: int) -> list[tuple[str, str]]:
     return [
         ("생성 조항 Hit@1 (★ NFR-002 1차)", "generation_exact_hit@1"),
         (f"생성 조항 Hit@{k}", f"generation_exact_hit@{k}"),
+        ("검색 통과(핵심 Top-5) (★ #163)", "retrieval_pass"),
         ("검색 조항 Hit@1", "retrieval_exact_hit@1"),
         (f"검색 조항 Hit@{k} (★ 비회귀 플로어)", f"retrieval_exact_hit@{k}"),
         ("legacy 문자열(현행 대조군)", "legacy_substring"),
