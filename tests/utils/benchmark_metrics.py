@@ -202,7 +202,12 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         gold_paras=sorted(gold_paras),
     )
     try:
-        state = run_workflow_to_completion(case.query, standard_filter=case.standard)
+        # 케이스 식별 정보를 LangSmith 트레이스에 부착. 트레이싱 비활성 시 무해하게 무시됨.
+        state = run_workflow_to_completion(
+            case.query,
+            standard_filter=case.standard,
+            metadata={"case_id": case.id, "gold": sorted(gold_paras)},
+        )
     except Exception as e:  # 케이스 격리: 한 건 실패해도 전체 측정 계속
         res.error = f"{type(e).__name__}: {e}"
         res.diag["traceback"] = traceback.format_exc()[-1500:]

@@ -42,7 +42,22 @@ class TestRunWorkflowToCompletion:
 
         assert result is completed
         assert "__interrupt__" not in result
-        mock_resume.assert_called_once_with("t1", {"action": "approve"})
+        mock_resume.assert_called_once_with("t1", {"action": "approve"}, metadata=None)
+
+    def test_forwards_metadata_to_resume(self):
+        """metadata 인자가 run/resume 양쪽에 동일하게 전달된다."""
+        interrupted = {"thread_id": "t1", "__interrupt__": [{"value": {}}]}
+        completed = {"thread_id": "t1", "final_response": "answer"}
+        meta = {"case_id": "K-007", "gold": ["1116-9"]}
+        with patch(
+            "tests.integration.helpers.run_workflow", return_value=interrupted
+        ) as mock_run, patch(
+            "tests.integration.helpers.resume_workflow", return_value=completed
+        ) as mock_resume:
+            run_workflow_to_completion("복잡한 회계 질의", metadata=meta)
+
+        mock_run.assert_called_once_with("복잡한 회계 질의", standard_filter="ALL", metadata=meta)
+        mock_resume.assert_called_once_with("t1", {"action": "approve"}, metadata=meta)
 
     def test_raises_when_loop_never_terminates(self):
         """resume이 계속 interrupt를 반환하면 _MAX_AUTO_APPROVE 초과 시 RuntimeError."""
