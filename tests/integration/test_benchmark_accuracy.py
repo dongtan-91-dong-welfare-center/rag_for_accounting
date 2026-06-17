@@ -139,6 +139,21 @@ class TestBenchmarkAccuracy:
             f"리포트: {benchmark_measurement['report_path']}"
         )
 
+    def test_retrieval_pass_floor(self, benchmark_measurement):
+        """검색 통과(핵심 조항 Top-5)가 비회귀 플로어(허용밴드 포함) 이상이어야 한다."""
+        floor = _load_floor()
+        self._guard_corpus(benchmark_measurement, floor)
+
+        floor_hits = floor["floors"]["retrieval_pass"]
+        tolerance = floor.get("tolerance", 0)
+        actual = benchmark_measurement["summary"]["retrieval_pass"]["hits"]
+        n = benchmark_measurement["summary"]["n_measured"]
+
+        assert actual >= floor_hits - tolerance, (
+            f"검색 통과(핵심 Top-5) 회귀: retrieval_pass={actual}/{n} < 플로어 {floor_hits}-{tolerance}. "
+            f"리포트: {benchmark_measurement['report_path']}"
+        )
+
     def test_answerable_floor(self, benchmark_measurement):
         """is_answerable 적중이 비회귀 플로어(허용밴드 포함) 이상이어야 한다(가드레일)."""
         floor = _load_floor()
