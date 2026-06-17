@@ -236,11 +236,13 @@ def search(state: GraphState) -> dict:
             "error_logs": new_logs,
         }
     except AccountingRAGError as e:
-        # 기타 도메인 에러: 보수적 처리, 재시도 없이 빈 결과
+        # 기타 도메인 에러: is_retryable로 재검색 여부 결정.
+        # embed_query 일시 장애(CM-002, is_retryable=True)는 SE-101/102와 동일하게 CRAG 루프로 재진입시키고
+        # 재시도 무의미한 에러는 SE-103처럼 빈 결과로 진행한다.
         new_logs = state.error_logs + [e.to_error_log()]
         return {
             "retrieved_chunks": [],
-            "needs_reretrieval": False,
+            "needs_reretrieval": e.is_retryable,
             "error_logs": new_logs,
         }
     except Exception as e:
