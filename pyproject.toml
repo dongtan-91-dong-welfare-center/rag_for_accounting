@@ -19,6 +19,11 @@ dependencies = [
     "langsmith>=0.1.0",
     "psycopg[binary,pool]>=3.1.0",
     "sentence-transformers>=3.0.0",
+    # 에이전트형 채팅 서비스(src/service) + A/B 하네스(ab_eval) — DeepAgent 전환 산출물
+    "deepagents>=0.6.7",
+    "langchain-openai>=0.2.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
 ]
 
 # !TODO: 패키지를 PyPI 등 외부에 배포할 경우, dependency-groups 대신
