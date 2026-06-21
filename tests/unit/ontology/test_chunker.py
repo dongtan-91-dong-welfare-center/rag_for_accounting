@@ -282,3 +282,132 @@ def test_chunk_id_determinism():
     a = chunk_graph(graph, max_tokens=5, token_counter=_word_count)
     b = chunk_graph(graph, max_tokens=5, token_counter=_word_count)
     assert [c.chunk_id for c in a] == [c.chunk_id for c in b]
+
+
+# ════════════════════ clause-level 청킹 ════════════════════
+# clause_level=True면 한 노드에 묶인 여러 조항(#### N.N)을 조항 경계로 분리해,
+# 다발 노드의 정답 조항이 또렷한 단일 청크가 되도록 한다(NFR-002 Hit@1).
+
+
+def _clause_node_graph(content: str, node_id: str = "gaap-ch21-bundle") -> OntologyGraph:
+    """단일 Subsection 노드(조항 다발 content)로 구성된 최소 그래프."""
+    graph = OntologyGraph()
+    graph.nodes.append(
+        OntologyNode(id="gaap-ch21", node_type="Standard", standard_type="GAAP", chapter="21")
+    )
+    graph.nodes.append(
+        OntologyNode(id=node_id, node_type="Subsection", title="다발", content=content)
+    )
+    return graph
+
+
+# 실제 노드 구조(gaap-ch21-...퇴직급여충당부채)를 모방한 조항 다발 — 21.8~21.10.
+_BUNDLE = "\n".join(
+    [
+        "#### 21.8",
+        "퇴직급여충당부채는 전종업원이 일시에 퇴직할 경우 지급할 금액으로 한다.",
+        "",
+        "#### 21.9",
+        "급여규정의 개정으로 퇴직금소요액이 증가되면 당기비용으로 인식한다.",
+        "",
+        "#### 21.10",
+        "확정급여형퇴직연금제도의 부채는 다음과 같이 회계처리한다.",
+    ]
+)
+
+
+@pytest.mark.unit
+def test_clause_level_splits_bundle_into_per_clause_chunks():
+    """clause_level=True면 조항 다발이 #### N.N 경계로 조항별 청크로 분리된다."""
+    chunks = chunk_graph(_clause_node_graph(_BUNDLE), clause_level=True, token_counter=_word_count)
+    assert len(chunks) == 3
+    # 각 조각이 자기 조항 헤더로 시작한다.
+    assert [c.content.split("\n", 1)[0] for c in chunks] == ["#### 21.8", "#### 21.9", "#### 21.10"]
+    # 동일 노드 → 동일 ontology_node_id + 순번 chunk_id.
+    assert all(c.metadata.ontology_node_id == "gaap-ch21-bundle" for c in chunks)
+    assert [c.chunk_id for c in chunks] == [
+        "gaap-ch21-bundle-0",
+        "gaap-ch21-bundle-1",
+        "gaap-ch21-bundle-2",
+    ]
+
+
+@pytest.mark.unit
+def test_clause_level_preserves_preamble_as_separate_chunk():
+    """첫 조항 헤더 앞 머리말은 별도 조각으로 보존된다."""
+    content = "\n".join(["이 절은 퇴직급여를 다룬다.", "", "#### 21.8", "퇴직급여충당부채는 ... 한다."])
+    chunks = chunk_graph(_clause_node_graph(content), clause_level=True, token_counter=_word_count)
+    assert len(chunks) == 2
+    assert chunks[0].content == "이 절은 퇴직급여를 다룬다."
+    assert chunks[1].content.startswith("#### 21.8")
+
+
+@pytest.mark.unit
+def test_clause_level_does_not_split_on_h5_subheaders():
+    """##### 하위문단 헤더는 경계가 아니라 상위 조항에 귀속된다."""
+    content = "\n".join(
+        [
+            "#### 21.10",
+            "확정급여형퇴직연금제도의 부채는 다음과 같이 처리한다.",
+            "",
+            "##### (1) 종업원이 퇴직하기 전의 경우",
+            "퇴직일시금에 상당하는 금액을 인식한다.",
+            "##### (2) 수급요건을 갖추고 퇴사한 경우",
+            "예상퇴직연금합계액의 현재가치를 측정한다.",
+        ]
+    )
+    chunks = chunk_graph(_clause_node_graph(content), clause_level=True, token_counter=_word_count)
+    assert len(chunks) == 1
+    assert "##### (1)" in chunks[0].content and "##### (2)" in chunks[0].content
+
+
+@pytest.mark.unit
+def test_clause_level_recognizes_branch_number_header():
+    """가지번호(21.5의2) 헤더도 조항 경계로 인식된다."""
+    content = "\n".join(["#### 21.5", "본문 가 나 다.", "", "#### 21.5의2", "가지조항 본문 라 마 바."])
+    chunks = chunk_graph(_clause_node_graph(content), clause_level=True, token_counter=_word_count)
+    assert len(chunks) == 2
+    assert chunks[0].content.startswith("#### 21.5\n")
+    assert chunks[1].content.startswith("#### 21.5의2")
+
+
+@pytest.mark.unit
+def test_clause_level_falls_back_to_token_split_for_clauseless_node():
+    """조항 헤더가 없는 노드는 clause_level에서도 토큰 한도 분할만 적용된다."""
+    content = "\n".join(["가 나 다 라", "마 바 사 아", "자 차 카 타", "파 하 거 너"])
+    chunks = chunk_graph(
+        _clause_node_graph(content), clause_level=True, max_tokens=5, token_counter=_word_count
+    )
+    # 헤더가 없으니 조항 분할은 일어나지 않고 _split_content(max_tokens=5)만 동작 → 4조각.
+    assert len(chunks) == 4
+    assert all(_word_count(c.content) <= 5 for c in chunks)
+
+
+@pytest.mark.unit
+def test_clause_level_applies_token_split_within_oversized_clause():
+    """조항 분할 후 한 조각이 토큰 상한을 넘으면 _split_content 2차 분할이 적용된다(손실 없음).
+
+    실측상 6·21장에는 1024를 넘는 단일 조항이 없어 이 경로는 안전망이다.
+    헤더 전파(쪼개진 뒷조각에 #### 헤더 부착)는 의도적으로 미구현 — 死코드라 단순화.
+    """
+    content = "\n".join(["#### 21.8", "가 나 다 라 마 바 사 아 자 차"])
+    chunks = chunk_graph(
+        _clause_node_graph(content), clause_level=True, max_tokens=5, token_counter=_word_count
+    )
+    assert len(chunks) >= 2
+    assert all(_word_count(c.content) <= 5 for c in chunks)
+    # 전체 토큰(헤더 포함)이 보존된다.
+    assert " ".join(c.content for c in chunks).split() == content.split()
+
+
+@pytest.mark.unit
+def test_clause_level_false_is_unchanged_default():
+    """clause_level 미지정(기본 False)이면 기존 동작과 동일하다(운영 경로 회귀 가드)."""
+    default = chunk_graph(_clause_node_graph(_BUNDLE), token_counter=_word_count)
+    explicit_false = chunk_graph(
+        _clause_node_graph(_BUNDLE), clause_level=False, token_counter=_word_count
+    )
+    # 기본은 조항 분할을 하지 않으므로 다발이 한 청크(토큰 한도 이하)로 남는다.
+    assert len(default) == 1
+    assert default[0].chunk_id == "gaap-ch21-bundle"
+    assert [c.chunk_id for c in default] == [c.chunk_id for c in explicit_false]

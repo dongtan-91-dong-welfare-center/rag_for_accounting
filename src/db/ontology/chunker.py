@@ -34,6 +34,10 @@ logger = get_logger(__name__)
 # 문장 경계 분할용 — 마침표·물음표·느낌표(한글/전각 포함) 뒤의 공백에서 끊는다.
 _SENTENCE_RE = re.compile(r"(?<=[.。!?！？])\s+")
 
+# 조항 헤더 경계 분할용 — "#### 21.8", "#### 2.6.5", "#### 21.5의2"를 줄 시작에서 잡는다.
+# 채점기(tests/utils/benchmark_metrics._CHUNK_PARA_RE)와 동일 본체라 분할 경계와 채점 기준이 일치한다.
+_CLAUSE_HEADER_RE = re.compile(r"^####\s+\d+\.\d+(?:\.\d+)?(?:의\d+)?", re.MULTILINE)
+
 
 def _greedy_pack(units: list[str], sep: str, max_tokens: int, count: Callable[[str], int]) -> list[str]:
     """조각을 순서대로 이어붙이되, 토큰 한도를 넘기 직전까지 한 덩어리로 묶는다.
@@ -111,12 +115,38 @@ def _split_content(content: str, max_tokens: int, count: Callable[[str], int]) -
     return [p for p in pieces if p.strip()]
 
 
+def _split_by_clause(content: str) -> list[str]:
+    """노드 content를 조항 헤더(#### N.N) 경계로 분할한다.
+
+    각 헤더부터 다음 헤더 직전까지가 한 조각이다. 첫 헤더 앞 머리말은 별도 조각으로 보존한다.
+    헤더가 없으면 분할하지 않고 [content] 그대로 반환한다(clause-less 거대 노드 → 호출측이 토큰 분할).
+    H5(##### …) 등 하위 헤더는 경계로 쓰이지 않아 상위 조항 조각에 귀속된다.
+    """
+    starts = [m.start() for m in _CLAUSE_HEADER_RE.finditer(content)]
+    if not starts:
+        return [content]
+    pieces: list[str] = []
+    # 첫 조항 헤더 앞 머리말은 독립 조각으로 둔다.
+    if starts[0] > 0:
+        head = content[: starts[0]].strip()
+        if head:
+            pieces.append(head)
+    # 각 헤더부터 다음 헤더 직전까지를 한 조항 조각으로 묶는다.
+    for i, start in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(content)
+        piece = content[start:end].strip()
+        if piece:
+            pieces.append(piece)
+    return pieces
+
+
 def chunk_graph(
     graph: OntologyGraph,
     *,
     document_id: str | None = None,
     source_path: str | None = None,
     max_tokens: int = EMBEDDING_MAX_TOKENS,
+    clause_level: bool = False,
     token_counter: Callable[[str], int] = count_tokens,
 ) -> list[RetrievedChunk]:
     """온톨로지 그래프를 검색 청크 리스트로 변환한다.
@@ -125,6 +155,7 @@ def chunk_graph(
     :param document_id: 기준서 단위 식별자. None이면 Standard 노드의 id를 사용한다(장 단위).
     :param source_path: 원본 파일 경로(파서 메타데이터). 지정 시 ChunkMetadata extra 필드로 전파.
     :param max_tokens: 청크 1개의 토큰 상한. 초과 노드는 분할된다(기본 EMBEDDING_MAX_TOKENS).
+    :param clause_level: True면 조항 헤더(#### N.N) 경계로 먼저 분할한 뒤 토큰 상한을 적용한다. 기본 False(현행 동작 불변).
     :param token_counter: 토큰 수 계산 함수. 기본은 KURE-v1 토크나이저. 테스트에서 모델 로드 없이 가벼운 함수를 주입할 수 있도록 인자로 노출한다.
     :return: RetrievedChunk 리스트. 각 청크는 metadata.ontology_node_id를 보유하고 score=0.0.
     :raises OntologyParsingError: content 노드가 있는데 document_id를 결정할 수 없을 때 (OT-103)
@@ -152,7 +183,16 @@ def chunk_graph(
 
     chunks: list[RetrievedChunk] = []
     for node in content_nodes:
-        pieces = _split_content(node.content.strip(), max_tokens, token_counter)
+        text = node.content.strip()
+        if clause_level:
+            # 조항 경계로 1차 분할한 뒤, 각 조각에 토큰 상한 2차 분할(거대 clause-less 노드 안전망).
+            pieces = [
+                p
+                for seg in _split_by_clause(text)
+                for p in _split_content(seg, max_tokens, token_counter)
+            ]
+        else:
+            pieces = _split_content(text, max_tokens, token_counter)
         is_single = len(pieces) == 1
         for seq, piece in enumerate(pieces):
             # 분할되지 않은 노드는 chunk_id == node.id (노드 ↔ 청크 1:1).
