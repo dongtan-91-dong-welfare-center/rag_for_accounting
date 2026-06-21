@@ -28,7 +28,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src.db.connection import close_pool, init_pool
-from src.utils.config import CHUNKS_TABLE
+from src.utils.config import CHUNKS_TABLE, EMBEDDING_MAX_TOKENS
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,12 +71,16 @@ def _build_graph_from_source(args):
     return graph, str(md_path)
 
 
-def _index_graph(graph, source_path: str | None, collection: str) -> dict:
+def _index_graph(
+    graph, source_path: str | None, collection: str, *, clause_level: bool, max_tokens: int
+) -> dict:
     """온톨로지 그래프 한 개를 청킹 후 적재하고 IndexingResult를 dict로 반환한다."""
     from src.db.ontology.chunker import chunk_graph
     from src.db.vector_store import index_documents
 
-    chunks = chunk_graph(graph, source_path=source_path)
+    chunks = chunk_graph(
+        graph, source_path=source_path, clause_level=clause_level, max_tokens=max_tokens
+    )
     if not chunks:
         logger.warning(f"청크가 비어 있어 적재를 건너뜁니다: source={source_path}")
         return {"document_id": "", "chunk_count": 0, "status": "failed"}
@@ -116,7 +120,13 @@ def run_ingest(args) -> int:
         total_chunks = 0
         summaries: list[dict] = []
         for graph, source_path in targets:
-            result = _index_graph(graph, source_path, collection)
+            result = _index_graph(
+                graph,
+                source_path,
+                collection,
+                clause_level=args.clause_level,
+                max_tokens=args.max_tokens,
+            )
             total_chunks += result["chunk_count"]
             summaries.append(result)
             print(
@@ -240,6 +250,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"적재 대상 테이블 (기본: {CHUNKS_TABLE} — 검색기와 동일 테이블)",
     )
     p_ingest.add_argument("--reset", action="store_true", help="적재 전 컬렉션을 비운다")
+    p_ingest.add_argument(
+        "--clause-level",
+        action="store_true",
+        help="조항 헤더(#### N.N) 경계로 분할하여 적재. 기본: 온톨로지 노드 단위",
+    )
+    p_ingest.add_argument(
+        "--max-tokens",
+        type=int,
+        default=EMBEDDING_MAX_TOKENS,
+        help=f"청크 1개의 토큰 상한 (기본: {EMBEDDING_MAX_TOKENS})",
+    )
     p_ingest.set_defaults(func=run_ingest)
 
     # query
