@@ -199,11 +199,27 @@ def _print_response(result: dict) -> None:
     print("=" * 60)
 
 
+def _preload_embedding() -> None:
+    """첫 질의 전 임베딩 모델을 preload해 콜드 로드를 step_timeout(노드 30s) 밖으로 분리한다.
+
+    KURE-v1 콜드 로드(mps ~50초)가 search 노드 안에서 일어나면 step_timeout을 넘겨 첫 질의가 TimeoutError로 실패할 수 있다.
+    invoke() 전에 미리 데워 이를 막는다.
+    실패해도(예: HF 접속 불가) 막지 않는다. 첫 질의가 기존 lazy 로드로 폴백한다.
+    """
+    from src.utils.embedding import warmup_model
+
+    try:
+        warmup_model()
+    except Exception as e:  # noqa: BLE001 — preload 실패는 비치명적(lazy 폴백 존재)
+        logger.warning(f"임베딩 preload 실패 — 첫 질의에서 lazy 로드로 폴백: {e}")
+
+
 def run_query(args) -> int:
     """질의 경로 실행. HIL interrupt가 발생하면 결정을 받아 재개한다."""
     from src.agent.workflow import resume_workflow, run_workflow
 
     init_pool()
+    _preload_embedding()  # #168: 첫 질의 콜드 로드를 step_timeout(노드 30s) 밖으로 분리
     try:
         logger.info(f"질의 실행: '{args.query}' (standard={args.standard})")
         result = run_workflow(args.query, standard_filter=args.standard)
