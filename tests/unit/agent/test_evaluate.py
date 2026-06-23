@@ -380,7 +380,7 @@ class TestEvaluateContext:
         """LLM이 is_relevant=True, confidence=0.2를 반환하면 일관성 위반으로 보수적 폴백
 
         is_relevant=True이면서 confidence가 0.3 미만이면 신뢰할 수 없는 평가로 간주한다.
-        is_retryable=False이므로 needs_external=False로 CRAG 루프에 재진입하지 않는다.
+        EV-302 보수적 폴백은 needs_external=False로 설정되어 CRAG 루프에 재진입하지 않는다.
         """
         llm_eval = EvaluationResult(
             is_relevant=True,
@@ -402,14 +402,14 @@ class TestEvaluateContext:
             result = evaluate_context(state)
 
         assert result["evaluation"].is_relevant is False    # 보수적 폴백
-        assert result["evaluation"].needs_external is False # is_retryable=False → 루프 재진입 없음
+        assert result["evaluation"].needs_external is False # needs_external=False → 루프 재진입 없음
         assert result["error_logs"][-1]["error_type"] == "EV-302"   # 에러 타입이 EV-302인지 확인
 
     def test_hallucination_detected_returns_ev303_fallback(self):
         """reasoning에 청크에 없는 조항 번호 인용 시 환각 감지로 is_relevant=False 반환
 
         reasoning에 'K-IFRS 제1116호'가 인용되어 있지만 청크 내용에 해당 조항이 없으면 환각으로 판단.
-        is_retryable=False이므로 needs_external=False로 CRAG 루프에 재진입하지 않는다.
+        EV-303 보수적 폴백은 needs_external=False로 설정되어 CRAG 루프에 재진입하지 않는다.
         """
         llm_eval = EvaluationResult(
             is_relevant=True,
@@ -431,7 +431,7 @@ class TestEvaluateContext:
             result = evaluate_context(state)
 
         assert result["evaluation"].is_relevant is False    # 환각 감지 → is_relevant=False
-        assert result["evaluation"].needs_external is False # is_retryable=False → 루프 재진입 없음
+        assert result["evaluation"].needs_external is False # needs_external=False → 루프 재진입 없음
         assert result["error_logs"][-1]["error_type"] == "EV-303"   # 에러 타입이 EV-303인지 확인
 
 

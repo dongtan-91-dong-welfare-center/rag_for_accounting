@@ -342,11 +342,11 @@ class TestSearchNode:
 
     @patch("src.agent.workflow._search_impl")
     def test_embed_connection_error_triggers_reretrieval(self, mock_search):
-        """CM-002: embed_query 일시 장애(LLMAPIConnectionError, is_retryable=True)
+        """CM-002: embed_query 일시 장애(LLMAPIConnectionError)
         → needs_reretrieval=True, retrieved_chunks=[], error_logs 기록
 
-        embed_query 실패는 SE-101/102와 달리 일반 AccountingRAGError 분기로 떨어지지만,
-        is_retryable=True인 일시 장애이므로 SE-103(결과없음)과 구분해 CRAG 루프로 재진입해야 한다.
+        embed_query 실패는 SE-101/102와 함께 재시도 가능한 일시 장애로 타입 분기되어
+        SE-103(결과없음)과 구분해 CRAG 루프로 재진입해야 한다.
         """
         mock_search.side_effect = LLMAPIConnectionError("임베딩 API 연결 실패", node="search")
 
