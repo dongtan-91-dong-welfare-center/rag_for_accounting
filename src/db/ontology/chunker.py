@@ -24,7 +24,7 @@ from collections.abc import Callable
 
 from src.db.ontology.models import OntologyGraph
 from src.models.schemas import ChunkMetadata, RetrievedChunk
-from src.utils.config import EMBEDDING_MAX_TOKENS
+from src.utils.config import CHUNK_MAX_TOKENS
 from src.utils.embedding import count_tokens
 from src.utils.exception import OntologyParsingError
 from src.utils.logger import get_logger
@@ -145,7 +145,7 @@ def chunk_graph(
     *,
     document_id: str | None = None,
     source_path: str | None = None,
-    max_tokens: int = EMBEDDING_MAX_TOKENS,
+    max_tokens: int = CHUNK_MAX_TOKENS,
     clause_level: bool = False,
     token_counter: Callable[[str], int] = count_tokens,
 ) -> list[RetrievedChunk]:
@@ -154,7 +154,7 @@ def chunk_graph(
     :param graph: build_graph(또는 parse_markdown) 결과 그래프
     :param document_id: 기준서 단위 식별자. None이면 Standard 노드의 id를 사용한다(장 단위).
     :param source_path: 원본 파일 경로(파서 메타데이터). 지정 시 ChunkMetadata extra 필드로 전파.
-    :param max_tokens: 청크 1개의 토큰 상한. 초과 노드는 분할된다(기본 EMBEDDING_MAX_TOKENS).
+    :param max_tokens: 청크 1개의 토큰 상한. 초과 노드는 분할된다(기본 CHUNK_MAX_TOKENS).
     :param clause_level: True면 조항 헤더(#### N.N) 경계로 먼저 분할한 뒤 토큰 상한을 적용한다. 기본 False(현행 동작 불변).
     :param token_counter: 토큰 수 계산 함수. 기본은 KURE-v1 토크나이저. 테스트에서 모델 로드 없이 가벼운 함수를 주입할 수 있도록 인자로 노출한다.
     :return: RetrievedChunk 리스트. 각 청크는 metadata.ontology_node_id를 보유하고 score=0.0.

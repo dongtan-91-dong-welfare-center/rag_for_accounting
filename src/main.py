@@ -28,7 +28,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src.db.connection import close_pool, init_pool
-from src.utils.config import CHUNKS_TABLE, EMBEDDING_MAX_TOKENS
+from src.utils.config import CHUNK_MAX_TOKENS, CHUNKS_TABLE
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -258,8 +258,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument(
         "--max-tokens",
         type=int,
-        default=EMBEDDING_MAX_TOKENS,
-        help=f"청크 1개의 토큰 상한 (기본: {EMBEDDING_MAX_TOKENS})",
+        default=CHUNK_MAX_TOKENS,
+        help=f"청크 1개의 토큰 상한 (기본: {CHUNK_MAX_TOKENS})",
     )
     p_ingest.set_defaults(func=run_ingest)
 
