@@ -1,6 +1,6 @@
 {
   "_comment": "NFR-002 조항정확도 비회귀 플로어. hits >= floor - tolerance 일 때 통과. 검색단계만 게이트(생성단계는 비결정적 → 리포트 전용). corpus 불일치 시 플로어 단언 skip(데이터 상태 != 코드 회귀). 코퍼스 재적재 또는 벤치마크 gold 재교정 시 이 파일을 재시드할 것.",
-  "seeded_from": "docs/measurements/baseline_20260617_2057.json",
+  "seeded_from": "docs/measurements/baseline_20260623_2109.json",
   "corpus": {
     "indexed_chapters": [
       "1",
@@ -37,7 +37,7 @@
       "32",
       "33"
     ],
-    "n_chunks": 1042
+    "n_chunks": 1072
   },
   "k": 10,
   "n_measured": 14,

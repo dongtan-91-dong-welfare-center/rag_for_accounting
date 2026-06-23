@@ -30,6 +30,12 @@ EMBEDDING_MODEL: str = "nlpai-lab/KURE-v1"
 EMBEDDING_DIM: int = 1024   # KURE-v1(bge-m3 기반) 벡터 차원 수 → pgvector vector(1024)
 EMBEDDING_MAX_TOKENS: int = 8192    # KURE-v1 컨텍스트 한도 — 초과 청크는 IX-201로 스킵(부분 커밋)
 
+# 청킹 분할 상한 — 노드를 이 토큰 수 이하 조각으로 분할해 적재한다(chunk_graph 기본값).
+# EMBEDDING_MAX_TOKENS(모델 한도·IX-201 스킵 임계)와 분리한다: 
+# 거대 노드를 한 벡터로 임베딩할 때 MPS OOM(메모리 ∝ batch×seq²)을 막기 위함
+# 2048은 33장 실측상 정상 조항 다발(대부분 ≤2048)은 보존하고 거대 clause-less 블록(결론도출근거·실무지침 등)만 분할하는 값.
+CHUNK_MAX_TOKENS: int = 2048
+
 # 임베딩 실행 자원 설정 — 대량 적재 시 CPU 포화·메모리 누적 OOM 완화용. 모두 env로 override.
 #   - EMBEDDING_DEVICE: "auto"면 _get_model()이 cuda → mps → cpu 순으로 가용 디바이스를 고른다.
 #     Docker on Mac 컨테이너에는 MPS/Metal이 패스스루되지 않아 자동으로 cpu가 된다. 호스트 네이티브
