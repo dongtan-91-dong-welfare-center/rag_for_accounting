@@ -13,6 +13,12 @@
 """
 import pytest
 from unittest.mock import MagicMock, patch
+
+import httpx
+import pydantic
+from pydantic import BaseModel
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+
 from src.models.schemas import (
     RetrievedChunk,
     RerankingResult,
@@ -309,11 +315,12 @@ class TestEvaluateContext:
         assert eval_result.confidence == 0.85   # LLM 응답 유지
         assert "error_logs" not in result   # 에러 없음
 
-    def test_llm_parsing_failure_returns_conservative_fallback(self):
-        """EvaluationParsingError 발생 시 보수적 폴백이 반환되고 error_logs에 기록되는지 검증
+    def test_unexpected_model_behavior_wrapped_as_ev301(self):
+        """run_sync의 UnexpectedModelBehavior가 EV-301로 래핑되어 보수적 폴백·error_logs로 기록되는지 검증
 
-        [EV-301] EvaluationParsingError는 AccountingRAGError 계열이므로 to_error_log()를 통해 구조화된 로그로 변환되어 error_logs에 누적된다.
-        폴백은 is_relevant=False, needs_external=True로 설정되어 CRAG 루프 재진입을 유도한다.
+        [EV-301] 실제 LLM 파싱 실패 경로를 재현한다. 
+        inner try의 래핑이 없으면 except Exception으로 떨어져 노드가 하드 크래시하므로,
+        UnexpectedModelBehavior → EvaluationParsingError 변환이 동작해야 보수적 폴백이 반환된다.
         """
         state = GraphState(
             original_query="리스 회계처리는?",
@@ -324,13 +331,59 @@ class TestEvaluateContext:
                 ),
             ],
         )
-        with _mock_evaluator_agent(error=EvaluationParsingError("JSON 파싱 실패")):
+        with _mock_evaluator_agent(error=UnexpectedModelBehavior("예상치 못한 모델 출력")):
             result = evaluate_context(state)
 
         assert result["evaluation"].is_relevant is False    # 보수적 폴백
         assert result["evaluation"].needs_external is True  # CRAG 루프 재진입 유도
         assert "error_logs" in result   # error_logs가 존재하는지 확인
         assert result["error_logs"][0]["error_type"] == "EV-301"    # 에러 타입이 EV-301인지 확인
+
+    def test_pydantic_validation_error_wrapped_as_ev301(self):
+        """run_sync의 pydantic.ValidationError가 EV-301로 래핑되는지 검증 (래핑 튜플의 나머지 한 갈래)"""
+        class _M(BaseModel):
+            x: int
+
+        try:
+            _M(x="잘못된 값")  # type: ignore[arg-type]
+        except pydantic.ValidationError as ve:
+            validation_error = ve
+
+        state = GraphState(
+            original_query="리스 회계처리는?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="리스 회계처리...", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_evaluator_agent(error=validation_error):
+            result = evaluate_context(state)
+
+        assert result["evaluation"].is_relevant is False    # 보수적 폴백
+        assert result["error_logs"][0]["error_type"] == "EV-301"    # 에러 타입이 EV-301인지 확인
+
+    def test_httpx_request_error_wrapped_as_cm002(self):
+        """run_sync의 httpx.RequestError가 CM-002로 래핑되어 보수적 폴백·error_logs로 기록되는지 검증
+
+        EV-301 래핑과 같은 inner try에서 처리한다. 래핑이 없으면 except Exception으로 떨어져 크래시하므로,
+        httpx.RequestError → LLMAPIConnectionError(CM-002) 변환이 동작해야 한다.
+        """
+        state = GraphState(
+            original_query="리스 회계처리는?",
+            reranked_chunks=[
+                RerankingResult(
+                    chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="리스 회계처리...", score=0.9, metadata={}),
+                    rerank_score=0.95,
+                ),
+            ],
+        )
+        with _mock_evaluator_agent(error=httpx.RequestError("연결 실패")):
+            result = evaluate_context(state)
+
+        assert result["evaluation"].is_relevant is False    # 보수적 폴백
+        assert result["error_logs"][-1]["error_type"] == "CM-002"   # httpx.RequestError → CM-002
 
     def test_llm_api_error_below_max_retries_triggers_reentry(self):
         """rewrite_count < MAX_REWRITE_COUNT → needs_external=True로 CRAG 루프 재진입
@@ -380,7 +433,7 @@ class TestEvaluateContext:
         """LLM이 is_relevant=True, confidence=0.2를 반환하면 일관성 위반으로 보수적 폴백
 
         is_relevant=True이면서 confidence가 0.3 미만이면 신뢰할 수 없는 평가로 간주한다.
-        is_retryable=False이므로 needs_external=False로 CRAG 루프에 재진입하지 않는다.
+        EV-302 보수적 폴백은 needs_external=False로 설정되어 CRAG 루프에 재진입하지 않는다.
         """
         llm_eval = EvaluationResult(
             is_relevant=True,
@@ -402,14 +455,14 @@ class TestEvaluateContext:
             result = evaluate_context(state)
 
         assert result["evaluation"].is_relevant is False    # 보수적 폴백
-        assert result["evaluation"].needs_external is False # is_retryable=False → 루프 재진입 없음
+        assert result["evaluation"].needs_external is False # needs_external=False → 루프 재진입 없음
         assert result["error_logs"][-1]["error_type"] == "EV-302"   # 에러 타입이 EV-302인지 확인
 
     def test_hallucination_detected_returns_ev303_fallback(self):
         """reasoning에 청크에 없는 조항 번호 인용 시 환각 감지로 is_relevant=False 반환
 
         reasoning에 'K-IFRS 제1116호'가 인용되어 있지만 청크 내용에 해당 조항이 없으면 환각으로 판단.
-        is_retryable=False이므로 needs_external=False로 CRAG 루프에 재진입하지 않는다.
+        EV-303 보수적 폴백은 needs_external=False로 설정되어 CRAG 루프에 재진입하지 않는다.
         """
         llm_eval = EvaluationResult(
             is_relevant=True,
@@ -431,7 +484,7 @@ class TestEvaluateContext:
             result = evaluate_context(state)
 
         assert result["evaluation"].is_relevant is False    # 환각 감지 → is_relevant=False
-        assert result["evaluation"].needs_external is False # is_retryable=False → 루프 재진입 없음
+        assert result["evaluation"].needs_external is False # needs_external=False → 루프 재진입 없음
         assert result["error_logs"][-1]["error_type"] == "EV-303"   # 에러 타입이 EV-303인지 확인
 
 

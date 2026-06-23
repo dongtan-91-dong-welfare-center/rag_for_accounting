@@ -24,6 +24,7 @@ from src.utils.exception import (
     SearchTimeoutError,
     DatabaseQueryError,
     NoContextFoundError,
+    LLMAPIConnectionError,
 )
 from src.utils.logger import get_logger
 from src.models.state import GraphState
@@ -219,8 +220,8 @@ def search(state: GraphState) -> dict:
         merged = sorted(all_chunks.values(), key=lambda c: c.score, reverse=True)[:TOP_K_RETRIEVAL]
         return {"retrieved_chunks": merged}
 
-    except (SearchTimeoutError, DatabaseQueryError) as e:
-        # SE-101/SE-102: 재시도 가능한 타임아웃·DB 오류 → CRAG 루프 재진입
+    except (SearchTimeoutError, DatabaseQueryError, LLMAPIConnectionError) as e:
+        # SE-101/SE-102/CM-002: 재시도 가능한 타임아웃·DB 오류·임베딩 일시 장애 → CRAG 루프 재진입
         new_logs = state.error_logs + [e.to_error_log()]
         return {
             "retrieved_chunks": [],
@@ -236,13 +237,13 @@ def search(state: GraphState) -> dict:
             "error_logs": new_logs,
         }
     except AccountingRAGError as e:
-        # 기타 도메인 에러: is_retryable로 재검색 여부 결정.
-        # embed_query 일시 장애(CM-002, is_retryable=True)는 SE-101/102와 동일하게 CRAG 루프로 재진입시키고
-        # 재시도 무의미한 에러는 SE-103처럼 빈 결과로 진행한다.
+        # 그 외 예기치 못한 도메인 에러: 크래시 대신 graceful 강등.
+        # 재진입이 유의미한 일시 장애(SE-101/102/CM-002)는 위에서 타입으로 분기하므로,
+        # 여기 도달하는 에러는 재시도 무의미로 보고 SE-103처럼 빈 결과로 진행한다.
         new_logs = state.error_logs + [e.to_error_log()]
         return {
             "retrieved_chunks": [],
-            "needs_reretrieval": e.is_retryable,
+            "needs_reretrieval": False,
             "error_logs": new_logs,
         }
     except Exception as e:

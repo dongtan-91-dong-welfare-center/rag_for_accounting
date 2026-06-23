@@ -356,8 +356,8 @@ class TestRewriteQuery:
         assert len(state.rewritten_query.search_queries) == 2
 
     def test_unknown_strategy_fallback_to_bypass_with_error_log(self):
-        # _STRATEGY_FN["unknown_strategy"] → KeyError 발생 → rewrite_query outer except에서 잡힘
-        # 예외가 rewrite_query까지 전파되므로 error_logs에 기록됨
+        # 미정의 전략 → 명시 검증에서 ValueError 발생 → rewrite_query outer except에서 잡힘
+        # 예외가 rewrite_query까지 전파되므로 error_logs에 기록됨 (메시지에 전략명 포함)
         # cf. test_all_llm_failure: 각 함수가 예외를 내부에서 삼키므로 outer except 미발동
         with patch("src.agent.nodes.rewrite.classify_and_select") as mock_classify:
             mock_classify.return_value = (True, "unknown_strategy", 0.8)
@@ -366,12 +366,13 @@ class TestRewriteQuery:
         assert state.rewritten_query.search_queries == ["영업권 손상차손 인식 기준은?"]
         assert len(state.error_logs) == 1
         assert state.error_logs[0]["node"] == "rewrite"
-        assert state.error_logs[0]["error_type"] == "KeyError"
+        assert state.error_logs[0]["error_type"] == "ValueError"
+        assert "unknown_strategy" in state.error_logs[0]["message"]
 
     def test_all_llm_failure_falls_back_to_hyde_with_original(self):
         # classify_and_select 내부 except → (True, "hyde") 반환, apply_hyde 내부 except → [query] 반환
         # 예외가 각 함수 안에서 삼켜져 rewrite_query까지 전파되지 않으므로 outer except 미발동
-        # cf. test_unknown_strategy: KeyError는 rewrite_query 내부에서 직접 발생해 outer except에 잡힘
+        # cf. test_unknown_strategy: 미정의 전략은 rewrite_query 내부 명시 검증의 ValueError로 outer except에 잡힘
         with patch(self.PATCH) as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("network error")
             state = rewrite_query(self._make_state("영업권 손상차손 인식 기준은?"))

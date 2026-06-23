@@ -57,7 +57,7 @@ class TestRewriteNodeContract:
     def test_rewrite_fallback_contract(self, mock_classify):
         """Fallback 동작 검증:
         1. classify_and_select 패치를 통해 (True, "invalid_strategy", 0.7) 반환.
-        2. 발생하는 KeyError를 통해 strategy="bypass"로 폴백 및 error_logs 기록 검증.
+        2. 미정의 전략 명시 검증의 ValueError를 통해 strategy="bypass"로 폴백 및 error_logs 기록 검증.
         """
         mock_classify.return_value = (True, "invalid_strategy", 0.7)
 
@@ -76,7 +76,7 @@ class TestRewriteNodeContract:
 
         # error_logs 기록 검증
         assert len(result["error_logs"]) > 0    # 에러 로그 기록
-        assert any(log["node"] == "rewrite" and "KeyError" in log["error_type"] for log in result["error_logs"]) # KeyError 검증
+        assert any(log["node"] == "rewrite" and "ValueError" in log["error_type"] for log in result["error_logs"]) # ValueError 검증
 
 
 @pytest.mark.unit

@@ -186,6 +186,10 @@ def rewrite_query(state: GraphState) -> GraphState:
             )
             return state
 
+        # 분류기가 _STRATEGY_FN에 없는 전략(프롬프트가 허용하는 'bypass' 등)을 반환할 수 있으므로 암묵적 KeyError에 의존하지 않고 명시적으로 검증한다.
+        # 미정의 전략은 아래 outer except가 bypass로 강등한다.
+        if strategy not in _STRATEGY_FN:
+            raise ValueError(f"분류기가 미정의 전략을 반환: {strategy!r}")
         queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter, feedback)
         state.rewritten_query = RewrittenQuery(
             original_query=state.original_query,
@@ -194,6 +198,8 @@ def rewrite_query(state: GraphState) -> GraphState:
         )
 
     except Exception as e:
+        # 백스톱(삭제 금지): 위 명시 검증의 ValueError 및 분류·전략 적용 중 예기치 못한 예외를 graceful bypass DEGRADE로 강등하고 error_logs에 적재한다. 
+        # inner 헬퍼 폴백과 중복이 아니라, 헬퍼가 못 잡는 디스패치/구성 오류의 유일한 error_logs 적재처다.
         state.rewritten_query = RewrittenQuery(
             original_query=state.original_query,
             strategy="bypass",
