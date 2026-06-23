@@ -1,7 +1,10 @@
 # FUNC-007: 검색 맥락 평가 노드 (CRAG 패턴)
 import re
 
+import httpx
+import pydantic
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from src.models.state import GraphState
 from src.models.schemas import RerankingResult, EvaluationResult
 from src.agent.prompts import EVALUATION_PROMPT
@@ -101,8 +104,15 @@ def evaluate_context(state: GraphState) -> dict:
     evaluator_agent = Agent(f"openai-chat:{OPENAI_MODEL}", output_type=EvaluationResult)
 
     try:
-        result = evaluator_agent.run_sync(prompt)
-        eval_result: EvaluationResult = result.output
+        # PydanticAI 실행 — 파싱 실패(pydantic.ValidationError/UnexpectedModelBehavior)를 EV-301로 래핑한다.
+        # (generate 노드와 동일 패턴) 래핑하지 않으면 아래 except Exception으로 떨어져 노드가 하드 크래시한다.
+        try:
+            result = evaluator_agent.run_sync(prompt)
+            eval_result: EvaluationResult = result.output
+        except (pydantic.ValidationError, UnexpectedModelBehavior) as e:
+            raise EvaluationParsingError(f"LLM 평가 응답 파싱 실패: {e}")
+        except httpx.RequestError as e:
+            raise LLMAPIConnectionError(f"LLM API 연결 오류: {e}", node="evaluate")
     except EvaluationParsingError as e:
         # EV-301: 파싱 실패 → CRAG 루프 재진입 유도 (보수적 폴백)
         new_logs = state.error_logs + [e.to_error_log()]
