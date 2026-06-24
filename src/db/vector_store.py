@@ -18,7 +18,7 @@ from psycopg import errors, sql
 from psycopg.types.json import Jsonb
 
 from src.db.connection import get_pool
-from src.models.schemas import RetrievedChunk, IndexingResult
+from src.models.schemas import RetrievedChunk, IndexingResult, SkippedChunk
 from src.utils.config import BATCH_SIZE, EMBEDDING_DIM, EMBEDDING_MAX_TOKENS, SEARCH_TIMEOUT_SECONDS
 from src.utils.embedding import embed_texts, count_tokens
 from src.utils.exception import (
@@ -132,7 +132,8 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
     - EMBEDDING_MAX_TOKENS 초과 청크는 IX-201로 기록하고 청크 단위 스킵
     - 배치(BATCH_SIZE) 단위 부분 커밋: 실패 배치는 건너뛰고 나머지를 계속 처리
 
-    :return: IndexingResult — status는 전량 성공 "success" / 일부 성공 "partial" / 전량 실패 "failed"
+    :return: IndexingResult — status는 전량 성공 "success" / 일부 성공 "partial" / 전량 실패 "failed".
+        누락 청크(IX-201·배치실패)는 skipped_chunks에 사유와 함께 담아 복구 신호로 노출한다.
     """
     if not chunks:
         # 빈 입력은 저장할 것이 없는 비정상 호출이므로 failed로 보고한다 (인제스트 테스트 규약)
@@ -145,14 +146,22 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
     except AccountingRAGError as e:
         # 테이블조차 보장할 수 없으면 어떤 배치도 성공할 수 없으므로 즉시 failed 반환
         logger.error(f"인덱싱 중단 — 컬렉션 보장 실패: {e.message}")
-        return IndexingResult(document_id=document_id, chunk_count=0, status="failed")
+        # 입력 전 청크를 누락으로 기록해 복구 신호를 남긴다
+        skipped = [
+            SkippedChunk(chunk_id=c.chunk_id, error_type=e.error_type, reason=e.message)
+            for c in chunks
+        ]
+        return IndexingResult(
+            document_id=document_id, chunk_count=0, status="failed", skipped_chunks=skipped
+        )
 
     success_count = 0
+    skipped: list[SkippedChunk] = []
     for start in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[start:start + BATCH_SIZE]
+        valid_chunks = []
         try:
             # IX-201: 토큰 한도 초과 청크는 잘린 벡터가 저장되지 않도록 사전에 걸러 스킵한다
-            valid_chunks = []
             for chunk in batch:
                 token_count = count_tokens(chunk.content)
                 if token_count > EMBEDDING_MAX_TOKENS:
@@ -161,6 +170,9 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
                         f"tokens={token_count} > {EMBEDDING_MAX_TOKENS}"
                     )
                     logger.warning(f"[{error.error_type}] {error.message}")
+                    skipped.append(SkippedChunk(
+                        chunk_id=chunk.chunk_id, error_type=error.error_type, reason=error.message
+                    ))
                 else:
                     valid_chunks.append(chunk)
 
@@ -173,6 +185,11 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
         except AccountingRAGError as e:
             # CM-002(임베딩)·SE-102(DB) 등 배치 단위 실패 — 부분 커밋 정책에 따라 다음 배치 계속
             logger.error(f"[{e.error_type}] 배치 인덱싱 실패 (chunks[{start}:{start + len(batch)}]): {e.message}")
+            # 해당 배치의 valid_chunks(IX-201로 이미 걸러진 청크 제외)를 누락으로 기록
+            skipped.extend(
+                SkippedChunk(chunk_id=c.chunk_id, error_type=e.error_type, reason=e.message)
+                for c in valid_chunks
+            )
             continue
         finally:
             # 배치마다 해제 힙을 OS에 반환해 누적 RSS 증가를 완화한다
@@ -185,11 +202,15 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
     else:
         status = "failed"
 
+    if skipped:
+        logger.info(f"누락 청크 {len(skipped)}건: ids={[s.chunk_id for s in skipped]}")
     logger.info(
         f"인덱싱 완료: document_id={document_id}, collection={collection}, "
         f"{success_count}/{len(chunks)}건 저장, status={status}"
     )
-    return IndexingResult(document_id=document_id, chunk_count=success_count, status=status)
+    return IndexingResult(
+        document_id=document_id, chunk_count=success_count, status=status, skipped_chunks=skipped
+    )
 
 
 def similarity_search(query_vector: list[float], top_k: int, collection: str) -> list[RetrievedChunk]:

@@ -122,6 +122,12 @@ class TestIndexDocuments:
 
         assert result.status == "partial"
         assert result.chunk_count == 1
+        # 스킵된 청크가 IX-201로 추적되어야 한다
+        assert len(result.skipped_chunks) == 1
+        assert result.skipped_chunks[0].chunk_id == "c0"
+        assert result.skipped_chunks[0].error_type == "IX-201"
+        # 불변식: 성공 + 스킵 = 전체 입력
+        assert result.chunk_count + len(result.skipped_chunks) == 2
 
     def test_embedding_failure_returns_failed(self, mock_db_pool, mock_embedding):
         """임베딩 호출 실패(CM-002) 시 해당 배치 전체 실패 → 전량 실패면 status=failed"""
@@ -134,6 +140,10 @@ class TestIndexDocuments:
 
         assert result.status == "failed"
         assert result.chunk_count == 0
+        # 전량 실패(CM-002) 시 입력 청크 전부가 skipped로 기록된다
+        assert len(result.skipped_chunks) == 2
+        assert {s.error_type for s in result.skipped_chunks} == {"CM-002"}
+        assert {s.chunk_id for s in result.skipped_chunks} == {"c0", "c1"}
 
     def test_db_failure_on_upsert_returns_failed(self, mock_db_pool, mock_embedding):
         """upsert 단계 DB 오류(SE-102) 시 예외를 삼키고 status=failed로 보고"""
@@ -157,6 +167,10 @@ class TestIndexDocuments:
 
         assert result.status == "partial"
         assert result.chunk_count == 3      # 배치1(2건) + 배치3(1건)
+        # 실패한 배치2(c2·c3)가 SE-102로 추적된다
+        assert {s.chunk_id for s in result.skipped_chunks} == {"c2", "c3"}
+        assert {s.error_type for s in result.skipped_chunks} == {"SE-102"}
+        assert result.chunk_count + len(result.skipped_chunks) == 5
 
     def test_ensure_collection_failure_returns_failed(self, mock_embedding):
         """테이블 보장(DDL) 실패 시 어떤 배치도 시도하지 않고 즉시 failed"""
@@ -169,6 +183,9 @@ class TestIndexDocuments:
         assert result.status == "failed"
         assert result.chunk_count == 0
         mock_embed.assert_not_called()      # DDL 실패 시 임베딩 비용을 쓰지 않음
+        # DDL 실패 시에도 누락 청크 전부를 SE-102로 추적
+        assert {s.chunk_id for s in result.skipped_chunks} == {"c0", "c1"}
+        assert {s.error_type for s in result.skipped_chunks} == {"SE-102"}
 
 
 # 테스트용 DB 행 데이터 (chunk_id, document_id, content, metadata, score)

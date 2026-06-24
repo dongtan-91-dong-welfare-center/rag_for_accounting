@@ -28,17 +28,30 @@ class FinalResponse(BaseModel):
     confidence_score: float
 
 class ParsedDocument(BaseModel):
-    """파싱된 문서 — Docling 처리 결과 (FUNC-001 출력)"""
+    """파싱된 문서 — Docling 처리 결과 (FUNC-001 출력)
+
+    parser는 src/parse/parser_dtos.py를 통해 이 클래스를 재노출받아 사용한다.
+    """
     title: str
     text: str
-    tables: list[dict]
-    metadata: dict
+    tables: list[dict] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+class SkippedChunk(BaseModel):
+    """index_documents에서 적재되지 못한 청크와 사유 (FUNC-003 부분실패 추적)
+
+    재시도 가능 여부는 error_type에서 파생한다(IX-201 토큰초과=재적재 불가, SE-102 DB·CM-002 임베딩 일시장애=재적재 가능)
+    """
+    chunk_id: str
+    error_type: str   # "IX-201" | "SE-102" | "CM-002" ... (docs/func_interfaces.md 카탈로그)
+    reason: str       # 로그 문구와 동일한 상세 메시지
 
 class IndexingResult(BaseModel):
     """인덱싱 결과 — pgvector 저장 완료 여부 (FUNC-003 출력)"""
     document_id: str
-    chunk_count: int
+    chunk_count: int                                                 # 성공 적재 건수
     status: Literal["success", "partial", "failed"]
+    skipped_chunks: list[SkippedChunk] = Field(default_factory=list)  # 누락 청크 추적
     # @field_validator("chunk_count")
     # def count_positive(cls, v):
     #     assert v >= 0

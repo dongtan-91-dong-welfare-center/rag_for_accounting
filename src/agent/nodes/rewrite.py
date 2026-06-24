@@ -22,9 +22,32 @@ from src.agent.prompts import (
     STEPBACK_PROMPT,
 )
 from src.models.schemas import RewrittenQuery
-from src.models.state import GraphState
+from src.models.state import ErrorLog, GraphState
 from src.utils.config import OPENAI_MODEL
+from src.utils.exception import LLMAPIConnectionError
 from src.utils.llm_client import client
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def _record_llm_failure(fn_name: str, exc: Exception, error_logs: list[ErrorLog] | None) -> None:
+    """rewrite 헬퍼의 LLM 호출 실패를 관찰 가능하게 만든다.
+
+    - 항상 경고 로그를 남긴다(silent 강등 방지). 예외 클래스명을 메시지에 포함하고 exc_info=True로 스택트레이스를 보존하므로 연결 실패와 JSON 파싱 실패를 구분할 수 있다.
+    - error_logs가 주어지면 CM-002 항목을 누적해 상태로 전파한다. 
+        error_type은 CM-002 단일 버킷으로 두되(소비자는 관측 1곳뿐·라우팅 미사용), 세부 원인은 메시지·로그로 구분한다.
+        헬퍼는 폴백(원문·기본 전략)으로 정상 복귀하므로 예외를 재전파하지는 않는다.
+    """
+    logger.warning(
+        "%s LLM 호출 실패[%s] — 폴백 적용: %s", fn_name, type(exc).__name__, exc, exc_info=True
+    )
+    if error_logs is not None:
+        error_logs.append(
+            LLMAPIConnectionError(
+                f"{fn_name} 실패[{type(exc).__name__}]: {exc}", node="rewrite"
+            ).to_error_log()
+        )
 
 
 _STANDARD_LABEL: dict[str, str] = {
@@ -47,7 +70,7 @@ def _strip_markdown(content: str | None) -> str:
     return re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
 
 
-def classify_and_select(query: str) -> tuple[bool, str, float]:
+def classify_and_select(query: str, error_logs: list[ErrorLog] | None = None) -> tuple[bool, str, float]:
     """회계 여부·검색 전략·분류 신뢰도를 단일 LLM 호출로 판단한다. 실패 시 (True, 'hyde', 0.0)로 폴백."""
     try:
         resp = client.chat.completions.create(
@@ -66,8 +89,8 @@ def classify_and_select(query: str) -> tuple[bool, str, float]:
         # 운영 단계에서 분류 경계가 모호한(낮은 신뢰도) 케이스를 추출·분석하는 데 활용된다.
         confidence = _coerce_confidence(data.get("confidence"))
         return is_accounting, strategy, confidence
-    except Exception:
-        # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("classify_and_select failed: %s", e))
+    except Exception as e:
+        _record_llm_failure("classify_and_select", e, error_logs)
         return True, "hyde", 0.0
 
 
@@ -89,7 +112,8 @@ def _feedback_clause(feedback: str | None) -> str:
     )
 
 
-def apply_hyde(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
+def apply_hyde(query: str, standard_filter: str, feedback: str | None = None,
+               error_logs: list[ErrorLog] | None = None) -> list[str]:
     """원문 + 가상 답변을 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
@@ -103,13 +127,13 @@ def apply_hyde(query: str, standard_filter: str, feedback: str | None = None) ->
         hypo = json.loads(_strip_markdown(resp.choices[0].message.content)).get("hypothetical_answer", "")
         if hypo:
             return [query, hypo]
-    except Exception:
-        # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("apply_hyde failed: %s", e))
-        pass
+    except Exception as e:
+        _record_llm_failure("apply_hyde", e, error_logs)
     return [query]
 
 
-def apply_decompose(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
+def apply_decompose(query: str, standard_filter: str, feedback: str | None = None,
+                    error_logs: list[ErrorLog] | None = None) -> list[str]:
     """원문 + 서브쿼리들을 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
@@ -123,13 +147,13 @@ def apply_decompose(query: str, standard_filter: str, feedback: str | None = Non
         subs = json.loads(_strip_markdown(resp.choices[0].message.content)).get("sub_queries", [])
         if subs:
             return [query] + subs
-    except Exception:
-        # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("apply_decompose failed: %s", e))
-        pass
+    except Exception as e:
+        _record_llm_failure("apply_decompose", e, error_logs)
     return [query]
 
 
-def apply_stepback(query: str, standard_filter: str, feedback: str | None = None) -> list[str]:
+def apply_stepback(query: str, standard_filter: str, feedback: str | None = None,
+                   error_logs: list[ErrorLog] | None = None) -> list[str]:
     """원문 + 추상화된 원칙 쿼리를 반환한다. LLM 실패 시 원문만 반환."""
     try:
         resp = client.chat.completions.create(
@@ -143,9 +167,8 @@ def apply_stepback(query: str, standard_filter: str, feedback: str | None = None
         abstract = json.loads(_strip_markdown(resp.choices[0].message.content)).get("abstract_query", "")
         if abstract:
             return [query, abstract]
-    except Exception:
-        # !TODO: logger 구현 후 LLM 호출 실패 경고 로그 기록 (예: logger.warning("apply_stepback failed: %s", e))
-        pass
+    except Exception as e:
+        _record_llm_failure("apply_stepback", e, error_logs)
     return [query]
 
 
@@ -174,7 +197,7 @@ def rewrite_query(state: GraphState) -> GraphState:
     state.human_feedback = None
 
     try:
-        is_accounting, strategy, confidence = classify_and_select(state.original_query)
+        is_accounting, strategy, confidence = classify_and_select(state.original_query, state.error_logs)
         state.is_accounting_query = is_accounting
         state.classification_confidence = confidence
 
@@ -190,7 +213,7 @@ def rewrite_query(state: GraphState) -> GraphState:
         # 미정의 전략은 아래 outer except가 bypass로 강등한다.
         if strategy not in _STRATEGY_FN:
             raise ValueError(f"분류기가 미정의 전략을 반환: {strategy!r}")
-        queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter, feedback)
+        queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter, feedback, state.error_logs)
         state.rewritten_query = RewrittenQuery(
             original_query=state.original_query,
             strategy=strategy,

@@ -104,3 +104,21 @@ class TestParseMethod:
         parser = DoclingParser()
         with pytest.raises(Exception):
             parser.parse("nonexistent.pdf")
+
+
+@pytest.mark.unit
+class TestParsedDocumentDefinition:
+    """ParsedDocument 이원 정의 통합 — parser_dtos ↔ schemas 단일 정본 검증."""
+
+    def test_single_definition_across_import_paths(self):
+        # parser_dtos와 schemas 두 경로가 동일 클래스 객체로 귀결되어야 한다(이원 정의 제거).
+        from src.parse.parser_dtos import ParsedDocument as FromParser
+        from src.models.schemas import ParsedDocument as FromSchemas
+        assert FromParser is FromSchemas
+
+    def test_tables_metadata_default_to_empty(self):
+        # dataclass의 호출 편의(기본값)를 보존 — tables·metadata 미지정 시 빈 컬렉션.
+        from src.models.schemas import ParsedDocument
+        doc = ParsedDocument(title="t", text="body")
+        assert doc.tables == []
+        assert doc.metadata == {}

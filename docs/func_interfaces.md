@@ -15,7 +15,8 @@
 | `EvaluationResult` | is_relevant:bool, needs_external:bool, confidence:float, reasoning:str |
 | `Citation` | document_id:str, chunk_id:str, content:str, relevance_score:float |
 | `FinalResponse` | answer:str, citations:list[`Citation`], is_answerable:bool, confidence_score:float |
-| `IndexingResult` | document_id:str, chunk_count:int, status(`success`\|`partial`\|`failed`) |
+| `IndexingResult` | document_id:str, chunk_count:int, status(`success`\|`partial`\|`failed`), skipped_chunks:list[`SkippedChunk`] |
+| `SkippedChunk` | chunk_id:str, error_type:str, reason:str (적재 누락 청크 추적) |
 
 ---
 
@@ -83,7 +84,7 @@
 | 코드 | 노드 | 의미 | retryable |
 |---|---|---|---|
 | CM-001 | * | 설정/환경변수 누락 | ✗ |
-| CM-002 | * | LLM API 호출 실패 | ✓ |
+| CM-002 | * | LLM 호출 경로 실패(연결·인증·응답파싱) | ✓ |
 | CM-003 | * | 문서 파싱 실패 (클래스 존재, 미배선 — 착지점 `DoclingParser.parse`) | ✗ |
 | OT-103 | ontology | 구조파싱실패 | ✗ |
 | SE-101/102/103 | search/index | 타임아웃 / DB / 결과없음 | ✓/✓/✗ |
