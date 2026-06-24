@@ -1,4 +1,5 @@
 import json
+import logging
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -378,7 +379,10 @@ class TestRewriteQuery:
             state = rewrite_query(self._make_state("영업권 손상차손 인식 기준은?"))
         assert state.rewritten_query.strategy == "hyde"
         assert state.rewritten_query.search_queries == ["영업권 손상차손 인식 기준은?"]
-        assert state.error_logs == []
+        # 폴백은 유지하되, classify_and_select·apply_hyde 두 헬퍼의 LLM 실패가 더 이상 silent하지 않고 각각 CM-002로 state.error_logs에 누적된다.
+        assert len(state.error_logs) == 2  # classify_and_select + apply_hyde
+        assert [e["error_type"] for e in state.error_logs] == ["CM-002", "CM-002"]
+        assert all(e["node"] == "rewrite" for e in state.error_logs)
 
     def test_original_query_always_first_in_search_queries(self):
         query = "리스부채 최초 인식 방법은?"
@@ -416,7 +420,10 @@ class TestRewriteQuery:
         assert rq.search_queries[1] == "fallback_ans"
         assert rq.search_queries[0] == original_query     # 원문이 첫 번째 쿼리로 유지
         assert rq.original_query == original_query         # 원문 필드 보존
-        assert state.error_logs == []
+        # 분류 실패가 함수 안에서 삼켜져 outer except는 미발동하나, 분류 실패 1건이 CM-002로 기록된다(전략 성공분은 기록 없음).
+        assert len(state.error_logs) == 1
+        assert state.error_logs[0]["error_type"] == "CM-002"
+        assert state.error_logs[0]["node"] == "rewrite"
 
     def test_classify_succeeds_but_strategy_fails(self):
         # 첫 호출(분류)은 성공하여 "decompose" 할당
@@ -433,7 +440,22 @@ class TestRewriteQuery:
         assert rq.strategy == "decompose"                  # 분류 성공 결과 유지
         assert rq.search_queries == [original_query]       # 원문 보존
         assert rq.original_query == original_query         # 원문 필드 보존
-        assert state.error_logs == []
+        # 전략(apply_decompose) 실패가 함수 안에서 삼켜져 outer except는 미발동하나, 전략 실패 1건이 CM-002로 기록된다(분류 성공분은 기록 없음).
+        assert len(state.error_logs) == 1
+        assert state.error_logs[0]["error_type"] == "CM-002"
+        assert state.error_logs[0]["node"] == "rewrite"
+
+    def test_llm_failure_emits_warning_log(self, caplog):
+        # AC "LLM 실패 시 경고 로그가 남는다"를 직접 검증한다.
+        # classify_and_select·apply_hyde 두 호출이 모두 실패하므로 WARNING 2건 이상 남고, 각 메시지에 실패한 헬퍼명이 포함된다.
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.side_effect = Exception("network error")
+            with caplog.at_level(logging.WARNING, logger="src.agent.nodes.rewrite"):
+                rewrite_query(self._make_state("영업권 손상차손 인식 기준은?"))
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) >= 2
+        assert any("classify_and_select" in r.getMessage() for r in warnings)
+        assert any("apply_hyde" in r.getMessage() for r in warnings)
 
 
 # ── HIL 피드백 주입 (apply_* / rewrite_query) ───────────────────────────────────
