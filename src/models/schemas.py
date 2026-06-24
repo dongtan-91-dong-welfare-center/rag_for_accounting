@@ -28,11 +28,14 @@ class FinalResponse(BaseModel):
     confidence_score: float
 
 class ParsedDocument(BaseModel):
-    """파싱된 문서 — Docling 처리 결과 (FUNC-001 출력)"""
+    """파싱된 문서 — Docling 처리 결과 (FUNC-001 출력)
+
+    parser는 src/parse/parser_dtos.py를 통해 이 클래스를 재노출받아 사용한다.
+    """
     title: str
     text: str
-    tables: list[dict]
-    metadata: dict
+    tables: list[dict] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
 
 class IndexingResult(BaseModel):
     """인덱싱 결과 — pgvector 저장 완료 여부 (FUNC-003 출력)"""

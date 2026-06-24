@@ -9,11 +9,16 @@ DTO란?
 이 모듈에서 정의하는 것들:
     1. 레이아웃 후처리에 사용하는 임계값(threshold) 상수
     2. 리스트 마커(번호 매기기 기호)를 인식하기 위한 정규표현식 패턴
-    3. ParsedDocument — 파싱 결과를 담는 데이터 클래스
+    3. ParsedDocument — 파싱 결과 DTO (정본은 src/models/schemas.py, 여기서 재노출)
 """
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from docling_core.types.doc.document import RefItem
+
+# ParsedDocument의 단일 정본은 src/models/schemas.py. 
+# 기존 import 경로(src.parse.parser_dtos) 호환을 위해 재노출한다. 
+# schemas는 parse를 import하지 않으므로 순환 의존은 없다.
+from src.models.schemas import ParsedDocument  # noqa: F401
 
 # ──────────────────────────────────────────────────────────────────
 # 레이아웃 후처리 임계값 (Docling 내부 레이아웃 분석에서 사용)
@@ -52,32 +57,6 @@ _MARKER_RE = re.compile(
     r"|[가-힣]*\d+\.[A-Za-z]?\d*(?:의\d+)?"
     r")\s*$"
 )
-
-
-# ──────────────────────────────────────────────────────────────────
-# ParsedDocument — 문서 파싱 결과를 담는 데이터 클래스
-# ──────────────────────────────────────────────────────────────────
-# @dataclass 는 파이썬의 편의 기능으로, __init__() 메서드를 자동으로 만들어 줍니다.
-# 즉, 아래처럼 선언하면 ParsedDocument(title="...", text="...", ...) 형태로
-# 바로 객체를 생성할 수 있습니다.
-#
-# field(default_factory=list)는 "기본값으로 빈 리스트를 새로 만들어라"는 뜻입니다.
-# 파이썬에서 기본값에 []를 직접 쓰면 모든 인스턴스가 같은 리스트를 공유하는
-# 버그가 생기기 때문에, default_factory를 사용하는 것이 안전합니다.
-@dataclass
-class ParsedDocument:
-    # title  : 문서 제목 (보통 파일 이름에서 확장자를 뺀 부분)
-    title: str
-
-    # text   : 문서 본문 전체를 마크다운(Markdown) 형식으로 변환한 텍스트
-    text: str
-
-    # tables : 문서에서 추출한 표(table) 목록
-    #          각 표는 {"headers": [...], "rows": [[...], ...]} 형태의 딕셔너리
-    tables: list[dict] = field(default_factory=list)
-
-    # metadata : 문서에 대한 부가 정보 (예: 원본 파일 경로)
-    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
