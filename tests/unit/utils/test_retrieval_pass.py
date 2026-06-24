@@ -66,3 +66,9 @@ class TestRetrievalPass:
 
     def test_no_core_hit_fails(self):
         assert retrieval_pass(["#### 9.1\n본문", "#### 9.2\n본문"], {"21.8"}) is False
+
+    def test_aux_retrieved_but_core_absent_fails(self):
+        """핵심만 통과 기준 — 보조(15.20)가 Top-5에 있어도 핵심(15.18)이 없으면 실패.
+        core_paras 라벨링이 보조를 통과 판정에서 실제로 배제함을 고정한다."""
+        contents = ["#### 15.20\n본문", "#### 9.1\n본문"]  # 보조만 존재, 핵심 15.18 없음
+        assert retrieval_pass(contents, {"15.18"}) is False
