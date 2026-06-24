@@ -34,6 +34,21 @@ def _ensure_pool() -> bool:
     return True
 
 
+@st.cache_resource
+def _warmup_embedding() -> bool:
+    """임베딩 모델을 프로세스당 1회 preload해 첫 질의 콜드 로드를 step_timeout(노드 30s) 밖으로 분리.
+
+    실패해도 앱을 막지 않는다 — 첫 질의가 기존 lazy 로드로 폴백한다.
+    """
+    from src.utils.embedding import warmup_model
+
+    try:
+        warmup_model()
+    except Exception as e:  # noqa: BLE001 — preload 실패는 비치명적(lazy 폴백 존재)
+        st.warning(f"임베딩 preload 실패 — 첫 질의가 느릴 수 있습니다: {e}")
+    return True
+
+
 def _is_interrupt(result: dict) -> bool:
     """워크플로 결과가 HIL interrupt로 중단되었는지 여부."""
     return isinstance(result, dict) and "__interrupt__" in result
@@ -107,6 +122,7 @@ st.set_page_config(page_title="회계 기준서 RAG", page_icon="📘")
 st.title("회계 기준서 RAG 질의")
 
 _ensure_pool()
+_warmup_embedding()  # #168: 첫 질의 콜드 로드를 step_timeout 밖으로 분리
 st.session_state.setdefault("stage", "idle")
 
 # 질의 입력 폼 (HIL 확인 중에는 새 질의 시작을 막는다)

@@ -1,0 +1,134 @@
+{
+  "generated_at": "2026-06-24T21:14:02.110711+09:00",
+  "collection": "bench_indexing",
+  "env": {
+    "device": "mps",
+    "threads": 10,
+    "encode_batch_size": 16,
+    "pipeline_batch_size": 100
+  },
+  "cold_start_sec": 9.29,
+  "measured_files": [
+    "gaap-ch1.json",
+    "gaap-ch10.json",
+    "gaap-ch11.json",
+    "gaap-ch12.json",
+    "gaap-ch13.json",
+    "gaap-ch14.json",
+    "gaap-ch15.json",
+    "gaap-ch16.json",
+    "gaap-ch17.json",
+    "gaap-ch18.json",
+    "gaap-ch19.json",
+    "gaap-ch2.json",
+    "gaap-ch20.json",
+    "gaap-ch21.json",
+    "gaap-ch22.json",
+    "gaap-ch23.json",
+    "gaap-ch24.json",
+    "gaap-ch25.json",
+    "gaap-ch26.json",
+    "gaap-ch27.json",
+    "gaap-ch28.json",
+    "gaap-ch29.json",
+    "gaap-ch3.json",
+    "gaap-ch30.json",
+    "gaap-ch31.json",
+    "gaap-ch32.json",
+    "gaap-ch33.json",
+    "gaap-ch4.json",
+    "gaap-ch5.json",
+    "gaap-ch6.json",
+    "gaap-ch7.json",
+    "gaap-ch8.json",
+    "gaap-ch9.json"
+  ],
+  "indexing": {
+    "n_chunks_input": 1072,
+    "n_stored": 1072,
+    "n_skipped_ix201": 0,
+    "n_count_tokens_calls": 1072,
+    "n_embed_calls": 1072,
+    "wall_sec": 119.818,
+    "stage_sec": {
+      "count_tokens": 0.393,
+      "embed_texts": 115.853,
+      "upsert": 2.628,
+      "release": 0.943
+    },
+    "residual_sec": 0.0,
+    "per_chunk_ms": 111.77,
+    "cumulative": [
+      [
+        100,
+        8.53
+      ],
+      [
+        200,
+        18.026
+      ],
+      [
+        300,
+        29.89
+      ],
+      [
+        400,
+        40.483
+      ],
+      [
+        500,
+        51.628
+      ],
+      [
+        600,
+        64.205
+      ],
+      [
+        700,
+        75.375
+      ],
+      [
+        800,
+        88.109
+      ],
+      [
+        900,
+        97.648
+      ],
+      [
+        1000,
+        109.541
+      ],
+      [
+        1072,
+        119.818
+      ]
+    ]
+  },
+  "milestones": {
+    "at_500": 51.628,
+    "at_1000": 109.541
+  },
+  "search": {
+    "iters_per_query": 30,
+    "n_queries": 3,
+    "query_embed_p50_ms": 62.54,
+    "search_p50_ms": 8.23,
+    "search_p95_ms": 9.64,
+    "top1_score": 0.7277
+  },
+  "smoke_baseline": {
+    "n_chunks": 193,
+    "top1_score": 0.7524,
+    "source": "#105 2026-06-12"
+  },
+  "extrapolation": {
+    "measured_chapters": 33,
+    "per_chunk_sec": 0.1118,
+    "per_chapter_chunks_avg": 32.5,
+    "est_kifrs_chunks": 650,
+    "est_total_chunks_53ch": 1722,
+    "est_total_index_sec": 192.4,
+    "assumptions": "K-IFRS 장당 청크=GAAP 평균, 청크당 시간 일정(HNSW 비선형성 무시→하한)"
+  }
+}

@@ -6,6 +6,7 @@
     - _resolve_device(): "auto" 시 cuda→mps→cpu 우선순위, 명시값 패스스루
     - _resolve_thread_count(): 명시값/자동(max(1, cpu-2)) 산정
     - embed_texts(): 빈 입력 처리, encode 호출 인자(batch_size/normalize), 실패 시 CM-002 변환
+    - warmup_model(): preload 위해 임베딩 1회 호출, 실패 시 예외 전파
 
 torch/SentenceTransformer는 mock으로 차단해 실제 모델 로드 없이 논리만 검증한다.
 """
@@ -121,3 +122,27 @@ class TestEmbedTexts:
         with patch("src.utils.embedding._get_model", return_value=mock_model):
             with pytest.raises(LLMAPIConnectionError):
                 embed_texts(["가"])
+
+
+@pytest.mark.unit
+class TestWarmupModel:
+    """warmup_model() — 콜드 로드 분리용 모델 preload"""
+
+    def test_warmup_triggers_single_embed(self):
+        """모델 preload를 위해 임베딩 경로를 1회 태운다"""
+        from src.utils import embedding
+
+        with patch.object(embedding, "embed_texts", return_value=[[0.0]]) as mock_embed:
+            embedding.warmup_model()
+            mock_embed.assert_called_once()    # preload 1회
+
+    def test_warmup_propagates_failure(self):
+        """로드 실패는 LLMAPIConnectionError(CM-002)로 전파되어 호출측이 정책을 정한다"""
+        from src.utils import embedding
+
+        with patch.object(
+            embedding, "embed_texts",
+            side_effect=LLMAPIConnectionError("로드 실패", node="index"),
+        ):
+            with pytest.raises(LLMAPIConnectionError):
+                embedding.warmup_model()

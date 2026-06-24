@@ -125,3 +125,18 @@ def count_tokens(text: str, node: NodeType = "index") -> int:
     except Exception as e:
         logger.error(f"토큰 수 계산 실패: {e}")
         raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)
+
+
+def warmup_model() -> None:
+    """임베딩 모델을 미리 1회 로드·인코딩해 콜드 로드를 요청/측정 경로 밖으로 분리한다.
+
+    KURE-v1은 lazy 싱글톤(_get_model)이라 최초 임베딩 시점에 수십 초가 걸린다.
+    운영 진입점은 첫 질의 전에, 벤치마크는 측정 직전에 이 함수를 호출해
+    콜드 로드가 첫 질의 응답·첫 측정 배치에 섞이지 않도록 분리한다.
+
+    실패(모델 다운로드 불가 등) 시 embed_texts가 LLMAPIConnectionError(CM-002)를 전파하며,
+    삼킬지 중단할지는 호출측이 정한다(운영 진입점=graceful 삼킴, 벤치=중단).
+
+    :raises LLMAPIConnectionError: 모델 로드·인코딩 실패 시 (CM-002)
+    """
+    embed_texts(["warmup"], node="index")
