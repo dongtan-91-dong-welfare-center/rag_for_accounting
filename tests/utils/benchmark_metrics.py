@@ -11,21 +11,24 @@ NFR-002 벤치마크 조항정확도 측정 공용 모듈
   - clause_prefix    : 계층(prefix) 매칭 (gold "2.6.5" ↔ 청크 "2.6" 허용)
   - is_answerable    : 가드레일 지표
 
-각 조항키 지표는 검색단계(reranked_chunks)와 생성단계(citations)에서 각각 측정하여
+각 조항키 지표는 검색단계와 생성단계에서 각각 측정하여
 "검색이 못 찾은 것"과 "찾았는데 인용에서 누락된 것"을 분리한다.
-함께 Hit@1 / Hit@k / MRR / Recall, CRAG 루프 횟수(rewrite_count), 재작성 전략, needs_external 판정, 에러 로그를 기록한다.
+함께 Hit@1 / Hit@k / MRR / Recall, CRAG 루프 횟수, 재작성 전략, needs_external 판정, 에러 로그를 기록한다.
 
 전제: pgvector(Docker) + 라이브 LLM. benchmark.jsonl은 K-GAAP 14건이고 적재 데이터도 GAAP뿐이므로,
 gold references 중 "일반기업회계기준 …" 항목만 채점 대상으로 삼는다(K-IFRS 라벨은 미적재 → 채점 제외).
 """
 from __future__ import annotations
 
+import os
 import re
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
+from pydantic import BaseModel
 from src.utils.config import KST
 from tests.utils.benchmark_loader import BenchmarkCase
 
@@ -157,6 +160,54 @@ def retrieval_pass(
     return fh is not None and fh <= top_n
 
 
+# ════════════════════════════════ 내용 통과(content_pass) ════════════════════════════════
+# 검색 축(retrieval_pass)과 분리된 별도 LLM 판정 축. in-graph evaluate 노드의 CRAG reasoning과는
+# 다른 판정으로, "생성된 답변이 기대 정답에 비춰 내용상 적절한가"만 본다(검색·인용 여부 무관)
+class ContentVerdict(BaseModel):
+    """답변 내용 적절성 LLM 판정 결과."""
+    verdict: Literal["pass", "partial", "fail"]
+    reasoning: str
+
+
+CONTENT_JUDGE_PROMPT = """당신은 K-GAAP 회계 전문 평가자입니다. 아래 [질문]에 대한 [실제 답변]이 \
+[기대 정답]에 비춰 회계적으로 적절한지 판정하세요. 검색·인용 여부가 아니라 답변 '내용'만 봅니다.
+
+판정 기준:
+- pass    : 기대 정답의 핵심 결론·방향과 일치하고 회계적으로 옳음
+- partial : 부분적으로 맞으나 핵심 일부가 누락·모호함
+- fail    : 핵심 결론이 기대 정답과 어긋나거나 회계적으로 틀림
+
+[질문]
+{query}
+
+[기대 정답]
+{expected_answer}
+
+[실제 답변]
+{answer}
+"""
+
+
+def judge_content(*, query: str, expected_answer: str, answer: str, model=None) -> ContentVerdict:
+    """답변 내용 적절성을 LLM으로 판정한다(검색과 무관, 기대 정답 기준).
+
+    model 미지정 시 openai-chat:OPENAI_MODEL로 실행. 테스트는 TestModel 등을 주입해 결정적으로 검증한다.
+    """
+    from pydantic_ai import Agent
+    from src.utils.config import OPENAI_MODEL
+
+    prompt = CONTENT_JUDGE_PROMPT.format(
+        query=query, expected_answer=expected_answer, answer=answer
+    )
+    agent = Agent(model or f"openai-chat:{OPENAI_MODEL}", output_type=ContentVerdict)
+    return agent.run_sync(prompt).output
+
+
+def content_pass(verdict: ContentVerdict) -> bool:
+    """내용 통과 = 'pass'만 통과(partial/fail은 불통과)."""
+    return verdict.verdict == "pass"
+
+
 # ════════════════════════════════ 코퍼스 상태 ════════════════════════════════
 def get_indexed_chapters() -> set[str]:
     """현재 pgvector chunks 테이블에 적재된 chapter 집합을 조회한다."""
@@ -257,6 +308,21 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         "citations": cite_contents,
         "error_logs": state.get("error_logs") or [],
     }
+
+    # content_pass(내용 통과) 판정 — 옵트인(CONTENT_JUDGE). 검색축과 분리된 별도 LLM 판정 축.
+    # expected_answer 신뢰성 전제
+    if os.getenv("CONTENT_JUDGE"):
+        try:
+            verdict = judge_content(
+                query=case.query,
+                expected_answer=case.expected_answer,
+                answer=(fr.answer if fr else ""),
+            )
+            res.metrics["content_pass"] = content_pass(verdict)
+            res.diag["content_verdict"] = verdict.verdict
+            res.diag["content_reasoning"] = verdict.reasoning
+        except Exception as e:  # 판정 실패는 케이스를 죽이지 않음(내용축만 누락)
+            res.diag["content_judge_error"] = f"{type(e).__name__}: {e}"
     return res
 
 
@@ -287,6 +353,16 @@ def aggregate(results: list[CaseResult], k: int) -> dict:
         summary[f"{stage}_exact_mrr_avg"] = (
             round(sum(r.metrics.get(f"{stage}_exact_mrr", 0.0) for r in rows) / n, 4) if n else 0.0
         )
+    # 내용 통과: 판정이 수행된 케이스에 한해 별도 분모로 집계한다.
+    # (검색 축과 분리. 미판정 케이스는 분모에서 제외 → 기본 측정 동작/요약은 불변)
+    content_rows = [r for r in rows if "content_pass" in r.metrics]
+    if content_rows:
+        ch = sum(1 for r in content_rows if r.metrics["content_pass"])
+        summary["content_pass"] = {
+            "hits": ch,
+            "rate": round(ch / len(content_rows), 4),
+            "n": len(content_rows),
+        }
     return summary
 
 
