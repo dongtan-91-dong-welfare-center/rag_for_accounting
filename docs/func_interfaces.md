@@ -15,7 +15,8 @@
 | `EvaluationResult` | is_relevant:bool, needs_external:bool, confidence:float, reasoning:str |
 | `Citation` | document_id:str, chunk_id:str, content:str, relevance_score:float |
 | `FinalResponse` | answer:str, citations:list[`Citation`], is_answerable:bool, confidence_score:float |
-| `IndexingResult` | document_id:str, chunk_count:int, status(`success`\|`partial`\|`failed`) |
+| `IndexingResult` | document_id:str, chunk_count:int, status(`success`\|`partial`\|`failed`), skipped_chunks:list[`SkippedChunk`] |
+| `SkippedChunk` | chunk_id:str, error_type:str, reason:str (적재 누락 청크 추적) |
 
 ---
 
