@@ -37,6 +37,8 @@ docker compose up -d database
 
 미리 빌드된 온톨로지 그래프(`data/ontology/*.json`)를 청킹·임베딩하여 pgvector에 적재합니다.
 
+> 📌 데이터 정책: `data/`(회계기준 원문·파생)는 **BYO(Bring Your Own)** 방향으로 전환 중입니다 — 배경·근거는 [docs/decisions/0001](docs/decisions/0001-byo-corpus-kgaap.md) 참조.
+
 ```bash
 # data/ontology 전체 장을 적재 (검색기와 동일한 chunks 테이블에 저장)
 uv run python -m src.main ingest
@@ -76,35 +78,7 @@ LANGCHAIN_PROJECT=rag-for-accounting # 트레이스가 모일 프로젝트명(�
 
 ## 📂 프로젝트 구조
 
-```
-src/
-├── agent/              # 에이전트 로직 및 워크플로우
-│   ├── nodes/          # 워크플로우의 각 노드 (evaluate, generate, rewrite)
-│   │   ├── evaluate.py # 품질 평가 노드
-│   │   ├── generate.py # 답변 생성 노드
-│   │   └── rewrite.py  # 질문 재작성 노드
-│   ├── prompts.py      # LLM 프롬프트 정의
-│   └── workflow.py     # LangGraph 워크플로우 오케스트레이션
-├── db/                 # 벡터 데이터베이스 연동
-│   └── vector_store.py # 벡터 스토어 구현
-├── ingestion/          # 데이터 수집 및 처리
-│   ├── embedder.py     # 임베딩 생성 (Dense/Sparse)
-│   └── parser.py       # 문서 파싱 및 청킹
-├── models/             # 데이터 모델 및 스키마
-│   ├── schemas.py      # Pydantic 스키마 정의
-│   └── state.py        # LangGraph State 정의
-├── parse/              # 추가 파싱 및 클러스터링
-│   ├── cluster_merge.py # 클러스터 병합 로직
-│   ├── layout_config.py # 레이아웃 설정
-│   ├── parser.py       # 파서 구현
-│   └── parser_dtos.py  # 파서 DTO 정의
-├── retrieval/          # 검색 및 리랭킹
-│   ├── reranker.py     # 리랭킹 로직
-│   └── searcher.py     # 검색 구현
-└── utils/              # 유틸리티 및 설정
-    ├── config.py       # 설정 관리
-    └── logger.py       # 로깅 유틸리티
-```
+전체 문서 인덱스는 [docs/README.md](docs/README.md)에서 시작하세요. **현행 코드 모듈맵**은 [docs/architecture/architecture_overview.md](docs/architecture/architecture_overview.md)의 "모듈 지도(실제 구조)"를 참조합니다 — 단일 출처(SSoT)를 위해 구조를 여기서 중복 기재하지 않습니다.
 
 ## 📖 문서 학습
 
