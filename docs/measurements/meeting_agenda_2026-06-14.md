@@ -1,6 +1,6 @@
 # dev → main 통합 리뷰 (2026-06-14, D-Day)
 
-> v1.0(FUNC-001~009) 병합 가부 결정. 사전 감사 기반. 상세: `docs/v1_audit_report.md`
+> v1.0(FUNC-001~009) 병합 가부 결정. 사전 감사 기반. 상세: `docs/measurements/v1_audit_report.md`
 
 ## 1. 감사 요약 (5분)
 - 9개 FUNC 코어 구현 완료, 단위 테스트 276 passed. **하드 블로커 없음 → 조건부 병합 가능**

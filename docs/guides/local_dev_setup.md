@@ -77,4 +77,4 @@ docker compose exec app uv run python -m src.main query "..."
 ```
 
 ---
-관련 문서: [architecture_overview.md](architecture_overview.md) · [func_interfaces.md](func_interfaces.md) · `docs/docker_setup_guide.md`
+관련 문서: [architecture_overview.md](../architecture/architecture_overview.md) · [func_interfaces.md](../architecture/func_interfaces.md) · `docs/guides/docker_setup_guide.md`
