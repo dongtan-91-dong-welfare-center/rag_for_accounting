@@ -15,7 +15,8 @@
 | 임계값·모델·`RRF_K` 같은 상수는 | `src/utils/config.py` (코드가 정본) |
 | 측정·감사 결과(벤치마크·인덱싱·v1 감사) | [measurements/](measurements/) |
 | 참조 자료(DART 택소노미·rewrite 샘플·RAG 학습) | [reference/](reference/) |
-| 왜 그렇게 결정했나 (ADR) | `decisions/` |
+| 왜 그렇게 결정했나 (ADR) | [decisions/README.md](decisions/README.md) |
+| 회계기준 `data/`는 왜 레포에 없나 (BYO) | [decisions/0001-byo-corpus-kgaap.md](decisions/0001-byo-corpus-kgaap.md) |
 | 왜 GraphRAG/AGE/Milvus를 버렸나 | [archive/README.md](archive/README.md) |
 
 ## 용어 (단일화 사전)
