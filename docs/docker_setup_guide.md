@@ -21,12 +21,11 @@ docker-compose up --build -d
 
 ### 2단계: 자동화된 인프라 환경 검증 테스트
 과거에는 수동으로 각 환경에 접속하여 확장 기능(`vector`)의 설치 여부나 앱의 종속성 상태를 점검했으나, 
-현재는 해당 검증 과정이 `test/test_docker_setup.py` 내의 자동화 코드로 위임되었습니다.
+현재는 해당 검증이 `tests/utils/infra_check.py`의 `check_docker_infrastructure()`로 위임되어, `tests/integration/conftest.py`의 세션 픽스처에서 **통합 테스트 진입 전 자동으로 실행**됩니다(Docker 데몬·컨테이너 구동·`pgvector` 확장 로드를 점검하고, 문제가 있으면 통합 테스트를 건너뜀).
 
-로컬(호스트) 터미널에서 다음 명령어를 실행하여 모든 컨테이너 인프라가 정상적으로 준비되었는지 한 번에 검증합니다:
+따라서 인프라 준비 상태는 별도 명령 없이 통합 테스트를 실행하면 함께 검증됩니다:
 ```bash
-# 로컬 개발 환경(venv 등)에 미리 pytest가 설치되어 있다고 가정합니다.
-pytest test/test_docker_setup.py -v
+uv run python tests/run_tests.py --phase1-only
 ```
 
 ### 3단계: 컨테이너 쉘 접근 및 개발자 수동 활용 가이드
