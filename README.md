@@ -108,7 +108,7 @@ src/
 
 ## 📖 문서 학습
 
-RAG 기술에 대한 자세한 학습 자료는 `docs/rag_study.md` 파일에 정리되어 있습니다.
+RAG 기술에 대한 자세한 학습 자료는 `docs/reference/rag_study.md` 파일에 정리되어 있습니다.
 
 ## 📝 TODO
 
