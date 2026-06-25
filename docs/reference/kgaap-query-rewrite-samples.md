@@ -4,7 +4,7 @@
 
 - **출처:** 회계사 작성 K-GAAP 실무 질의 (18건)
 - **용도:** rewrite 전략(HyDE / Step-back / Decompose) 분류 기준과 그 산출물의 실제 예시. 프롬프트 튜닝, 평가셋 구성, 신규 전략 검토 시 참고한다.
-- **rewrite 노드 구현 문서:** [`docs/superpowers/plans/2026-04-20-query-rewrite.md`](./superpowers/plans/2026-04-20-query-rewrite.md)
+- **rewrite 노드 구현 문서:** [`docs/superpowers/plans/2026-04-20-query-rewrite.md`](../superpowers/plans/2026-04-20-query-rewrite.md)
 
 > 각 항목의 `search_queries`는 검색 노드에 그대로 전달되는 목록으로, **1번은 항상 원문 질의**이고 2번 이후가 전략이 생성한 산출물(가상 답변 / 추상화 질의 / 분해된 하위 질의)이다.
 

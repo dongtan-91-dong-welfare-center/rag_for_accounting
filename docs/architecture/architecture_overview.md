@@ -64,7 +64,7 @@ src/
 ```
 
 > 인터페이스(입출력 타입)·에러코드 카탈로그는 [func_interfaces.md](func_interfaces.md) 참조.
-> 데이터 흐름 다이어그램: `docs/assets/arch-ingest.svg`, `docs/assets/arch-query.svg`.
+> 데이터 흐름 다이어그램: `docs/architecture/assets/arch-ingest.svg`, `docs/architecture/assets/arch-query.svg`.
 
 ## 4. 알려진 한계 (v1.0)
 - 전 파이프라인 테스트가 mock — 실데이터 E2E 미검증 (병합 전 스모크 권고)
@@ -72,4 +72,4 @@ src/
 - Sparse 검색 한국어 형태소 미지원, GIN 인덱스 미설정
 - 크로스챕터 참조는 단일 문서 빌드 한계로 미해소 엣지로 남음
 
-상세 갭·로드맵: [v1_audit_report.md](v1_audit_report.md).
+상세 갭·로드맵: [v1_audit_report.md](../measurements/v1_audit_report.md).
