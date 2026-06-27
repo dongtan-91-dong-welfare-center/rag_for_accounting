@@ -17,5 +17,9 @@
 | # | 결정 | Status |
 |---|---|---|
 | [0001](0001-byo-corpus-kgaap.md) | BYO 코퍼스 — 회계기준 원문을 레포에 두지 않음 (#102/KASB) | Draft |
+| [0002](0002-kure-v1-embedding.md) | 임베딩 모델 KURE-v1 (자체호스팅, 1024차원) | Draft |
+| [0003](0003-pgvector-hnsw-vectorstore.md) | 벡터 스토어 pgvector + HNSW (Milvus·AGE 대신) | Draft |
+| [0004](0004-rrf-hybrid-fusion.md) | 하이브리드 검색 융합 RRF (순위 기반) | Draft |
+| [0005](0005-langgraph-orchestration.md) | 오케스트레이션 LangGraph StateGraph + MemorySaver | Draft |
 
-> 폐기된 결정들의 계보(GraphRAG/AGE → pgvector 등)는 회고 ADR로 박제하지 않고 [archive/README.md](../archive/README.md)가 커버한다.
+> 0002~0005는 v1.0에서 이미 내린 결정을 2026-06-27에 **소급 기록**한 것이다(코드가 정본, ADR은 "왜"를 박제). 폐기된 결정들의 계보(GraphRAG/AGE → pgvector 등)는 회고 ADR로 박제하지 않고 [archive/README.md](../archive/README.md)가 커버한다.

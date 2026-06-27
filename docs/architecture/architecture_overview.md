@@ -35,16 +35,16 @@ graph TD
 
 ## 2. 핵심 결정 (요약)
 
-> 결정 *기록*의 정본은 ADR([decisions/](../decisions/README.md))이다. 아래 표는 한눈 요약이며, 현재 ADR로 승격된 것은 BYO(0001)뿐 — 나머지는 ADR 백필 대상이다.
+> 결정 *기록*의 정본은 ADR([decisions/](../decisions/README.md))이다. 아래 표는 한눈 요약 — 핵심 결정은 ADR로 소급 기록했다(0002~0005).
 
 | 영역 | 결정 | 근거 |
 |---|---|---|
-| 임베딩 | `nlpai-lab/KURE-v1` (자체호스팅, MIT, 1024차원) | 인덱싱·검색이 `embed_texts()` 공유 → 차원 정합 구조적 보장 |
-| 벡터 인덱스 | pgvector HNSW + `vector_cosine_ops` | 점진 적재(upsert)에 IVFFlat보다 적합 |
+| 임베딩 | `nlpai-lab/KURE-v1` (자체호스팅, MIT, 1024차원) | 인덱싱·검색이 `embed_texts()` 공유 → 차원 정합 구조적 보장 · [ADR-0002](../decisions/0002-kure-v1-embedding.md) |
+| 벡터 인덱스 | pgvector HNSW + `vector_cosine_ops` | 점진 적재(upsert)에 IVFFlat보다 적합 · [ADR-0003](../decisions/0003-pgvector-hnsw-vectorstore.md) |
 | Sparse 검색 | PostgreSQL `to_tsvector('simple')` + `ts_rank_cd` | ※ 한국어 형태소 미지원·GIN 인덱스 미설정 |
-| 하이브리드 병합 | RRF(Reciprocal Rank Fusion), k=60 | 점수 분포 차이에 강건, 가중치 튜닝 불필요 |
+| 하이브리드 병합 | RRF(Reciprocal Rank Fusion), k=60 | 점수 분포 차이에 강건, 가중치 튜닝 불필요 · [ADR-0004](../decisions/0004-rrf-hybrid-fusion.md) |
 | LLM | `OPENAI_MODEL`(config) · PydanticAI/OpenAI | rewrite/evaluate/generate 공통 (라이브 검증 필요) |
-| 오케스트레이션 | LangGraph StateGraph + MemorySaver 체크포인터 | HIL interrupt/resume, CRAG 루프 |
+| 오케스트레이션 | LangGraph StateGraph + MemorySaver 체크포인터 | HIL interrupt/resume, CRAG 루프 · [ADR-0005](../decisions/0005-langgraph-orchestration.md) |
 | 상태 공유 | `GraphState`(Pydantic) 증분 merge | 노드는 변경 필드 dict만 반환 |
 
 ## 3. 모듈 지도 (실제 구조)
