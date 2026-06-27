@@ -81,4 +81,4 @@ src/
 - Sparse 검색 한국어 형태소 미지원, GIN 인덱스 미설정
 - 크로스챕터 참조는 단일 문서 빌드 한계로 미해소 엣지로 남음
 
-상세 갭·로드맵: [v1_audit_report.md](../measurements/v1_audit_report.md).
+상세 갭(2026-06-13 동결 감사): [v1_audit_report.md](../measurements/v1_audit_report.md). 향후 계획은 GitHub [마일스톤](https://github.com/dongtan-91-dong-welfare-center/rag_for_accounting/milestones).

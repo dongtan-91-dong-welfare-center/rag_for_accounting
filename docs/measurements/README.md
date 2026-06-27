@@ -13,7 +13,7 @@
 | `indexing_bench_<YYYYMMDD>_<HHMM>.{json,md}` | 인덱싱 성능 벤치마크 |
 | `rechunk_ab_<YYYYMMDD>_<HHMM>.md` | 청킹 A/B 실험 기록 |
 | `case_analysis_<이슈번호>.md` | 케이스 단위 실패 분석 |
-| `v1_audit_report.md` | ★현행 v1.0 병합 감사 (폐기 아님 — archive 아님) |
+| `v1_audit_report.md` | v1.0 병합 시점 **동결 감사 기록**(현행 아님 · 미래는 GitHub 마일스톤) |
 
 `근거:` 타임스탬프를 파일명에 박아 "언제 측정인지"를 본문 안 열고 안다(신선도 표기). 같은 종류는 같은 접두로 묶여 정렬·대조가 쉽다.
 
