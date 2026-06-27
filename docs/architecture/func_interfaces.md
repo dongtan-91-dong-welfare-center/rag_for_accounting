@@ -1,23 +1,25 @@
 # FUNC 인터페이스 명세 (FUNC-001~009)
 
-> v1.0 각 기능의 입출력 계약. 타입은 `src/models/schemas.py`, `src/models/state.py` 기준.
-> 작성일 2026-06-13.
-> 약어: HNSW(근사최근접 벡터 인덱스) · tsvector(PostgreSQL 전문검색 토큰) · upsert(있으면 갱신·없으면 삽입). 공통 용어(조항·RRF·HIL·CRAG)는 [용어 사전](../README.md#용어-단일화-사전) 참조 — 비개발 독자는 [아키텍처 개요](architecture_overview.md)부터.
+> **한 줄 요약(BLUF):** v1.0 각 기능(FUNC-001~009)의 입출력 계약과 에러코드. 타입은 `src/models/schemas.py`·`src/models/state.py`가 정본이다.
+
+> **약어** — HNSW(근사최근접 벡터 인덱스) · tsvector(PostgreSQL 전문검색 토큰) · upsert(있으면 갱신·없으면 삽입). 공통 용어(조항·RRF·HIL·CRAG)는 [용어 사전](../README.md#용어-단일화-사전), 비개발 독자는 [아키텍처 개요](architecture_overview.md)부터.
+
+*작성일 2026-06-13 · 코드 실태 기준.*
 
 ## 데이터 스키마 요약 (`src/models/schemas.py`)
 
 | 스키마 | 필드 |
 |---|---|
-| `ParsedDocument` | title:str, text:str(markdown), tables:list[dict], metadata:dict |
-| `RewrittenQuery` | original_query:str, strategy:str(`hyde`\|`decompose`\|`stepback`\|`bypass`), search_queries:list[str] |
-| `RetrievedChunk` | chunk_id:str, document_id:str, content:str, score:float, metadata:`ChunkMetadata` |
-| `ChunkMetadata` | ontology_node_id, node_type, standard_type, chapter (+extra="allow") |
-| `RerankingResult` | chunk:`RetrievedChunk`, rerank_score:float |
-| `EvaluationResult` | is_relevant:bool, needs_external:bool, confidence:float, reasoning:str |
-| `Citation` | document_id:str, chunk_id:str, content:str, relevance_score:float |
-| `FinalResponse` | answer:str, citations:list[`Citation`], is_answerable:bool, confidence_score:float |
-| `IndexingResult` | document_id:str, chunk_count:int, status(`success`\|`partial`\|`failed`), skipped_chunks:list[`SkippedChunk`] |
-| `SkippedChunk` | chunk_id:str, error_type:str, reason:str (적재 누락 청크 추적) |
+| `ParsedDocument` | title:str<br>text:str (markdown)<br>tables:list[dict]<br>metadata:dict |
+| `RewrittenQuery` | original_query:str<br>strategy:str (`hyde`\|`decompose`\|`stepback`\|`bypass`)<br>search_queries:list[str] |
+| `RetrievedChunk` | chunk_id:str<br>document_id:str<br>content:str<br>score:float<br>metadata:`ChunkMetadata` |
+| `ChunkMetadata` | ontology_node_id<br>node_type<br>standard_type<br>chapter<br>(+extra="allow") |
+| `RerankingResult` | chunk:`RetrievedChunk`<br>rerank_score:float |
+| `EvaluationResult` | is_relevant:bool<br>needs_external:bool<br>confidence:float<br>reasoning:str |
+| `Citation` | document_id:str<br>chunk_id:str<br>content:str<br>relevance_score:float |
+| `FinalResponse` | answer:str<br>citations:list[`Citation`]<br>is_answerable:bool<br>confidence_score:float |
+| `IndexingResult` | document_id:str<br>chunk_count:int<br>status (`success`\|`partial`\|`failed`)<br>skipped_chunks:list[`SkippedChunk`] |
+| `SkippedChunk` | chunk_id:str<br>error_type:str<br>reason:str — 적재 누락 청크 추적 |
 
 ---
 
@@ -25,13 +27,12 @@
 - **입력**: `file_path: str|Path` (PDF). 선택: overlap/containment_threshold(0.15), converter 주입
 - **출력**: `ParsedDocument` (text는 마크다운, tables는 `{headers:[...], rows:[[...]]}`)
 - **진입**: `DoclingParser().parse(path)`
-- **비고**: ⚠️ `ParsedDocument`가 `parser_dtos.py`(dataclass, 실제 반환)와 `schemas.py`(Pydantic)에 이원 정의됨 — 통합 필요.
 
 ## FUNC-002 — 청킹/온톨로지 (`src/db/ontology/`)
 - **입력**: 마크다운 경로 또는 `ParsedDocument`
 - **출력**: `OntologyGraph`(노드 `Standard`/`Section`/`Subsection` + edges) → `RetrievedChunk[]`(score=0.0, metadata.ontology_node_id)
 - **진입**: `build_graph(md_path, standard_id, standard_type)` → `chunk_graph(graph, source_path)`
-- **에러**: OT-103(구조파싱실패). OT-101(순환참조)/OT-102(중복노드)는 검증 미구현으로 클래스 제거됨(#139) — 검증 로직 도입 시 재정의.
+- **에러**: OT-103(구조파싱실패)
 
 ## FUNC-003 — 인덱싱 (`src/db/vector_store.py`, `src/utils/embedding.py`)
 - **입력**: `list[RetrievedChunk]`, collection(기본 `chunks`)
@@ -43,7 +44,7 @@
 - **입력**: `GraphState`(original_query, standard_filter, human_feedback)
 - **출력(상태 갱신)**: rewritten_query:`RewrittenQuery`, is_accounting_query:bool, classification_confidence:float
 - **진입**: `rewrite_query(state)`. classify_and_select → hyde/decompose/stepback
-- **에러**: CM-002(LLM). ⚠️ 현재 LLM 실패가 silent 폴백
+- **에러**: CM-002(LLM)
 
 ## FUNC-005 — 하이브리드 검색 (`src/retrieval/searcher.py`)
 - **입력**: `query:str`, `top_k:int=10`, `metadata_filter:dict|None`
@@ -76,24 +77,22 @@
 - **라우팅**: `route_after_rewrite`, `route_after_human_review`, `route_after_evaluate`(needs_reretrieval 최우선)
 - **제어 상수**: MAX_REWRITE_COUNT=3, MAX_HIL_COUNT=5
 - **진입**: `run_workflow(query, standard_filter)`, `resume_workflow(thread_id, decision)`
-- **복원력**: `handle_node_errors` 데코레이터(예외→error_logs 기록 후 계속), GraphRecursionError 폴백. ⚠️ TimeoutError는 재전파, search의 CM-002 오분류
+- **복원력**: `handle_node_errors` 데코레이터(예외→error_logs 기록 후 계속), GraphRecursionError 폴백.
 
 ---
 
 ## 에러코드 카탈로그 (`src/utils/exception.py`)
 
-| 코드 | 노드 | 의미 | retryable |
-|---|---|---|---|
-| CM-001 | * | 설정/환경변수 누락 | ✗ |
-| CM-002 | * | LLM 호출 경로 실패(연결·인증·응답파싱) | ✓ |
-| CM-003 | * | 문서 파싱 실패 (클래스 존재, 미배선 — 착지점 `DoclingParser.parse`) | ✗ |
-| OT-103 | ontology | 구조파싱실패 | ✗ |
-| SE-101/102/103 | search/index | 타임아웃 / DB / 결과없음 | ✓/✓/✗ |
-| RR-201/202 | rerank | 모델실패 / 임계미달 | ✓/✗ |
-| IX-201 | index | 임베딩 토큰 한도 초과 | ✗ |
-| EV-301/302/303 | evaluate | 평가파싱 / 일관성 / 할루시네이션 | ✓/✗/✗ |
-| GN-401/402 | generate | 응답포맷 / 컨텍스트길이 | ✓/✗ |
+| 코드 | 노드 | 의미 |
+|---|---|---|
+| CM-001 | * | 설정/환경변수 누락 |
+| CM-002 | * | LLM 호출 경로 실패(연결·인증·응답파싱) |
+| CM-003 | * | 문서 파싱 실패 (클래스 존재, 미배선 — 착지점 `DoclingParser.parse`) |
+| OT-103 | ontology | 구조파싱실패 |
+| SE-101/102/103 | search/index | 타임아웃 / DB / 결과없음 |
+| RR-201/202 | rerank | 모델실패 / 임계미달 |
+| IX-201 | index | 임베딩 토큰 한도 초과 |
+| EV-301/302/303 | evaluate | 평가파싱 / 일관성 / 할루시네이션 |
+| GN-401/402 | generate | 응답포맷 / 컨텍스트길이 |
 
 > `ErrorLog`(timestamp KST, node, error_type, message)로 `GraphState.error_logs`에 누적.
->
-> #139에서 제거된 미사용 분류: PS-001(파일 없음)/PS-002(미지원 포맷), OT-101(순환참조)/OT-102(중복노드). 검증 로직을 실제 구현하는 시점에 raise 사이트와 함께 재도입한다.
