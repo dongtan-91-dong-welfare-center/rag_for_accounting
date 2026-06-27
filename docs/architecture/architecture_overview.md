@@ -6,23 +6,31 @@
 
 ## 1. 한눈에 보기
 
-두 경로를 단일 CLI(`src/main.py`)로 제공한다.
+두 경로를 단일 CLI(`src/main.py`)로 제공한다. 흐름도는 GitHub에서 바로 보이도록 mermaid 인라인이 정본이다.
 
+**적재 (ingest)**
+
+```mermaid
+graph TD
+    A["원본 PDF/HWP"] -->|FUNC-001 Docling 파싱| B["ParsedDocument (markdown)"]
+    B -->|FUNC-002 온톨로지 빌드| C["OntologyGraph: Standard·Section·Subsection + edges"]
+    C -->|FUNC-002 청킹| D["RetrievedChunk[] (metadata.ontology_node_id)"]
+    D -->|FUNC-003 임베딩 후 pgvector HNSW upsert| E[("chunks 테이블")]
 ```
-[적재 ingest]
- PDF/HWP ──(FUNC-001 Docling 파싱)──▶ ParsedDocument(markdown)
-   └▶(FUNC-002 온톨로지 빌드)──▶ OntologyGraph(Standard/Section/Subsection + edges)
-        └▶(FUNC-002 청킹)──▶ RetrievedChunk[]  (metadata.ontology_node_id)
-             └▶(FUNC-003 임베딩 KURE-v1 → pgvector HNSW upsert)──▶ chunks 테이블
 
-[질의 query — LangGraph StateGraph]
- original_query
-   ─▶ rewrite(FUNC-004) ──┬─(비회계)─▶ early_exit ─▶ END
-                          └─(회계)──▶ human_review(HIL, interrupt)
-   ─▶ search(FUNC-005, dense+sparse RRF)
-   ─▶ rerank(FUNC-006, CrossEncoder · USE_RERANKER 게이트)
-   ─▶ evaluate(FUNC-007, CRAG 자가검증) ──(부족)──▶ rewrite (CRAG 루프, 최대 3회)
-   ─▶ generate(FUNC-008, 답변+인용) ─▶ FinalResponse ─▶ END
+**질의 (query) — LangGraph StateGraph**
+
+```mermaid
+graph TD
+    Q["original_query"] --> RW["rewrite (FUNC-004)"]
+    RW -->|비회계| EX["early_exit"] --> ENDX(["END"])
+    RW -->|회계| HV["human_review (HIL·interrupt)"]
+    HV --> SR["search (FUNC-005·dense+sparse RRF)"]
+    SR --> RK["rerank (FUNC-006·CrossEncoder·USE_RERANKER 게이트)"]
+    RK --> EV["evaluate (FUNC-007·CRAG 자가검증)"]
+    EV -->|부족시 재작성 최대 3회| RW
+    EV --> GN["generate (FUNC-008·답변+인용)"]
+    GN --> FR["FinalResponse"] --> ENDX
 ```
 
 ## 2. 핵심 결정
@@ -64,7 +72,6 @@ src/
 ```
 
 > 인터페이스(입출력 타입)·에러코드 카탈로그는 [func_interfaces.md](func_interfaces.md) 참조.
-> 데이터 흐름 다이어그램: `docs/architecture/assets/arch-ingest.svg`, `docs/architecture/assets/arch-query.svg`.
 
 ## 4. 알려진 한계 (v1.0)
 - 전 파이프라인 테스트가 mock — 실데이터 E2E 미검증 (병합 전 스모크 권고)

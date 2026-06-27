@@ -16,7 +16,7 @@ class GraphState(BaseModel):
     """
     LangGraph StateGraph의 공유 상태 (State) 객체.
     모든 노드는 이 상태를 입력받아 작업을 수행하고, 변경할 필드만 담은 dict를 반환하여 증분 업데이트(Merge) 합니다.
-    전체 흐름은 [상태 다이어그램](docs/assets/arch-state.svg)을 참고하세요.
+    전체 흐름은 [아키텍처 개요](docs/architecture/architecture_overview.md)를 참고하세요.
     """
     # 사용자 초기 입력값
     original_query:                str                    # 워크플로우 시작 시 주입됨. 불변에 가깝게 유지
