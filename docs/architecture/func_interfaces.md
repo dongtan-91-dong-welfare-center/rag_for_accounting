@@ -2,6 +2,7 @@
 
 > v1.0 각 기능의 입출력 계약. 타입은 `src/models/schemas.py`, `src/models/state.py` 기준.
 > 작성일 2026-06-13.
+> 약어: HNSW(근사최근접 벡터 인덱스) · tsvector(PostgreSQL 전문검색 토큰) · upsert(있으면 갱신·없으면 삽입). 공통 용어(조항·RRF·HIL·CRAG)는 [용어 사전](../README.md#용어-단일화-사전) 참조 — 비개발 독자는 [아키텍처 개요](architecture_overview.md)부터.
 
 ## 데이터 스키마 요약 (`src/models/schemas.py`)
 

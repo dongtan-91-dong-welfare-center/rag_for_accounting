@@ -2,6 +2,7 @@
 
 > 2024 DART Taxonomy (`2024-DART_Taxonomy_20240926_배포용최종.xlsx`) 분석
 > 온톨로지 설계를 위한 4개 링크베이스 정리
+> 약어: Taxonomy/택소노미(XBRL 기반 재무보고 분류체계) · Linkbase/링크베이스(개념 간 관계를 정의하는 계층) · ELR(Extended Link Role, 링크베이스 내 표현 그룹). 공통 용어는 [용어 사전](../README.md#용어-단일화-사전) 참조.
 
 ---
 
