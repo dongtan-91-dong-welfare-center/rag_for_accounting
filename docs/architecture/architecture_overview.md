@@ -1,12 +1,12 @@
 # 아키텍처 개요 (v1.0)
 
-> 회계기준서 RAG 시스템. **pgvector + BM25(tsvector) 하이브리드 검색** 기반.
-> Apache AGE / EdgeQuake / GraphRAG는 v1.0에서 제거됨(초기 설계 문서 `ARCHITECTURE.md`는 superseded).
-> 작성일 2026-06-13 · 코드 실태 기준.
+> **한 줄 요약(BLUF):** 회계기준서 RAG 시스템 — **pgvector + BM25(tsvector) 하이브리드 검색** 기반.
+
+*2026-06-13 작성 · 코드 실태 기준. Apache AGE / EdgeQuake / GraphRAG는 제거됨(폐기 경위 → [archive](../archive/README.md)).*
 
 ## 1. 한눈에 보기
 
-두 경로를 단일 CLI(`src/main.py`)로 제공한다. 흐름도는 GitHub에서 바로 보이도록 mermaid 인라인이 정본이다.
+두 경로를 단일 CLI(`src/main.py`)로 제공한다. 다이어그램의 `FUNC-001`~`FUNC-009` 라벨 정의는 [func_interfaces.md](func_interfaces.md)에 있다.
 
 **적재 (ingest)**
 
@@ -33,7 +33,9 @@ graph TD
     GN --> FR["FinalResponse"] --> ENDX
 ```
 
-## 2. 핵심 결정
+## 2. 핵심 결정 (요약)
+
+> 결정 *기록*의 정본은 ADR([decisions/](../decisions/README.md))이다. 아래 표는 한눈 요약이며, 현재 ADR로 승격된 것은 BYO(0001)뿐 — 나머지는 ADR 백필 대상이다.
 
 | 영역 | 결정 | 근거 |
 |---|---|---|
