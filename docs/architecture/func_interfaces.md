@@ -55,8 +55,8 @@
 
 ## FUNC-006 — 리랭킹 (`src/retrieval/reranker.py`)
 - **입력**: `query:str`, `list[RetrievedChunk]`
-- **출력**: `list[RerankingResult]` (rerank_score 내림차순, RERANK_THRESHOLD=0.5 필터)
-- **진입**: `rerank_chunks(...)`. `USE_RERANKER=False`면 워크플로우가 호출 스킵
+- **출력**: `list[RerankingResult]` (rerank_score 내림차순, RERANK_THRESHOLD 필터 — 기본값은 config.py, `.env`로 조정 가능)
+- **진입**: `rerank_chunks(...)`. `USE_RERANKER`(기본 false, `.env` 토글)가 꺼져 있으면 워크플로우가 호출 스킵
 - **에러**: RR-201(모델/점수 실패), RR-202(임계 초과 청크 0건)
 
 ## FUNC-007 — 적합성 평가 / CRAG (`src/agent/nodes/evaluate.py`)

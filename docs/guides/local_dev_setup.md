@@ -27,7 +27,7 @@ cp .env.example .env
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | 연결 대상 |
 
-> 모델·임계치 등은 `.env`가 아니라 `src/utils/config.py` 상수로 관리(EMBEDDING_MODEL, OPENAI_MODEL, RRF_K, TOP_K_RETRIEVAL, USE_RERANKER ...).
+> 모델·임계치의 기본값 정본은 `src/utils/config.py`다(EMBEDDING_MODEL, OPENAI_MODEL, RRF_K, TOP_K_RETRIEVAL ...). 리랭커(USE_RERANKER·RERANK_THRESHOLD·RERANK_MODEL)와 임베딩 실행 자원(EMBEDDING_DEVICE 등)은 `.env`로 override할 수 있다 — 키 목록은 `.env.example` 참조.
 
 ## 4. 데이터베이스 기동
 ```bash
