@@ -16,7 +16,7 @@ from src.agent.nodes.evaluate import evaluate_context as evaluate
 from src.retrieval.searcher import search_chunks as _search_impl
 from src.retrieval.reranker import rerank_chunks as _rerank_impl
 from src.utils import config
-from src.utils.config import MAX_REWRITE_COUNT, MAX_HIL_COUNT, KST, RERANK_THRESHOLD, TOP_K_RETRIEVAL
+from src.utils.config import MAX_REWRITE_COUNT, MAX_HIL_COUNT, KST, TOP_K_RETRIEVAL
 from src.utils.exception import (
     AccountingRAGError,
     RerankFailureError,
@@ -294,13 +294,13 @@ def rerank(state: GraphState) -> dict:
 
         # rerank()가 내림차순 정렬을 보장하므로 0번째가 최고 점수
         max_score = results[0].rerank_score
-        if max_score < RERANK_THRESHOLD:
+        if max_score < config.RERANK_THRESHOLD:
             logger.warning(
                 f"재정렬 점수 임계값 미달: 최고점={max_score}, "
-                f"임계값={RERANK_THRESHOLD}"
+                f"임계값={config.RERANK_THRESHOLD}"
             )
             raise ScoreThresholdError(
-                f"최고 관련도({max_score})가 임계값({RERANK_THRESHOLD})에 미달합니다."
+                f"최고 관련도({max_score})가 임계값({config.RERANK_THRESHOLD})에 미달합니다."
             )
 
         logger.info(f"재정렬 완료: {len(results)}개 청크 반환")

@@ -11,7 +11,8 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from src.models.state import GraphState
 from src.models.schemas import RerankingResult, Citation, FinalResponse, LLMInternalResponse
 from src.agent.prompts import GENERATION_PROMPT
-from src.utils.config import RERANK_THRESHOLD, KST, MAX_CONTEXT_TOKENS, OPENAI_MODEL
+from src.utils import config
+from src.utils.config import KST, MAX_CONTEXT_TOKENS, OPENAI_MODEL
 from src.utils.exception import (
     AccountingRAGError,
     LLMResponseFormatError,
@@ -43,7 +44,7 @@ def generate_response(state: GraphState) -> dict:
         context_chunks = []
         chunk_map = {}
         for idx, r_chunk in enumerate(state.reranked_chunks, start=1):
-            if r_chunk.rerank_score >= RERANK_THRESHOLD:
+            if r_chunk.rerank_score >= config.RERANK_THRESHOLD:
                 chunk_text = f"[{idx}] {r_chunk.chunk.content}"     # [1] 문서 내용, [2] 문서 내용
                 candidate_str = "\n\n".join(context_chunks + [chunk_text])  # "[1] ...\n\n[2] ..."
                 estimated_tokens = len(candidate_str) // 2  # 토큰 추정 (o200k_base 기준 한국어 1 토큰 ≈ 2~3 글자)
