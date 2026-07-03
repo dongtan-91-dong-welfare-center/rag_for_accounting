@@ -1,0 +1,86 @@
+/**
+ * API 클라이언트 — src/api/schemas.py 계약의 TypeScript 미러.
+ *
+ * 응답은 status(done|interrupted)로 구분되는 유니언이다. 필드를 여기 말고
+ * 다른 곳에 정의하지 말 것 — 백엔드 계약 변경 시 이 파일만 함께 고친다.
+ */
+
+export interface ClauseOut {
+  rank: number;
+  chapter: string;
+  node_id: string;
+  score: number;
+  content: string;
+}
+
+export interface CitationOut {
+  document_id: string;
+  chunk_id: string;
+  content: string;
+  relevance_score: number;
+}
+
+export type ResumeAction = "approve" | "rewrite";
+
+export interface InterruptOption {
+  action: ResumeAction;
+  label: string;
+}
+
+export interface InterruptInfo {
+  strategy: string;
+  original_query: string;
+  search_queries: string[];
+  options: InterruptOption[];
+}
+
+export interface QueryDoneResponse {
+  status: "done";
+  thread_id: string;
+  answer: string;
+  is_answerable: boolean;
+  confidence: number;
+  /** 서버가 error_logs에서 파생한 폴백 구분자 — TIMEOUT이면 일시적 실패(재시도 유도). */
+  error_code: "TIMEOUT" | null;
+  clauses: ClauseOut[];
+  citations: CitationOut[];
+}
+
+export interface QueryInterruptedResponse {
+  status: "interrupted";
+  thread_id: string;
+  interrupt: InterruptInfo;
+}
+
+export type WorkflowResponse = QueryDoneResponse | QueryInterruptedResponse;
+
+export type StandardFilter = "ALL" | "GAAP" | "KIFRS";
+
+const API_BASE: string = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`${res.status} ${res.statusText} — ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export function postQuery(query: string, standardFilter: StandardFilter): Promise<WorkflowResponse> {
+  return post("/query", { query, standard_filter: standardFilter });
+}
+
+export function postResume(
+  threadId: string,
+  action: ResumeAction,
+  feedback?: string,
+): Promise<WorkflowResponse> {
+  const body: Record<string, unknown> = { thread_id: threadId, action };
+  if (feedback !== undefined) body.feedback = feedback;
+  return post("/resume", body);
+}
