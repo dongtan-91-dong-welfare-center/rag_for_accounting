@@ -4,9 +4,13 @@ CLAUDE.md SSoT 규칙("문서에 수치를 복제하지 말고 코드를 가리�
 문서가 핵심 상수를 `NAME=값` 형태로 박아두면, 그 값이 config.py와 어긋났는지 검사해 드리프트를 잡는다.
 손-스냅샷을 금지하는 대신 이 검사로 안전망을 둔다.
 
-테스트 스위트에는 묶지 않는다(수동 실행). 
+테스트 스위트에는 묶지 않는다(수동 실행).
 문서나 config.py를 손댄 뒤 uv run python scripts/config_value_lint.py로 불일치가 0인지 확인하는 용도.
 스캔 범위·제외 규칙은 path_lint와 공유한다.
+
+주의: config는 import 시 load_dotenv()로 .env를 반영한다.
+TRACKED 상수(RERANK_THRESHOLD 등)를 .env로 override한 상태에서 돌리면 문서의 기본값 서술과 어긋나는 오탐이 난다
+기본값 검증은 해당 env 미설정으로 실행한다.
 """
 from __future__ import annotations
 

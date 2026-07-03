@@ -1,15 +1,37 @@
 import os
 from datetime import timezone, timedelta
 
+from dotenv import load_dotenv
+
+# config는 logger/exception을 경유한 transitive import로 어떤 진입점의 load_dotenv()보다도 먼저 평가될 수 있다.
+# 여기서 직접 로드해 .env 반영을 import 순서와 무관하게 보장한다.
+# 이미 설정된 실제 환경변수는 덮어쓰지 않는다(override=False 기본값).
+load_dotenv()
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """환경변수를 bool로 파싱한다 — bool("false") == True 함정을 피해 truthy 집합만 True."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"true", "1", "yes"}
+
+
+def _env_float(name: str, default: float) -> float:
+    """환경변수를 float로 파싱한다. 미설정이면 기본값, 숫자가 아니면 ValueError(fail-fast)."""
+    value = os.getenv(name)
+    return default if value is None else float(value)
+
+
 # 파이프라인 전역 설정값
 MAX_REWRITE_COUNT: int = 3          # FUNC-004: CRAG 루프(평가 임계치 미달 재검색) 최대 반복 횟수
 MAX_HIL_COUNT: int = 5              # 워크플로우: Human-in-the-Loop 재작성 요청 최대 반복 횟수 (CRAG 루프와 분리)
 TOP_K_RETRIEVAL: int = 10           # FUNC-005: 1차 검색 반환 청크 수
 
-# Reranking Configuration
-USE_RERANKER: bool = False          # 리랭킹 모델 활성화 여부
-RERANK_THRESHOLD: float = 0.5       # FUNC-006: 재정렬 후 필터링 임계값 (기본값: 중간 신뢰도)
-RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # FUNC-006: Cross-Encoder 모델 식별자
+# Reranking Configuration — .env로 토글 가능, 기본값은 테스트/CI 보존을 위해 유지
+USE_RERANKER: bool = _env_bool("USE_RERANKER", False)           # 리랭킹 모델 활성화 여부
+RERANK_THRESHOLD: float = _env_float("RERANK_THRESHOLD", 0.5)   # FUNC-006: 재정렬 후 필터링 임계값 (기본값: 중간 신뢰도)
+RERANK_MODEL: str = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")  # FUNC-006: Cross-Encoder 모델 식별자
 VECTOR_COLLECTION_NAME: str = "rag_for_accounting"  # FUNC-003: pgvector 컬렉션명
 OPENAI_MODEL: str = "gpt-5.4-mini"   # FUNC-007, 008, 009: LLM 모델 식별자
 

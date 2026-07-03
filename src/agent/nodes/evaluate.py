@@ -8,7 +8,8 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from src.models.state import GraphState
 from src.models.schemas import RerankingResult, EvaluationResult
 from src.agent.prompts import EVALUATION_PROMPT
-from src.utils.config import RERANK_THRESHOLD, MAX_REWRITE_COUNT, OPENAI_MODEL
+from src.utils import config
+from src.utils.config import MAX_REWRITE_COUNT, OPENAI_MODEL
 from src.utils.exception import (
     AccountingRAGError,
     EvaluationParsingError,
@@ -201,7 +202,7 @@ def check_relevance(chunk: RerankingResult, query: str) -> bool:
     Returns:
         bool: 관련성 충족 여부
     """
-    return chunk.rerank_score >= RERANK_THRESHOLD and len(chunk.chunk.content.strip()) > 0
+    return chunk.rerank_score >= config.RERANK_THRESHOLD and len(chunk.chunk.content.strip()) > 0
 
 
 def _is_negated(sentence: str) -> bool:

@@ -2,7 +2,7 @@
 
 ## ✅ 벤치마크 정확도 베이스라인 실측 완료 (1라운드)
 
-전량 인덱싱(33장, 1042청크) 후 K-GAAP 14건 라이브 측정 수행. 측정 하니스 `scripts/benchmark_baseline.py`, raw `docs/measurements/baseline_20260614_0021.json`, 회의용 종합 `docs/measurements/baseline_meeting_brief.md`.
+전량 인덱싱(33장, 1042청크) 후 K-GAAP 14건 라이브 측정 수행. 측정 하니스 `scripts/benchmark_baseline.py`, raw baseline_20260614_0021.json(로컬 산출물, gitignore로 미추적), 회의용 종합 `docs/measurements/baseline_meeting_brief.md`.
 
 ### 채점 방법론 (결정)
 - **현행 `ref in citation_text` 문자열 매칭은 0/14 (0%)** — 라벨(`제18장 18.7조`)이 본문(`#### 18.7`)에 문자열로 없어 구조적으로 실패함을 실증.
