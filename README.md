@@ -63,6 +63,20 @@ uv run python -m src.main query "리스 회계처리" --standard GAAP
 
 > 컨테이너(`app`) 안에서 실행하려면 `docker compose exec app uv run python -m src.main ...` 형태로 호출합니다.
 
+#### 웹 화면 (FastAPI + React)
+
+브라우저에서 질의하려면 API 서버(`src/api/server.py`)와 React 프론트(`frontend/`)를 띄웁니다.
+
+```bash
+# 1) API 서버 — 단일 워커 전제(자세한 제약은 docs/guides/local_dev_setup.md)
+uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000
+
+# 2) React 개발 서버 (frontend/에서, http://localhost:5173)
+cd frontend && npm install && npm run dev
+```
+
+> 기존 Streamlit 화면(`app.py`)은 React가 동일 기능(질의·조항 표시·HIL 왕복)을 대체하면서 **유지보수 동결(deprecated)** 상태입니다 — 신규 기능은 React에만 추가하며, 제거 시점은 v1.1에서 결정합니다.
+
 ### 4. (선택) LangSmith 트레이싱
 
 케이스별로 파이프라인 노드 흐름·입출력·지연을 추적하려면 LangSmith 트레이싱을 켤 수 있습니다(개발자 디버깅용, 기본 OFF). `.env`에 아래 환경변수를 설정합니다.
