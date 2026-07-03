@@ -398,14 +398,50 @@ class TestRunWorkflow:
         assert "재시도" in result["final_response"].answer
 
     @patch("src.agent.workflow.build_workflow")
-    def test_run_workflow_timeout_propagates(self, mock_build_workflow):
-        """TimeoutError 발생 시 예외가 그대로 상위로 전파(raise)되는지 검증"""
+    def test_run_workflow_timeout_fallback(self, mock_build_workflow):
+        """TimeoutError 발생 시 재전파 대신 폴백 dict 반환 검증"""
+        from src.models.schemas import FinalResponse
+
         mock_app = MagicMock()
         mock_app.invoke.side_effect = TimeoutError("시간 초과")
         mock_build_workflow.return_value = mock_app
 
-        with pytest.raises(TimeoutError):
-            run_workflow("영업권 손상차손 인식 기준은?")
+        result = run_workflow("영업권 손상차손 인식 기준은?")
+
+        assert isinstance(result, dict) # LangGraph 에러 발생 시 폴백 딕셔너리 반환
+        assert result["thread_id"] # 클라이언트 재시도를 위해 항상 포함
+        assert isinstance(result["final_response"], FinalResponse) # FinalResponse 구조화된 응답
+        assert result["final_response"].is_answerable is False # 답변 불가
+        assert "시간이 초과" in result["final_response"].answer # 시간 초과 메시지
+        assert result["error_logs"][-1]["node"] == "workflow" # 에러 발생 노드
+        assert result["error_logs"][-1]["error_type"] == "TIMEOUT" # 에러 타입
+
+
+@pytest.mark.unit
+class TestResumeWorkflow:
+    """resume_workflow() 실행기 단위 테스트"""
+
+    @patch("src.agent.workflow.build_workflow")
+    def test_resume_workflow_timeout_fallback(self, mock_build_workflow):
+        """재개 중 TimeoutError 발생 시 체크포인트 상태 기반 폴백 dict 반환 검증"""
+        from src.models.schemas import FinalResponse
+
+        mock_app = MagicMock()
+        mock_app.invoke.side_effect = TimeoutError("시간 초과")
+        # 체크포인터에 보관된 중간 상태 스냅샷 (search까지 진행된 상황 가정)
+        mock_app.get_state.return_value = MagicMock(
+            values={"original_query": "영업권 손상차손 인식 기준은?", "rewrite_count": 1, "error_logs": []}
+        )
+        mock_build_workflow.return_value = mock_app
+
+        result = resume_workflow("tid-131", {"action": "approve"})
+
+        assert isinstance(result, dict) # LangGraph 에러 발생 시 폴백 딕셔너리 반환
+        assert result["thread_id"] == "tid-131" # 클라이언트 재시도를 위해 항상 포함
+        assert result["rewrite_count"] == 1 # 체크포인트에 보관된 중간 상태가 폴백에 보존된다
+        assert isinstance(result["final_response"], FinalResponse) # FinalResponse 구조화된 응답
+        assert result["final_response"].is_answerable is False # 답변 불가
+        assert result["error_logs"][-1]["error_type"] == "TIMEOUT" # 에러 타입
 
 
 @pytest.mark.unit

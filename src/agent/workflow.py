@@ -27,7 +27,7 @@ from src.utils.exception import (
     LLMAPIConnectionError,
 )
 from src.utils.logger import get_logger
-from src.models.state import GraphState
+from src.models.state import GraphState, ErrorLog
 from src.models.schemas import (
     RetrievedChunk, FinalResponse, RerankingResult
 )
@@ -485,6 +485,25 @@ def _recursion_fallback_response() -> FinalResponse:
     )
 
 
+def _timeout_fallback_response() -> FinalResponse:
+    return FinalResponse(
+        answer="처리 시간이 초과되어 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.",
+        citations=[],
+        is_answerable=False,
+        confidence_score=0.0,
+    )
+
+
+def _timeout_error_log(e: TimeoutError) -> ErrorLog:
+    # step_timeout은 그래프 러너가 던지므로 어느 노드에서 초과됐는지 특정할 수 없다 → node="workflow"
+    return {
+        "timestamp": datetime.now(KST).isoformat(),
+        "node": "workflow",
+        "error_type": "TIMEOUT",
+        "message": str(e) or "노드 실행이 step_timeout을 초과했습니다.",
+    }
+
+
 def run_workflow(
     query: str,
     standard_filter: Literal["GAAP", "KIFRS", "ALL"] = "ALL",
@@ -528,12 +547,14 @@ def run_workflow(
         fallback = {k: getattr(initial_state, k) for k in GraphState.model_fields}  # 예시: {'original_query': '....', ...}
         fallback["thread_id"] = thread_id
         return fallback
-    except TimeoutError:
-        # 타임아웃 발생 시
-        # TODO: MVP 단계에서는 타임아웃 발생 시 호출자(API 라우터 등)가 예외를 처리하도록 재전파(re-raise)합니다.
-        # 추후 타임아웃 발생 시 안전한 GraphState 반환 및 error_logs 기록 로직 추가 필요.
-        # traceback을 보존하기 위해 인수 없이 raise를 사용합니다.
-        raise
+    except TimeoutError as e:
+        # 노드 실행이 step_timeout을 초과 — 구조화 반환 계약(#131)에 따라
+        # GraphRecursionError와 동일하게 폴백 GraphState + error_logs를 반환한다.
+        initial_state.final_response = _timeout_fallback_response()
+        initial_state.error_logs = initial_state.error_logs + [_timeout_error_log(e)]
+        fallback = {k: getattr(initial_state, k) for k in GraphState.model_fields}
+        fallback["thread_id"] = thread_id
+        return fallback
 
 
 def resume_workflow(
@@ -567,5 +588,11 @@ def resume_workflow(
         fallback["final_response"] = _recursion_fallback_response()
         fallback["thread_id"] = thread_id
         return fallback
-    except TimeoutError:
-        raise
+    except TimeoutError as e:
+        # 재개 중 타임아웃도 재전파 대신 체크포인트 상태 기반 폴백을 반환한다(#131).
+        snapshot = app.get_state(_run_config(thread_id))
+        fallback = dict(snapshot.values)
+        fallback["final_response"] = _timeout_fallback_response()
+        fallback["error_logs"] = list(fallback.get("error_logs", [])) + [_timeout_error_log(e)]
+        fallback["thread_id"] = thread_id
+        return fallback

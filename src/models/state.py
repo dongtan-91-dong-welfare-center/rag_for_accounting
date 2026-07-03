@@ -8,7 +8,7 @@ class ErrorLog(TypedDict):
     각 노드 실행 중 발생한 예외 정보를 기록하는 타입 딕셔너리.
     """
     timestamp:  str   # ISO 8601 형식의 한국 표준시(KST, +09:00). 예: "2026-04-19T10:00:00+09:00" (src.utils.config KST 활용)
-    node:       str   # 예외가 발생한 노드명: "rewrite" | "search" | "rerank" | "evaluate" | "generate" | "parse" | "ontology" | "index"
+    node:       str   # 예외가 발생한 노드명: "rewrite" | "search" | "rerank" | "evaluate" | "generate" | "parse" | "ontology" | "index" | "workflow"(그래프 레벨, 노드 특정 불가)
     error_type: str   # 커스텀 에러 코드 (예: "CM-002", "SE-101") 또는 일반 예외 시 "UNKNOWN"
     message:    str   # 에러 상세 메시지
 
