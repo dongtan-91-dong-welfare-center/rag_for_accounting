@@ -411,3 +411,16 @@ def test_clause_level_false_is_unchanged_default():
     assert len(default) == 1
     assert default[0].chunk_id == "gaap-ch21-bundle"
     assert [c.chunk_id for c in default] == [c.chunk_id for c in explicit_false]
+
+
+@pytest.mark.unit
+def test_empty_para_node_not_chunked():
+    """content가 빈 문단 번호 노드(md_parser가 번호 연속성 보존용으로 남긴 노드)는 청크화되지 않는다."""
+    graph = OntologyGraph()
+    graph.nodes.append(OntologyNode(id="gaap-ch6", node_type="Standard", standard_type="GAAP", chapter="6"))
+    graph.nodes.append(OntologyNode(id="gaap-ch6-s1-6.5", node_type="Subsection", title="6.5", content=""))
+    graph.nodes.append(OntologyNode(id="gaap-ch6-s1-본문", node_type="Subsection", title="본문", content="내용이 있다"))
+    chunks = chunk_graph(graph, token_counter=_word_count)
+    node_ids = {c.metadata.ontology_node_id for c in chunks}
+    assert "gaap-ch6-s1-6.5" not in node_ids
+    assert "gaap-ch6-s1-본문" in node_ids
