@@ -77,5 +77,13 @@ MAX_CONTEXT_TOKENS: int = 270000
 # 검색 대상 테이블명 — RetrievedChunk 스키마와 컬럼명을 통일
 CHUNKS_TABLE: str = "chunks"
 
+# API 서버(src/api/server.py) CORS 허용 origin — React dev 서버(Vite 기본 5173) 브라우저 호출용.
+# 배포 origin이 다르면 콤마 구분 env로 override 한다(예: API_CORS_ORIGINS=https://rag.example.com).
+API_CORS_ORIGINS: list[str] = [
+    origin.strip()
+    for origin in os.getenv("API_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+    if origin.strip()
+]
+
 # 시간대(에러 로그 기록 시 한국 표준시(UTC+9)를 기준으로 하기 위함)
 KST = timezone(timedelta(hours=9))
