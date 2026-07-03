@@ -77,7 +77,7 @@
 - **라우팅**: `route_after_rewrite`, `route_after_human_review`, `route_after_evaluate`(needs_reretrieval 최우선)
 - **제어 상수**: MAX_REWRITE_COUNT=3, MAX_HIL_COUNT=5
 - **진입**: `run_workflow(query, standard_filter)`, `resume_workflow(thread_id, decision)`
-- **복원력**: `handle_node_errors` 데코레이터(예외→error_logs 기록 후 계속), GraphRecursionError 폴백.
+- **복원력**: `handle_node_errors` 데코레이터(예외→error_logs 기록 후 계속), GraphRecursionError·TimeoutError 폴백(재전파 없이 구조화 GraphState 반환).
 
 ---
 
