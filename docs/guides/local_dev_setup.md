@@ -56,6 +56,15 @@ uv run python -m src.main query "리스 회계처리" --standard GAAP
 ```
 > HIL interrupt 발생 시 대화형으로 승인/재작성 입력. 비대화형(파이프) 환경은 자동 승인.
 
+### API 서버(FastAPI)
+React 프론트엔드가 소비하는 HTTP 진입점(`POST /query`·`POST /resume`)을 띄운다.
+```bash
+uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000
+```
+> ⚠️ **단일 워커 전제.** HIL 체크포인터가 프로세스-로컬 MemorySaver라서 `--workers N`으로 늘리면 `/resume`이 다른 워커로 라우팅돼 세션을 찾지 못한다(404). 서버 재시작 시 진행 중 HIL 세션도 소실된다. 영속 체크포인터(PostgresSaver) 전환은 #209.
+>
+> OpenAPI 문서는 http://localhost:8000/docs — 응답 계약의 정본은 `src/api/schemas.py`. CORS 허용 origin은 `API_CORS_ORIGINS`(`.env.example` 참조)로 override.
+
 ## 6. 테스트
 마커 3단계 (`pyproject.toml`):
 

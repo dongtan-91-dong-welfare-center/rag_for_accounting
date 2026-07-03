@@ -40,6 +40,10 @@ services:
     # 호스트 브라우저(http://localhost:8501)에서 컨테이너 내부 8501에 접근하기 위한 통로.
     ports:
       - "8501:8501"
+      # [API 서버(FastAPI) 포트 매핑]
+      # src/api/server.py를 `uvicorn src.api.server:app --host 0.0.0.0 --port 8000`으로
+      # 띄울 때 호스트(React dev 서버·브라우저)가 http://localhost:8000 으로 접근하기 위한 통로.
+      - "8000:8000"
     volumes:
       # [실시간 코드 동기화]
       # 로컬 PC의 현재 디렉토리 코드를 컨테이너의 /app 시스템으로 실시간 마운트시켜 놓습니다.
