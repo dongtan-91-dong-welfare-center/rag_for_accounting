@@ -2,7 +2,7 @@
 
 > **한 줄 요약(BLUF):** 회계기준서 RAG 시스템 — **pgvector + BM25(tsvector) 하이브리드 검색** 기반.
 
-*2026-06-13 작성 · 코드 실태 기준. Apache AGE / EdgeQuake / GraphRAG는 제거됨(폐기 경위 → [archive](../archive/README.md)).*
+*2026-06-13 작성 · 코드 실태 기준. 이전 그래프 DB 기반 설계는 폐기됨(경위 → [archive](../archive/README.md)).*
 
 ## 1. 한눈에 보기
 
@@ -77,7 +77,6 @@ src/
 
 ## 4. 알려진 한계 (v1.0)
 - 전 파이프라인 테스트가 mock — 실데이터 E2E 미검증 (병합 전 스모크 권고)
-- DB 인프라(db.Dockerfile/docker-compose/.env)에 Apache AGE 빌드·로드 잔재
 - Sparse 검색 한국어 형태소 미지원, GIN 인덱스 미설정
 - 크로스챕터 참조는 단일 문서 빌드 한계로 미해소 엣지로 남음
 
