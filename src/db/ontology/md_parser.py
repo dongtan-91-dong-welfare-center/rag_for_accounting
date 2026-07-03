@@ -58,7 +58,9 @@ def parse_markdown(
     child_order: dict[str, int] = {}  # parent_id → 자식 누적 수. Section·Subsection 구분 없이 부모 기준으로 순번 부여.
     content_lines: list[str] = []
     section_content_lines: list[str] = []
-    subsection_occurrence: dict[str, int] = {}  # base_id → 등장 횟수. 재등장 시 suffix(-2, -3)로 id 구분.
+    used_ids: set[str] = {standard_id}  # 부여된 모든 노드 id. 타입 불문 유일성을 보장한다.
+    # 절번호 없는 Section과 동명 Subsection(부록의 H3 등)이 같은 슬러그 id로 충돌하던 문제를 막기 위해
+    # 서브섹션끼리만이 아니라 Section·Standard id까지 통틀어 비교한다. 재등장 시 suffix(-2, -3).
     heading_ref_targets: list[str] = []  # 현재 H3 헤딩 어노테이션에서 추출한 참조 원문
     heading_ref_source: str = ""         # 어노테이션이 포함된 원래 H3 헤딩 텍스트 (source_text 용)
     current_para_id: str = ""            # H4에서 추출된 현재 문단 번호. 본문 어노테이션 엣지의 paragraph 필드에 사용.
@@ -72,7 +74,11 @@ def parse_markdown(
         if current_subsection is None:              # H3 없이 H2가 연속으로 나오는 경우 등 flush할 소절이 없을 때 가드
             return
         content = '\n'.join(content_lines).strip()
-        if content or current_subsection.paragraphs:
+        # title 자체가 문단 번호인 빈 소절(삭제되었거나 내용이 '의N' 하위문단으로 옮겨간 문단)도
+        # 노드로 남긴다. 문단 번호의 존재를 기록해 번호 연속성과 참조 해소를 보장한다.
+        title = current_subsection.title.strip()
+        is_para_node = _extract_para_id(title) == title.replace(' ', '')
+        if content or current_subsection.paragraphs or is_para_node:
             current_subsection.content = content
             graph.nodes.append(current_subsection)
             parent_id = current_section.id if current_section else standard_id
@@ -140,12 +146,20 @@ def parse_markdown(
             flush_section_content()
             # 절 번호가 없는 헤딩(예: 용어의 정의)은 제목을 slugify해 id를 만든다.
             sec_id = f"{standard_id}-s{m.group(1)}" if m else f"{standard_id}-{_slugify(heading)}"
-            # 같은 id가 이미 있으면(부록 등에서 절이 재등장) 기존 노드를 재사용해 내용을 이어붙인다.
-            existing = next((n for n in graph.nodes if n.id == sec_id), None)
+            # 같은 id의 Section이 이미 있으면(부록 등에서 절이 재등장) 기존 노드를 재사용해 내용을 이어붙인다.
+            # 단 node_type까지 확인해 동명 Subsection을 Section으로 잘못 재사용하지 않는다.
+            existing = next((n for n in graph.nodes if n.id == sec_id and n.node_type == "Section"), None)
             if existing:
                 current_section = existing
                 # child_order[sec_id]는 기존 자식 수가 이미 누적되어 있어 그대로 이어진다.
             else:
+                # 슬러그 id가 다른 타입 노드에 이미 점유됐으면 suffix(-2, -3)로 충돌을 피한다.
+                base_sec_id = sec_id
+                dup = 2
+                while sec_id in used_ids:
+                    sec_id = f"{base_sec_id}-{dup}"
+                    dup += 1
+                used_ids.add(sec_id)
                 child_order[standard_id] = child_order.get(standard_id, 0) + 1
                 order = child_order[standard_id]
                 current_section = OntologyNode(
@@ -186,9 +200,13 @@ def parse_markdown(
             # 부록 등에서 동일 제목의 Subsection이 재등장할 수 있다.
             # Subsection은 임베딩 단위이므로 Section처럼 내용을 병합하면 길이가 과도해진다.
             # 대신 별도 노드로 생성하고 id에 -2, -3 suffix를 붙여 충돌을 방지한다.
-            count = subsection_occurrence.get(base_id, 0)
-            subsection_occurrence[base_id] = count + 1
-            sub_id = base_id if count == 0 else f"{base_id}-{count + 1}"
+            # used_ids로 Section·Standard id까지 통틀어 비교해 타입 간 충돌도 막는다.
+            sub_id = base_id
+            dup = 2
+            while sub_id in used_ids:
+                sub_id = f"{base_id}-{dup}"
+                dup += 1
+            used_ids.add(sub_id)
             child_order[parent_id] = child_order.get(parent_id, 0) + 1
             current_subsection = OntologyNode(
                 id=sub_id,

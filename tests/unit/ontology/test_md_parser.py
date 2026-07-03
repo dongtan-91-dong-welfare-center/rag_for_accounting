@@ -82,3 +82,56 @@ def test_contains_edges_exist():
     contains = [e for e in graph.edges if e.edge_type == "CONTAINS"]
     from_ids = [e.from_id for e in contains]
     assert "gaap-ch6" in from_ids
+
+
+EMPTY_PARA_MD = """# 제 6 장 테스트
+
+## 제 1 절 공통사항
+
+### 6.5
+
+### 6.6
+
+#### 6.6 이 문단은 내용이 있다 .
+"""
+
+
+@pytest.mark.unit
+def test_empty_paragraph_number_subsection_preserved():
+    """title 자체가 문단 번호인 빈 소절(삭제됐거나 내용이 하위문단으로 옮겨간 문단)도 노드로 남긴다.
+
+    문단 번호의 존재를 기록해 번호 연속성(범위 확장)과 참조 해소(build_lookup)를 보장한다.
+    """
+    graph = parse_markdown(EMPTY_PARA_MD, standard_id="gaap-ch6", standard_type="GAAP")
+    titles = [n.title for n in graph.nodes if n.node_type == "Subsection"]
+    assert "6.5" in titles
+
+
+SLUG_CONFLICT_MD = """# 제 6 장 테스트
+
+### 용어의 정의
+
+이 소절은 절(H2) 없이 등장해 Standard 직속 Subsection이 된다 .
+
+## 용어의 정의
+
+본문이 이어진다 .
+
+### 하위 소절
+
+내용 .
+"""
+
+
+@pytest.mark.unit
+def test_section_slug_id_conflict_with_subsection_gets_suffix():
+    """절번호 없는 Section 슬러그 id가 동명 Subsection id와 충돌하면 suffix로 구분한다.
+
+    동명 Subsection을 Section으로 잘못 재사용하면 타입이 섞여 CONTAINS 구조가 깨진다.
+    """
+    graph = parse_markdown(SLUG_CONFLICT_MD, standard_id="gaap-ch6", standard_type="GAAP")
+    subsections = [n for n in graph.nodes if n.node_type == "Subsection" and n.title == "용어의 정의"]
+    sections = [n for n in graph.nodes if n.node_type == "Section" and n.title == "용어의 정의"]
+    assert len(subsections) == 1
+    assert len(sections) == 1
+    assert sections[0].id != subsections[0].id
