@@ -27,14 +27,13 @@ cp .env.example .env
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | 연결 대상 |
 
-> ⚠️ `.env.example`에 남아있는 `AGE_GRAPH_NAME` 등 AGE 레거시 키는 v1.0에서 불필요(#126, 정리 예정).
 > 모델·임계치 등은 `.env`가 아니라 `src/utils/config.py` 상수로 관리(EMBEDDING_MODEL, OPENAI_MODEL, RRF_K, TOP_K_RETRIEVAL, USE_RERANKER ...).
 
 ## 4. 데이터베이스 기동
 ```bash
 docker compose up -d database
 ```
-> 현재 DB 이미지(`db.Dockerfile`)는 pgvector + (레거시) Apache AGE를 빌드한다. AGE 잔재 제거는 #126 진행 중.
+> DB 이미지(`db.Dockerfile`)는 pgvector 확장이 포함된 PostgreSQL을 빌드한다.
 
 ## 5. 실행 (진입점 `src/main.py`)
 ### 적재(ingest)

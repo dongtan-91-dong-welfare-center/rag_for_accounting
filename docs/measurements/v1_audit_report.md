@@ -1,5 +1,7 @@
 # v1.0 전체 감사 보고서 (FUNC-001~009)
 
+> **한 줄 요약(BLUF):** 2026-06-13 v1.0 병합 시점의 **동결 감사 기록**이다 — 현행 상태가 아니며(이후 상당수 해소됨) 수정하지 않는다. 향후 계획·진행은 GitHub [마일스톤](https://github.com/dongtan-91-dong-welfare-center/rag_for_accounting/milestones)이 정본이다.
+
 > 기준: `origin/dev` ≡ `test/chunking-search-integration`(동일선상) · 작성일 2026-06-13 (D-1)
 > 방법: FUNC별·프로덕션 차원별 병렬 코드/테스트 감사 + 단위/시스템/통합 테스트 실측 + 적대적 완결성 비평
 
@@ -85,34 +87,7 @@
 
 ## 2. Phase 3 — 프로덕션 로드맵 (v1.0 이후)
 
-### 관찰성 (Observability)
-- [high] 구조화 로깅(JSON Lines) 도입 — 현재 text formatter만
-- [high] 요청 단위 trace_id 전파 — thread_id는 HIL 전용, 전 경로 단일 trace 부재
-- [high] 메트릭 수집 — `logger.py`의 log_execution_time 스텁 완성
-- [med] LLM 토큰/비용 추적 — OpenAI usage 미기록
-- [low] LangSmith 트레이싱 연동 — 의존성 선언만 있고 import 0건
-
-### 에러 핸들링·복구
-- [med] `is_retryable` 메타데이터 활성화 — 현재 dead code, 재시도 라우팅에 연결
-- [med] error_logs 무한 증가 가드 — TTL/상한/회전 없이 MemorySaver 누적
-- [med] index_documents 부분실패 dead-letter/재시도 훅(M7)
-- [low] CRAG rewrite_count 재진입 전략 확정(동일 재시도 vs hyde→decompose→stepback 에스컬레이션)
-
-### 성능·부하
-- [high] pgvector HNSW 인덱싱 성능 벤치마크 (#98)
-- [high] 대량 적재 OOM 완화 검증 (#117, KURE-v1 CPU 프로파일)
-- [med] 한국어 형태소 sparse 검색 (#81, pg_bigm/사전 토큰화) — 현재 `to_tsvector('simple')` + GIN 인덱스 없음(매 질의 풀스캔)
-- [med] RRF k 튜닝 벤치마크 (#99)
-- [med] 연결풀 고갈 가드 — getconn 타임아웃 없음(max_size=10)
-- [med] OpenAI 클라이언트 timeout/retry — step_timeout(30s) < API 기본(60s) 불일치
-
-### 배포 인프라
-- [med] DB 스키마 마이그레이션 도구(Alembic 등) — 현재 _ensure_collection 동적 생성만
-- [med] DB 백업·복구·DR 절차
-- [med] Docker 멀티스테이지 빌드 — 프로덕션 이미지에 dev 의존성(pytest) 포함
-- [med] 헬스체크/준비성 프로브 (docker-compose)
-- [low] 이미지 태그 버전 고정
-- [low] v1.1 패키지화 + 로컬 MCP 서버 BYO-corpus (#103)
+> 이 절의 미래 작업은 GitHub **[마일스톤](https://github.com/dongtan-91-dong-welfare-center/rag_for_accounting/milestones)·backlog로 이관**됐다(2026-06-27): 미티켓 아이디어는 backlog 이슈 #191(관찰성)·#192(복원력)·#193(배포 인프라)·#194(런타임 가드)로 신설, 기존 #99·#103·#133·#150·#151·#159·#171·#172·#178도 부착. **진행 상태는 마일스톤이 정본이며 이 문서는 갱신하지 않는다.**
 
 ---
 

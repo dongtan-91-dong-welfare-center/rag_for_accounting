@@ -22,7 +22,7 @@ uv sync
 
 ### 2. 데이터베이스 기동
 
-pgvector 확장이 포함된 PostgreSQL을 docker-compose로 기동합니다.
+pgvector 확장이 포함된 PostgreSQL을 docker compose로 기동합니다.
 접속 정보는 `.env`(템플릿: `.env.example`)에서 읽습니다.
 
 ```bash

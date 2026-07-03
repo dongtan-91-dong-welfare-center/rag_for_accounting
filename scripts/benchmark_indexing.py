@@ -270,11 +270,35 @@ def _extrapolate(measured_files: list[str], n_stored: int, index_sec: float) -> 
     }
 
 
+def _verdict_bluf(payload: dict) -> str:
+    """리포트 상단 한 줄 판정 — 적재 처리량·검색 지연·sanity·외삽을 요약한다.
+
+    raw 측정 덤프만으로는 "그래서 좋은가/나쁜가"가 안 보이므로, 
+    핵심 수치와 탑1 sanity 판정을 한 줄로 압축한다.
+    """
+    idx, srch, ext = payload["indexing"], payload["search"], payload["extrapolation"]
+    top1 = srch.get("top1_score")
+    base = _SMOKE_BASELINE["top1_score"]
+    if top1 is None:
+        sanity = "탑1 미측정"
+    else:
+        diff = top1 - base
+        label = "동급" if abs(diff) <= 0.05 else ("상승" if diff > 0 else "하락")
+        sanity = f"탑1 {top1}(0차 {base} 대비 {label})"
+    return (
+        f"{idx['n_stored']}청크 적재 {idx['wall_sec']}s(청크당 {idx['per_chunk_ms']}ms) · "
+        f"검색 p50 {srch['search_p50_ms']}ms · {sanity} · "
+        f"53장 외삽 ~{ext['est_total_index_sec']}s"
+    )
+
+
 def _write_report(payload: dict, out_dir: Path, stamp: str) -> Path:
     idx, srch, ext = payload["indexing"], payload["search"], payload["extrapolation"]
     ms = payload["milestones"]
     lines = [
         "# pgvector 인덱싱 성능 벤치마크",
+        "",
+        f"> **한 줄 요약(BLUF):** {_verdict_bluf(payload)}",
         "",
         f"- 생성: {payload['generated_at']}",
         f"- 컬렉션: `{payload['collection']}` (전용, 측정 후 정리)",

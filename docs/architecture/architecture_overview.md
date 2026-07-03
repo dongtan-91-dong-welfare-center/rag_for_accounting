@@ -1,40 +1,50 @@
 # 아키텍처 개요 (v1.0)
 
-> 회계기준서 RAG 시스템. **pgvector + BM25(tsvector) 하이브리드 검색** 기반.
-> Apache AGE / EdgeQuake / GraphRAG는 v1.0에서 제거됨(초기 설계 문서 `ARCHITECTURE.md`는 superseded).
-> 작성일 2026-06-13 · 코드 실태 기준.
+> **한 줄 요약(BLUF):** 회계기준서 RAG 시스템 — **pgvector + BM25(tsvector) 하이브리드 검색** 기반.
+
+*2026-06-13 작성 · 코드 실태 기준. 이전 그래프 DB 기반 설계는 폐기됨(경위 → [archive](../archive/README.md)).*
 
 ## 1. 한눈에 보기
 
-두 경로를 단일 CLI(`src/main.py`)로 제공한다.
+두 경로를 단일 CLI(`src/main.py`)로 제공한다. 다이어그램의 `FUNC-001`~`FUNC-009` 라벨 정의는 [func_interfaces.md](func_interfaces.md)에 있다.
 
-```
-[적재 ingest]
- PDF/HWP ──(FUNC-001 Docling 파싱)──▶ ParsedDocument(markdown)
-   └▶(FUNC-002 온톨로지 빌드)──▶ OntologyGraph(Standard/Section/Subsection + edges)
-        └▶(FUNC-002 청킹)──▶ RetrievedChunk[]  (metadata.ontology_node_id)
-             └▶(FUNC-003 임베딩 KURE-v1 → pgvector HNSW upsert)──▶ chunks 테이블
+**적재 (ingest)**
 
-[질의 query — LangGraph StateGraph]
- original_query
-   ─▶ rewrite(FUNC-004) ──┬─(비회계)─▶ early_exit ─▶ END
-                          └─(회계)──▶ human_review(HIL, interrupt)
-   ─▶ search(FUNC-005, dense+sparse RRF)
-   ─▶ rerank(FUNC-006, CrossEncoder · USE_RERANKER 게이트)
-   ─▶ evaluate(FUNC-007, CRAG 자가검증) ──(부족)──▶ rewrite (CRAG 루프, 최대 3회)
-   ─▶ generate(FUNC-008, 답변+인용) ─▶ FinalResponse ─▶ END
+```mermaid
+graph TD
+    A["원본 PDF/HWP"] -->|FUNC-001 Docling 파싱| B["ParsedDocument (markdown)"]
+    B -->|FUNC-002 온톨로지 빌드| C["OntologyGraph: Standard·Section·Subsection + edges"]
+    C -->|FUNC-002 청킹| D["RetrievedChunk[] (metadata.ontology_node_id)"]
+    D -->|FUNC-003 임베딩 후 pgvector HNSW upsert| E[("chunks 테이블")]
 ```
 
-## 2. 핵심 결정
+**질의 (query) — LangGraph StateGraph**
+
+```mermaid
+graph TD
+    Q["original_query"] --> RW["rewrite (FUNC-004)"]
+    RW -->|비회계| EX["early_exit"] --> ENDX(["END"])
+    RW -->|회계| HV["human_review (HIL·interrupt)"]
+    HV --> SR["search (FUNC-005·dense+sparse RRF)"]
+    SR --> RK["rerank (FUNC-006·CrossEncoder·USE_RERANKER 게이트)"]
+    RK --> EV["evaluate (FUNC-007·CRAG 자가검증)"]
+    EV -->|부족시 재작성 최대 3회| RW
+    EV --> GN["generate (FUNC-008·답변+인용)"]
+    GN --> FR["FinalResponse"] --> ENDX
+```
+
+## 2. 핵심 결정 (요약)
+
+> 결정 *기록*의 정본은 ADR([decisions/](../decisions/README.md))이다. 아래 표는 한눈 요약 — 핵심 결정은 ADR로 소급 기록했다(0002~0005).
 
 | 영역 | 결정 | 근거 |
 |---|---|---|
-| 임베딩 | `nlpai-lab/KURE-v1` (자체호스팅, MIT, 1024차원) | 인덱싱·검색이 `embed_texts()` 공유 → 차원 정합 구조적 보장 |
-| 벡터 인덱스 | pgvector HNSW + `vector_cosine_ops` | 점진 적재(upsert)에 IVFFlat보다 적합 |
+| 임베딩 | `nlpai-lab/KURE-v1` (자체호스팅, MIT, 1024차원) | 인덱싱·검색이 `embed_texts()` 공유 → 차원 정합 구조적 보장 · [ADR-0002](../decisions/0002-kure-v1-embedding.md) |
+| 벡터 인덱스 | pgvector HNSW + `vector_cosine_ops` | 점진 적재(upsert)에 IVFFlat보다 적합 · [ADR-0003](../decisions/0003-pgvector-hnsw-vectorstore.md) |
 | Sparse 검색 | PostgreSQL `to_tsvector('simple')` + `ts_rank_cd` | ※ 한국어 형태소 미지원·GIN 인덱스 미설정 |
-| 하이브리드 병합 | RRF(Reciprocal Rank Fusion), k=60 | 점수 분포 차이에 강건, 가중치 튜닝 불필요 |
+| 하이브리드 병합 | RRF(Reciprocal Rank Fusion), k=60 | 점수 분포 차이에 강건, 가중치 튜닝 불필요 · [ADR-0004](../decisions/0004-rrf-hybrid-fusion.md) |
 | LLM | `OPENAI_MODEL`(config) · PydanticAI/OpenAI | rewrite/evaluate/generate 공통 (라이브 검증 필요) |
-| 오케스트레이션 | LangGraph StateGraph + MemorySaver 체크포인터 | HIL interrupt/resume, CRAG 루프 |
+| 오케스트레이션 | LangGraph StateGraph + MemorySaver 체크포인터 | HIL interrupt/resume, CRAG 루프 · [ADR-0005](../decisions/0005-langgraph-orchestration.md) |
 | 상태 공유 | `GraphState`(Pydantic) 증분 merge | 노드는 변경 필드 dict만 반환 |
 
 ## 3. 모듈 지도 (실제 구조)
@@ -64,12 +74,10 @@ src/
 ```
 
 > 인터페이스(입출력 타입)·에러코드 카탈로그는 [func_interfaces.md](func_interfaces.md) 참조.
-> 데이터 흐름 다이어그램: `docs/architecture/assets/arch-ingest.svg`, `docs/architecture/assets/arch-query.svg`.
 
 ## 4. 알려진 한계 (v1.0)
 - 전 파이프라인 테스트가 mock — 실데이터 E2E 미검증 (병합 전 스모크 권고)
-- DB 인프라(db.Dockerfile/docker-compose/.env)에 Apache AGE 빌드·로드 잔재
 - Sparse 검색 한국어 형태소 미지원, GIN 인덱스 미설정
 - 크로스챕터 참조는 단일 문서 빌드 한계로 미해소 엣지로 남음
 
-상세 갭·로드맵: [v1_audit_report.md](../measurements/v1_audit_report.md).
+상세 갭(2026-06-13 동결 감사): [v1_audit_report.md](../measurements/v1_audit_report.md). 향후 계획은 GitHub [마일스톤](https://github.com/dongtan-91-dong-welfare-center/rag_for_accounting/milestones).

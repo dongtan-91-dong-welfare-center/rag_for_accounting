@@ -1,5 +1,7 @@
 # 프로젝트 Docker 환경 구성 및 검증 가이드
 
+> **한 줄 요약(BLUF):** 개발 환경 일관성을 위한 Docker(`pgvector` PostgreSQL) 구성·실행·검증 가이드. 인프라 준비 상태는 통합 테스트가 자동 점검하므로, 빌드(`docker compose up --build -d`) 후 `uv run python tests/run_tests.py --phase1-only`만 실행하면 된다.
+
 본 문서는 개발 환경의 일관성을 맞추기 위해 도입된 Docker 및 컨테이너 환경의 사용 가이드입니다. 
 가이드를 따라 Docker 환경을 빌드하고, 환경이 정상적으로 갖춰져 있는지 테스트해 볼 수 있습니다.
 
@@ -16,12 +18,11 @@
 ### 1단계: 컨테이너 빌드 및 백그라운드 실행
 기존과 변경된 `pyproject.toml`과 `Dockerfile` 사항을 반영해야 하므로 반드시 갱신 빌드가 필요합니다.
 ```bash
-docker-compose up --build -d
+docker compose up --build -d
 ```
 
 ### 2단계: 자동화된 인프라 환경 검증 테스트
-과거에는 수동으로 각 환경에 접속하여 확장 기능(`vector`)의 설치 여부나 앱의 종속성 상태를 점검했으나, 
-현재는 해당 검증이 `tests/utils/infra_check.py`의 `check_docker_infrastructure()`로 위임되어, `tests/integration/conftest.py`의 세션 픽스처에서 **통합 테스트 진입 전 자동으로 실행**됩니다(Docker 데몬·컨테이너 구동·`pgvector` 확장 로드를 점검하고, 문제가 있으면 통합 테스트를 건너뜀).
+인프라 검증은 `tests/utils/infra_check.py`의 `check_docker_infrastructure()`에 위임되어 있습니다. `tests/integration/conftest.py`의 세션 픽스처가 **통합 테스트 진입 전 자동으로 실행**하여 Docker 데몬·컨테이너 구동·`pgvector` 확장 로드를 점검하고, 문제가 있으면 통합 테스트를 건너뜁니다.
 
 따라서 인프라 준비 상태는 별도 명령 없이 통합 테스트를 실행하면 함께 검증됩니다:
 ```bash
@@ -69,5 +70,5 @@ docker exec -it accounting_db psql -U accounting_user -d accounting_db
 2. **컨테이너 환경 재구축 (필수)**
    변경된 정보를 Docker 이미지의 가상 환경(`/app/.venv`) 내부에 반영할 수 있도록 재빌드를 수반하여 컨테이너를 구동합니다.
    ```bash
-   docker-compose up --build -d
+   docker compose up --build -d
    ```

@@ -1,7 +1,7 @@
 # 회계기준서 온톨로지 스키마 설계 문서
 
 > 작성일: 2026-05-17  
-> 대상 파일: `src/ontology/extractor.py`, `data/ontology/schema.json`  
+> 대상 파일: `src/db/ontology/builder.py`, `data/ontology/schema.json`  
 > 출력 위치: `data/ontology/chapter_XX.json` (33개 파일)
 
 ---
