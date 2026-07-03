@@ -47,3 +47,4 @@ Thumbs.db
 # 비회귀 기준값 tests/integration/benchmark_floor.json 은 추적한다.
 docs/measurements/benchmark_result_*.md
 docs/measurements/baseline_*.json
+docs/measurements/rerank_replay_*.json
