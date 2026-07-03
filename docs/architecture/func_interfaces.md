@@ -94,5 +94,6 @@
 | IX-201 | index | 임베딩 토큰 한도 초과 |
 | EV-301/302/303 | evaluate | 평가파싱 / 일관성 / 할루시네이션 |
 | GN-401/402 | generate | 응답포맷 / 컨텍스트길이 |
+| TIMEOUT | workflow | step_timeout 초과(그래프 레벨, 노드 특정 불가 — `exception.py` 아닌 `workflow.py` 폴백이 직접 기록) |
 
 > `ErrorLog`(timestamp KST, node, error_type, message)로 `GraphState.error_logs`에 누적.
