@@ -1,6 +1,6 @@
 # 아키텍처 개요 (v1.0)
 
-> **한 줄 요약(BLUF):** 회계기준서 RAG 시스템 — **pgvector + BM25(tsvector) 하이브리드 검색** 기반.
+> **한 줄 요약(BLUF):** 회계기준서 RAG 시스템 — **pgvector + PostgreSQL 전문검색(ts_rank_cd) 하이브리드 검색** 기반.
 
 *2026-06-13 작성 · 코드 실태 기준. 이전 그래프 DB 기반 설계는 폐기됨(경위 → [archive](../archive/README.md)).*
 
@@ -41,7 +41,7 @@ graph TD
 |---|---|---|
 | 임베딩 | `nlpai-lab/KURE-v1` (자체호스팅, MIT, 1024차원) | 인덱싱·검색이 `embed_texts()` 공유 → 차원 정합 구조적 보장 · [ADR-0002](../decisions/0002-kure-v1-embedding.md) |
 | 벡터 인덱스 | pgvector HNSW + `vector_cosine_ops` | 점진 적재(upsert)에 IVFFlat보다 적합 · [ADR-0003](../decisions/0003-pgvector-hnsw-vectorstore.md) |
-| Sparse 검색 | PostgreSQL `to_tsvector('simple')` + `ts_rank_cd` | ※ 한국어 형태소 미지원·GIN 인덱스 미설정 |
+| Sparse 검색 | PostgreSQL `to_tsvector('simple')` + `ts_rank_cd` | ※ BM25 아님(IDF 부재) · 한국어 형태소 미지원 · GIN 인덱스 미설정 |
 | 하이브리드 병합 | RRF(Reciprocal Rank Fusion), k=60 | 점수 분포 차이에 강건, 가중치 튜닝 불필요 · [ADR-0004](../decisions/0004-rrf-hybrid-fusion.md) |
 | LLM | `OPENAI_MODEL`(config) · PydanticAI/OpenAI | rewrite/evaluate/generate 공통 (라이브 검증 필요) |
 | 오케스트레이션 | LangGraph StateGraph + MemorySaver 체크포인터 | HIL interrupt/resume, CRAG 루프 · [ADR-0005](../decisions/0005-langgraph-orchestration.md) |

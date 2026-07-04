@@ -69,7 +69,11 @@ def dense_search(query_embedding: list[float], top_k: int, metadata_filter: dict
 
 
 def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None, collection: str = CHUNKS_TABLE) -> list[RetrievedChunk]:
-    """PostgreSQL 내장 텍스트 검색 기능(BM25 유사)을 활용한 Sparse 검색. collection으로 검색 대상 테이블을 지정한다(기본: 운영 CHUNKS_TABLE)."""
+    """PostgreSQL 내장 텍스트 검색(ts_rank_cd 순위)을 활용한 Sparse 검색. collection으로 검색 대상 테이블을 지정한다(기본: 운영 CHUNKS_TABLE).
+
+    ts_rank_cd는 BM25가 아니라 IDF(흔한 단어를 자동으로 덜 세는 가중치)가 없다.
+    이 부재로 흔한 용어가 순위를 지배해, sparse 활성화가 두 차례 실측에서 기각됐다.
+    """
     # WHERE 조건이 있다면 AND로 연결, 없으면 WHERE로 시작
     filter_clause, filter_params = _build_where_clause(metadata_filter)
     
