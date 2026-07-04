@@ -106,15 +106,20 @@ class TestBm25Sparse:
     """_bm25_sparse() — 오프라인 BM25 순위에서 필터 통과 상위 top_n을 RetrievedChunk로 만든다."""
 
     def test_applies_metadata_filter(self):
-        # dense가 GAAP만 보므로 BM25도 GAAP만 후보에 남겨야 병합이 공정하다
-        corpus = [_chunk("1", "상계 손익", "GAAP"), _chunk("2", "상계 자산", "KIFRS")]
+        # dense가 GAAP만 보므로 BM25도 GAAP만 후보에 남겨야 병합이 공정하다.
+        # "상계"는 5문서 중 2개(<절반)에 등장 → IDF 양수, 그중 GAAP은 1번뿐.
+        corpus = [_chunk("1", "상계 손익", "GAAP"), _chunk("2", "상계 자산", "KIFRS"),
+                  _chunk("3", "퇴직 급여", "GAAP"), _chunk("4", "현금 흐름", "KIFRS"),
+                  _chunk("5", "재고 자산", "GAAP")]
         idx = Bm25Index([c.content for c in corpus], str.split)
         out = _bm25_sparse(idx, corpus, "상계", top_n=10, metadata_filter={"standard_type": "GAAP"})
         assert [c.chunk_id for c in out] == ["1"]
 
     def test_score_replaced_by_bm25(self):
-        # 코퍼스 청크의 score(0)를 실제 BM25 점수로 갱신한 복사본을 돌려준다
-        corpus = [_chunk("1", "상계 손익", "GAAP"), _chunk("2", "퇴직 급여", "GAAP")]
+        # 코퍼스 청크의 score(0)를 실제 BM25 점수로 갱신한 복사본을 돌려준다.
+        # "상계"가 3문서 중 1개에만 등장 → IDF 양수, 그 문서만 매칭.
+        corpus = [_chunk("1", "상계 손익", "GAAP"), _chunk("2", "퇴직 급여", "GAAP"),
+                  _chunk("3", "자산 평가", "GAAP")]
         idx = Bm25Index([c.content for c in corpus], str.split)
         out = _bm25_sparse(idx, corpus, "상계", top_n=10, metadata_filter=None)
         assert [c.chunk_id for c in out] == ["1"]
