@@ -103,6 +103,17 @@ cd frontend && npm install && npm run dev
 
 > 기존 Streamlit 화면(`app.py`)은 React가 동일 기능(질의·조항 표시·HIL 왕복)을 대체하면서 **유지보수 동결(deprecated)** 상태입니다 — 신규 기능은 React에만 추가하며, 제거 시점은 v1.1에서 결정합니다.
 
+#### MCP 서버 (FastMCP)
+
+RAG 질의를 MCP 도구로 노출합니다(`src/mcp/server.py`, stdio). 도구는 `query_standards`(질의)와 `resume_query`(HIL 재개) 2종이며 응답 스키마는 API(`/query`·`/resume`)와 동일합니다.
+
+```bash
+# MCP 클라이언트 등록 (stdio, 프로젝트 루트에서)
+claude mcp add accounting-rag -- uv run python -m src.mcp.server
+```
+
+> DB·임베딩 서버가 떠 있어야 합니다(`docker compose up -d database embedding`). 임베딩을 TEI로 위임하려면 `EMBEDDING_SERVER_URL=http://localhost:8080`을 설정합니다.
+
 ### 4. (선택) LangSmith 트레이싱
 
 케이스별로 파이프라인 노드 흐름·입출력·지연을 추적하려면 LangSmith 트레이싱을 켤 수 있습니다(개발자 디버깅용, 기본 OFF). `.env`에 아래 환경변수를 설정합니다.
