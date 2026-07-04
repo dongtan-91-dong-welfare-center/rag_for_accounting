@@ -62,7 +62,7 @@ export type WorkflowResponse = QueryDoneResponse | QueryInterruptedResponse;
 
 export type StandardFilter = "ALL" | "GAAP" | "KIFRS";
 
-const API_BASE: string = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

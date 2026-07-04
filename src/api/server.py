@@ -13,12 +13,15 @@ run_workflow는 동기·블로킹(매 호출 그래프 재컴파일 + LLM 수 �
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi import Path as PathParam
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
@@ -60,6 +63,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+FRONTEND_DIST_DIR = Path(os.getenv("FRONTEND_DIST_DIR", "frontend/dist"))
+FRONTEND_INDEX = FRONTEND_DIST_DIR / "index.html"
+
+if (FRONTEND_DIST_DIR / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
+
 
 class QueryRequest(BaseModel):
     """질의 요청. 빈 질의(공백만 포함)는 워크플로 진입 전에 422로 거절한다."""
@@ -79,6 +88,11 @@ class ResumeRequest(BaseModel):
     thread_id: str
     action: Literal["approve", "rewrite"]
     feedback: str | None = None
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.post("/query", response_model=WorkflowResponse)
@@ -112,3 +126,20 @@ def document_pdf(
     if pdf_path is None:
         raise HTTPException(status_code=404, detail=f"no pdf for document_id: {document_id}")
     return FileResponse(pdf_path, media_type="application/pdf", filename=pdf_path.name)
+
+
+@app.get("/favicon.svg")
+def favicon() -> FileResponse:
+    favicon_path = FRONTEND_DIST_DIR / "favicon.svg"
+    if not favicon_path.exists():
+        raise HTTPException(status_code=404, detail="favicon not found")
+    return FileResponse(favicon_path, media_type="image/svg+xml")
+
+
+@app.get("/")
+@app.get("/{full_path:path}")
+def frontend_app(full_path: str = "") -> FileResponse:
+    """React SPA fallback for the integrated app image."""
+    if not FRONTEND_INDEX.exists():
+        raise HTTPException(status_code=404, detail="frontend build not found")
+    return FileResponse(FRONTEND_INDEX)

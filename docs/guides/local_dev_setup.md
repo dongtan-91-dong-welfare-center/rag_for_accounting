@@ -1,6 +1,8 @@
 # 로컬 개발 셋업
 
 > 작성일 2026-06-13. 패키지 매니저는 **uv** 고정.
+> 루트의 `./install.sh`는 Docker Compose로 database + embedding + app을 모두 기동한다. app 컨테이너는 FastAPI API와 빌드된 React 프론트를 `:8000`에서 함께 서빙한다. 상태 점검은 `./check.sh`(무변경).
+> 임베딩(KURE-v1)은 docker `embedding` 서비스(TEI 기성 이미지)로 분리 서빙되며, `EMBEDDING_SERVER_URL` 설정 시 `src/client`를 통해 위임하고 미설정 시 프로세스 내 로드(호스트 MPS)로 돈다.
 
 ## 1. 사전 요구
 - Python 3.12+ (`.python-version` 참조)
@@ -31,11 +33,11 @@ cp .env.example .env
 
 > 모델·임계치의 기본값 정본은 `src/utils/config.py`다(EMBEDDING_MODEL, OPENAI_MODEL, RRF_K, TOP_K_RETRIEVAL ...). 리랭커(USE_RERANKER·RERANK_THRESHOLD·RERANK_MODEL)와 임베딩 실행 자원(EMBEDDING_DEVICE 등)은 `.env`로 override할 수 있다 — 키 목록은 `.env.example` 참조.
 
-## 4. 데이터베이스 기동
+## 4. Docker 스택 기동
 ```bash
-docker compose up -d database
+docker compose up -d --build
 ```
-> DB 이미지(`db.Dockerfile`)는 pgvector 확장이 포함된 PostgreSQL을 빌드한다.
+> DB 이미지(`db.Dockerfile`)는 pgvector 확장이 포함된 PostgreSQL을 빌드한다. `embedding`은 TEI로 KURE-v1을 서빙하고, `app`은 `http://localhost:8000`에서 API와 React를 함께 제공한다.
 
 ## 5. 실행 (진입점 `src/main.py`)
 ### 적재(ingest)
@@ -57,13 +59,23 @@ uv run python -m src.main query "리스 회계처리" --standard GAAP
 > HIL interrupt 발생 시 대화형으로 승인/재작성 입력. 비대화형(파이프) 환경은 자동 승인.
 
 ### API 서버(FastAPI)
-React 프론트엔드가 소비하는 HTTP 진입점(`POST /query`·`POST /resume`)을 띄운다.
+컨테이너 기본 경로에서는 `app` 서비스가 이미 `http://localhost:8000`에서 API와 React를 함께 서빙한다.
+
+호스트에서 API만 직접 실행하려면 아래처럼 띄운다.
 ```bash
 uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000
 ```
 > ⚠️ **단일 워커 전제.** HIL 체크포인터가 프로세스-로컬 MemorySaver라서 `--workers N`으로 늘리면 `/resume`이 다른 워커로 라우팅돼 세션을 찾지 못한다(404). 서버 재시작 시 진행 중 HIL 세션도 소실된다. 영속 체크포인터(PostgresSaver) 전환은 #209.
 >
 > OpenAPI 문서는 http://localhost:8000/docs — 응답 계약의 정본은 `src/api/schemas.py`. CORS 허용 origin은 `API_CORS_ORIGINS`(`.env.example` 참조)로 override.
+
+### React 개발 서버
+컨테이너 통합 앱이 아닌 Vite dev 서버로 프론트를 개발할 때만 실행한다. `frontend/vite.config.ts`가 `/query`, `/resume`, `/documents`를 `localhost:8000`으로 프록시한다.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
 ## 6. 테스트
 마커 3단계 (`pyproject.toml`):
