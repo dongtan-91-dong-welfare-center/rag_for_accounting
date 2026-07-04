@@ -16,6 +16,7 @@ uv sync          # .venv 생성 + 의존성(dev 포함) 설치
 ```
 > 모든 Python 실행은 `uv run ...`로 한다(예: `uv run pytest`, `uv run python -m src.main ...`).
 > 기본 개발 경로는 Docker의 TEI 임베딩 서버를 사용한다. PDF 파싱 적재는 `uv sync --extra ingest`, `EMBEDDING_SERVER_URL` 없이 호스트 프로세스 안에서 KURE-v1을 직접 로드하는 경로는 `uv sync --extra local-embedding`으로 무거운 파서/모델 스택을 명시 설치한다.
+> 전체 테스트 실행에도 `--extra ingest`가 필요하다: `uv sync --extra ingest && uv run pytest`. `tests/unit/parse`가 `src/parse`(docling 사용)를 import하므로, extra 없이 `uv run pytest`를 돌리면 해당 7건이 `ModuleNotFoundError: docling_core`로 실패한다.
 
 ## 3. 환경 변수
 ```bash
