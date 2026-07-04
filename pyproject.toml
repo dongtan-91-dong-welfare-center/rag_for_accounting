@@ -39,8 +39,10 @@ local-embedding = [
 # --extra local-embedding 또는 --extra ingest를 명시한 환경에서만 무거운 모델/파서 스택을 설치한다.
 [dependency-groups]
 dev = [
+    "kiwipiepy>=0.23.2",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
+    "rank-bm25>=0.2.2",
 ]
 
 [tool.pytest.ini_options]
