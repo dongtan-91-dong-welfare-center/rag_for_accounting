@@ -14,6 +14,7 @@
 | 함수 계약(FUNC-001~009) 입출력·에러코드 | [architecture/func_interfaces.md](architecture/func_interfaces.md) |
 | ingest·query를 어떻게 실행하나 | [guides/](guides/) (로컬·도커) + 루트 [README.md](../README.md) |
 | 검색·답변 **통과 판정 규칙**은 | [policies/eval_pass_rules.md](policies/eval_pass_rules.md) |
+| 파싱 산출물(llm_parsed) **정본·취소선 제외 규칙**은 | [policies/parsing_output_rules.md](policies/parsing_output_rules.md) |
 | 임계값·모델·`RRF_K` 같은 상수는 | [src/utils/config.py](../src/utils/config.py) |
 | 측정·감사 결과(벤치마크·인덱싱·v1 감사) | [measurements/](measurements/) |
 | 앞으로의 계획·진행 상황 (미래) | GitHub [마일스톤](https://github.com/dongtan-91-dong-welfare-center/rag_for_accounting/milestones)·이슈 (레포가 아니라 GitHub가 정본) |
