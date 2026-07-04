@@ -15,17 +15,18 @@
 ## 2. 무엇을 골랐나 (Decision)
 
 - **BYO(Bring Your Own) 코퍼스**: 원문·파생을 레포에서 제외하고, 신규 기여자는 KASB 공식 출처(https://db.kasb.or.kr)에서 직접 받아 로컬 `data/`에 적재한다.
-- 작업트리에서 `data/` 제거 + `.gitignore` 등록 + 전 브랜치 히스토리 purge(BFG/git filter-repo).
+- 작업트리에서 `data/` 제거 + `.gitignore` 등록 + 전 브랜치 히스토리 purge(BFG/git filter-repo). 대상은 `data/`에 한정하지 않는다 — `data/` 밖 파생물(예: 루트 `dataset_accounting_sample.json`)도 포함한다.
 - README에 **KASB 출처 표기**(출처: 한국회계기준원 http://www.kasb.or.kr Copyright ©KAI all rights reserved.)와 **비영리 목적**을 명시한다(KASB 회신 요건).
+- **예외 — 설계 노출용 최소 샘플**(2026-07-04 범위 명확화): 데이터 설계를 보여주는 최소 샘플은 `examples/`에 둔다. 파이프라인 단계별 실데이터 발췌(llm_parsed 몇 문단 · 온톨로지 노드/엣지 일부 · 청크 1~2건)로 한정하고, raw PDF·전문(全文)·pgvector 덤프는 제외하며 수십 KB를 상한으로 한다. examples/의 README에 KASB 출처 표기·비영리 명시와 "데이터 샘플은 MIT 적용 제외" 고지를 담는다. 보호 대상은 설계·형식이므로 결정 취지와 충돌하지 않는다.
 
 ## 3. 결과(영향) (Consequences)
 
 - (+) 레포가 합법·공개 가능하며, 첫인상에서 "이 `data/`가 public 배포 데이터인가?" 오판이 사라진다.
 - (+) 인덱싱(#93)·E2E(#95)는 로컬 `data/` 경로 규약 그대로 동작한다.
-- (−) 신규 기여자가 데이터를 직접 받아야 해 진입 마찰이 늘어난다 → 다운로드 안내(예: scripts/download_corpus.md)로 완화 예정.
+- (−) 신규 기여자가 데이터를 직접 받아야 해 진입 마찰이 늘어난다 → 다운로드 안내(예: scripts/download_corpus.md)와 `examples/` 최소 샘플(산출물 형식의 기준)로 완화 예정.
 - (−) 히스토리 재작성은 전 팀원 re-clone이 필요하다.
 
 ## 4. 구현·관계
 
-- **구현**: `data/` 실제 제거·`.gitignore` 등록·KASB 출처 표기·다운로드 안내는 **#206**(BYO 구현)에서 진행한다. 결정은 확정(Accepted)이고 구현 진척은 이슈로 추적한다.
+- **구현**: `data/` 실제 제거·`.gitignore` 등록·KASB 출처 표기·다운로드 안내·`examples/` 샘플 신설은 **#206**(BYO 구현)에서 진행한다. 결정은 확정(Accepted)이고 구현 진척은 이슈로 추적한다.
 - **감사보고서와의 관계**: `v1_audit_report.md`(2026-06-13 동결)는 저작권 해소를 근거로 "data/ 추적은 의도된 상태"라 적었으나, 본 ADR이 *팀 가공물 보호*를 근거로 **BYO(제거)를 정본**으로 확정한다(감사는 동결이라 갱신하지 않음).
