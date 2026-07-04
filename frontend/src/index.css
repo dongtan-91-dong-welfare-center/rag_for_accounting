@@ -134,3 +134,54 @@ details.card summary {
   color: #777;
   font-size: 0.9rem;
 }
+
+.page-btn {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.8rem;
+  background: #eef2fb;
+  color: #2d5be3;
+  border: 1px solid #c9d6f5;
+}
+
+.viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 10;
+}
+
+.viewer-panel {
+  background: #fff;
+  border-radius: 10px;
+  width: min(960px, 100%);
+  height: min(90vh, 100%);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  gap: 0.5rem;
+}
+
+.viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.viewer-frame {
+  flex: 1;
+  border: 1px solid #e2e4e8;
+  border-radius: 6px;
+  width: 100%;
+}
+
+.viewer-copyright {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #777;
+  text-align: center;
+}

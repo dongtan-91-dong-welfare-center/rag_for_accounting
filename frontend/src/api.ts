@@ -11,6 +11,10 @@ export interface ClauseOut {
   node_id: string;
   score: number;
   content: string;
+  document_id: string;
+  /** 원본 PDF 페이지 범위 — 백필 전/미매칭이면 null(원문 보기 버튼 미표시). */
+  page_start: number | null;
+  page_end: number | null;
 }
 
 export interface CitationOut {
@@ -18,6 +22,8 @@ export interface CitationOut {
   chunk_id: string;
   content: string;
   relevance_score: number;
+  page_start: number | null;
+  page_end: number | null;
 }
 
 export type ResumeAction = "approve" | "rewrite";
@@ -83,4 +89,20 @@ export function postResume(
   const body: Record<string, unknown> = { thread_id: threadId, action };
   if (feedback !== undefined) body.feedback = feedback;
   return post("/resume", body);
+}
+
+/** 원문 PDF 서빙 경로 — 브라우저 내장 뷰어의 #page=N 으로 해당 페이지를 연다. */
+export function documentPdfUrl(documentId: string, page?: number): string {
+  const hash = page ? `#page=${page}` : "";
+  return `${API_BASE}/documents/${documentId}/pdf${hash}`;
+}
+
+/** PDF 제공 여부 확인(BYO 환경 폴백용) — 404면 뷰어를 안내 메시지로 강등한다. */
+export async function checkPdfAvailable(documentId: string): Promise<boolean> {
+  try {
+    const res = await fetch(documentPdfUrl(documentId), { method: "HEAD" });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

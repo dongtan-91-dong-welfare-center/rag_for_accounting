@@ -5,7 +5,7 @@
  * HIL interrupt가 오면 승인/재작성을 받아 /resume으로 재개한다(재중단 가능).
  * NFR-002: 검색된 조항이 1순위 — 답변보다 먼저 노출한다.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   QueryDoneResponse,
   QueryInterruptedResponse,
@@ -13,7 +13,7 @@ import type {
   StandardFilter,
   WorkflowResponse,
 } from "./api";
-import { postQuery, postResume } from "./api";
+import { checkPdfAvailable, documentPdfUrl, postQuery, postResume } from "./api";
 
 const STANDARD_OPTIONS: StandardFilter[] = ["ALL", "GAAP", "KIFRS"];
 
@@ -169,7 +169,87 @@ function HumanReview({
   );
 }
 
+interface ViewerTarget {
+  documentId: string;
+  page: number;
+}
+
+function PageButton({
+  documentId,
+  pageStart,
+  pageEnd,
+  onOpen,
+}: {
+  documentId: string;
+  pageStart: number | null;
+  pageEnd: number | null;
+  onOpen: (target: ViewerTarget) => void;
+}) {
+  // 백필 전/미매칭 청크는 페이지가 없어 버튼을 표시하지 않는다(자연 강등).
+  if (pageStart === null) return null;
+  const label = pageEnd !== null && pageEnd !== pageStart ? `p.${pageStart}–${pageEnd}` : `p.${pageStart}`;
+  return (
+    <button
+      type="button"
+      className="page-btn"
+      onClick={(e) => {
+        // <summary> 안에서 details 토글을 유발하지 않도록 기본 동작을 막는다.
+        e.preventDefault();
+        e.stopPropagation();
+        onOpen({ documentId, page: pageStart });
+      }}
+    >
+      원문 {label}
+    </button>
+  );
+}
+
+function PdfViewerModal({ target, onClose }: { target: ViewerTarget; onClose: () => void }) {
+  const [available, setAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    setAvailable(null);
+    checkPdfAvailable(target.documentId).then(setAvailable);
+  }, [target.documentId]);
+
+  return (
+    <div className="viewer-overlay" onClick={onClose}>
+      <div className="viewer-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="viewer-header">
+          <strong>
+            원문 보기 — {target.documentId} · {target.page}쪽
+          </strong>
+          <button type="button" onClick={onClose}>
+            닫기
+          </button>
+        </div>
+        {available === null && <p className="notice info">원문 문서를 확인하는 중…</p>}
+        {available === false && (
+          <p className="notice warning">
+            원본 PDF가 서버에 없습니다. 운영 환경에 원본 문서(PDF_DIR)를 배치하면 해당 페이지를 바로
+            볼 수 있습니다.
+          </p>
+        )}
+        {available && (
+          <iframe
+            className="viewer-frame"
+            title={`${target.documentId} 원문`}
+            src={documentPdfUrl(target.documentId, target.page)}
+          />
+        )}
+        {/* 6/14 회의 결정: 원문 노출 시 한국회계기준원 저작권 표기 */}
+        <p className="viewer-copyright">
+          ⓒ 한국회계기준원. 본 문서의 저작권은 한국회계기준원에 있으며, 조항 원문 확인 용도로만
+          제공됩니다.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function Result({ response }: { response: QueryDoneResponse }) {
+  const [viewer, setViewer] = useState<ViewerTarget | null>(null);
+
   return (
     <section>
       {response.error_code === "TIMEOUT" ? (
@@ -196,7 +276,13 @@ function Result({ response }: { response: QueryDoneResponse }) {
             <details key={c.rank} className="card">
               <summary>
                 [{c.rank}] {c.chapter}장{c.node_id && ` · ${c.node_id}`} · 검색점수{" "}
-                {c.score.toFixed(3)}
+                {c.score.toFixed(3)}{" "}
+                <PageButton
+                  documentId={c.document_id}
+                  pageStart={c.page_start}
+                  pageEnd={c.page_end}
+                  onOpen={setViewer}
+                />
               </summary>
               <p className="prewrap">{c.content}</p>
             </details>
@@ -215,11 +301,19 @@ function Result({ response }: { response: QueryDoneResponse }) {
       {response.citations.map((c, i) => (
         <details key={c.chunk_id} className="card">
           <summary>
-            [{i + 1}] {c.document_id} / {c.chunk_id} · 관련도 {c.relevance_score.toFixed(2)}
+            [{i + 1}] {c.document_id} / {c.chunk_id} · 관련도 {c.relevance_score.toFixed(2)}{" "}
+            <PageButton
+              documentId={c.document_id}
+              pageStart={c.page_start}
+              pageEnd={c.page_end}
+              onOpen={setViewer}
+            />
           </summary>
           <p className="prewrap">{c.content}</p>
         </details>
       ))}
+
+      {viewer && <PdfViewerModal target={viewer} onClose={() => setViewer(null)} />}
     </section>
   );
 }
