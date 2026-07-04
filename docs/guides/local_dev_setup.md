@@ -15,6 +15,7 @@
 uv sync          # .venv 생성 + 의존성(dev 포함) 설치
 ```
 > 모든 Python 실행은 `uv run ...`로 한다(예: `uv run pytest`, `uv run python -m src.main ...`).
+> 기본 개발 경로는 Docker의 TEI 임베딩 서버를 사용한다. PDF 파싱 적재는 `uv sync --extra ingest`, `EMBEDDING_SERVER_URL` 없이 호스트 프로세스 안에서 KURE-v1을 직접 로드하는 경로는 `uv sync --extra local-embedding`으로 무거운 파서/모델 스택을 명시 설치한다.
 
 ## 3. 환경 변수
 ```bash
@@ -51,6 +52,7 @@ uv run python -m src.main ingest --reset
 # 단일 PDF: 파싱→온톨로지→청킹→적재 전체 경로
 uv run python -m src.main ingest --pdf data/raw/제6장.pdf --standard-id gaap-ch6 --standard-type GAAP
 ```
+> `docker-compose.yml`의 `./data/raw:/app/data/raw:ro` 마운트는 API PDF 서빙용이다. 문서 적재(`ingest`)는 `uv sync --extra ingest`를 설치한 쓰기 가능한 호스트 환경에서 실행하는 것을 전제로 한다.
 ### 질의(query)
 ```bash
 uv run python -m src.main query "금융자산의 최초 인식 시점은?"

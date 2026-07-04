@@ -36,6 +36,13 @@ uv 사용을 권장합니다.
 uv sync
 ```
 
+기본 설치는 Docker의 TEI 임베딩 서버를 사용하며, 앱/query 실행에 필요한 의존성만 설치합니다. PDF 파싱 적재나 로컬 모델 임베딩을 쓸 때만 extra를 추가합니다.
+
+```bash
+uv sync --extra ingest           # --pdf ingest / Docling 파싱 경로
+uv sync --extra local-embedding  # EMBEDDING_SERVER_URL 없이 로컬 KURE-v1 직접 로드
+```
+
 ### 2. 데이터베이스 기동
 
 pgvector 확장이 포함된 PostgreSQL을 docker compose로 기동합니다.
@@ -54,6 +61,7 @@ docker compose up -d database
 미리 빌드된 온톨로지 그래프(`data/ontology/*.json`)를 청킹·임베딩하여 pgvector에 적재합니다.
 
 > 📌 데이터 정책: `data/`(회계기준 원문·파생)는 **BYO(Bring Your Own)** 방향으로 전환 중입니다 — 배경·근거는 [docs/decisions/0001](docs/decisions/0001-byo-corpus-kgaap.md) 참조.
+> 컨테이너의 `data/raw` 마운트는 PDF 서빙용 read-only입니다. 문서 적재(`ingest`)는 `uv sync --extra ingest`를 설치한 호스트에서 실행하는 전제입니다.
 
 ```bash
 # data/ontology 전체 장을 적재 (검색기와 동일한 chunks 테이블에 저장)

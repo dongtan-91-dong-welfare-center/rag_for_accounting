@@ -5,20 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "docling>=2.85.0",
     "langgraph>=1.1.10",
     "streamlit>=1.56.0",
     "pydantic>=2.0.0",
     "openai>=1.0.0",
     "python-dotenv>=1.0.0",
-    "pikepdf>=10.7.2",
-    "pyhwp>=0.1b15",
-    "pdfminer-six>=20260107",
-    "pdf2image>=1.17.0",
     "pydantic-ai>=0.0.1",
     "langsmith>=0.1.0",
     "psycopg[binary,pool]>=3.1.0",
-    "sentence-transformers>=3.0.0",
     # 에이전트형 채팅 서비스(src/service) + A/B 하네스(ab_eval) — DeepAgent 전환 산출물
     "deepagents>=0.6.7",
     "langchain-openai>=0.2.0",
@@ -27,8 +21,20 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
-# !TODO: 패키지를 PyPI 등 외부에 배포할 경우, dependency-groups 대신
-#        [project.optional-dependencies]로 전환 필요 (외부 사용자가 pip install pkg[dev] 형태로 설치할 수 있도록)
+[project.optional-dependencies]
+ingest = [
+    "docling>=2.85.0",
+    "pdf2image>=1.17.0",
+    "pdfminer-six>=20260107",
+    "pikepdf>=10.7.2",
+    "pyhwp>=0.1b15",
+]
+local-embedding = [
+    "sentence-transformers>=3.0.0",
+]
+
+# dev 도구는 uv dependency group으로만 설치한다. 운영 이미지는 --no-dev, 로컬 임베딩은
+# --extra local-embedding 또는 --extra ingest를 명시한 환경에서만 무거운 모델/파서 스택을 설치한다.
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",

@@ -22,7 +22,17 @@ fi
 echo "[1/3] Building and starting containers"
 docker compose up -d --build
 
-echo "[2/3] Waiting for app server"
+echo "[2/3] Waiting for embedding and app servers"
+echo "Waiting for embedding server. First KURE-v1 download can take several minutes."
+for _ in $(seq 1 180); do
+  if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+    break
+  fi
+  sleep 5
+done
+curl -fsS http://localhost:8080/health >/dev/null 2>&1 \
+  || { echo "embedding server is not ready. Check: docker compose logs embedding" >&2; exit 1; }
+
 for _ in $(seq 1 60); do
   if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
     break
