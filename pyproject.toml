@@ -31,8 +31,10 @@ dependencies = [
 #        [project.optional-dependencies]로 전환 필요 (외부 사용자가 pip install pkg[dev] 형태로 설치할 수 있도록)
 [dependency-groups]
 dev = [
+    "kiwipiepy>=0.23.2",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
+    "rank-bm25>=0.2.2",
 ]
 
 [tool.pytest.ini_options]
