@@ -86,9 +86,9 @@ LANGCHAIN_PROJECT=rag-for-accounting # 트레이스가 모일 프로젝트명(�
 
 RAG 기술에 대한 자세한 학습 자료는 `docs/reference/rag_study.md` 파일에 정리되어 있습니다.
 
-## 📝 TODO
+## 📝 진행 상황
 
-현재 진행 중인 작업은 `task-board.html` 파일에 정리되어 있습니다.
+앞으로의 계획·진행 상황은 GitHub [마일스톤](https://github.com/dongtan-91-dong-welfare-center/rag_for_accounting/milestones)·이슈가 정본입니다 — 레포·문서는 현재와 과거(아키텍처·결정·측정)를 다루고, 미래는 상태 드리프트를 막기 위해 GitHub에서만 관리합니다.
 
 
 ## 📚 데이터 출처
