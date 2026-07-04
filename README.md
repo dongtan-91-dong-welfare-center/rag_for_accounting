@@ -6,9 +6,9 @@
 
 ## 🚀 주요 기능
 
-- **에이전트 워크플로우**: 질문 재작성 → 문서 검색 → 품질 평가 → 답변 생성의 4단계 파이프라인
+- **에이전트 워크플로우**: 질문 재작성(rewrite) → 검색(search) → 리랭킹(rerank, 기본 비활성) → 품질 평가(evaluate) → 답변 생성(generate)의 메인 경로 5단계 파이프라인
 - **하이브리드 검색**: Dense(의미) 및 Sparse(키워드) 벡터를 결합한 고성능 검색
-- **고급 RAG 기법**: 컨텍스트얼 리트리벌, 리랭킹 등 적용
+- **선택적 리랭킹**: Cross-Encoder 재정렬을 옵션으로 지원한다. 실측에서 품질이 회귀해 기본 비활성(`USE_RERANKER=false`)이며, 필요 시 켤 수 있다.
 - **구조화된 답변**: Pydantic을 활용한 정제된 답변 출력
 
 ## 🛠️ 설치 및 실행
@@ -86,9 +86,9 @@ LANGCHAIN_PROJECT=rag-for-accounting # 트레이스가 모일 프로젝트명(�
 
 RAG 기술에 대한 자세한 학습 자료는 `docs/reference/rag_study.md` 파일에 정리되어 있습니다.
 
-## 📝 TODO
+## 📝 진행 상황
 
-현재 진행 중인 작업은 `task-board.html` 파일에 정리되어 있습니다.
+앞으로의 계획·진행 상황은 GitHub [마일스톤](https://github.com/dongtan-91-dong-welfare-center/rag_for_accounting/milestones)·이슈가 정본입니다 — 레포·문서는 현재와 과거(아키텍처·결정·측정)를 다루고, 미래는 상태 드리프트를 막기 위해 GitHub에서만 관리합니다.
 
 
 ## 📚 데이터 출처
