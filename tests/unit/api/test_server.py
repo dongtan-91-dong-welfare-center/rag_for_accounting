@@ -215,7 +215,12 @@ class TestDocumentPdf:
         assert client.get("/documents/gaap-ch10/pdf").status_code == 404
 
     def test_path_escape_attempt_is_rejected(self, client, monkeypatch, tmp_path):
-        """document_id는 [a-z0-9-] 패턴만 허용 — 경로 탈출(.. 등)을 라우팅 단계에서 차단."""
+        """document_id는 [a-z0-9-] 패턴만 허용 — 경로 탈출 시도가 PDF 라우트에 도달하지 못한다.
+
+        ..%2F는 URL 정규화로 SPA catch-all(index.html)로 흘러가 파일 시스템 경로로 해석되지 않고, 패턴 위반(대문자 등)은 422다.
+        어느 쪽이든 PDF가 반환되지 않아야 한다.
+        """
         monkeypatch.setattr("src.api.server.PDF_DIR", str(tmp_path))
-        assert client.get("/documents/..%2Fsecret/pdf").status_code in (404, 422)
+        r = client.get("/documents/..%2Fsecret/pdf")
+        assert r.headers["content-type"] != "application/pdf"
         assert client.get("/documents/GAAP_CH10/pdf").status_code == 422
