@@ -49,3 +49,4 @@ docs/measurements/benchmark_result_*.md
 docs/measurements/baseline_*.json
 docs/measurements/rerank_replay_*.json
 docs/measurements/sparse_predicate_replay_*.json
+docs/measurements/sparse_keyword_replay_*.json
