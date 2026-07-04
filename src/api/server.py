@@ -16,13 +16,16 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi import Path as PathParam
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
 from src.api.schemas import WorkflowResponse, to_api_response
 from src.db.connection import close_pool, init_pool
-from src.utils.config import API_CORS_ORIGINS
+from src.parse.page_map import resolve_pdf_path
+from src.utils.config import API_CORS_ORIGINS, PDF_DIR
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -95,3 +98,17 @@ def resume(req: ResumeRequest) -> WorkflowResponse:
         decision["feedback"] = req.feedback
     result = resume_workflow(req.thread_id, decision)
     return to_api_response(result)
+
+
+@app.get("/documents/{document_id}/pdf")
+def document_pdf(
+    document_id: str = PathParam(pattern=r"^[a-z0-9-]+$"),  # 경로 탈출(..%2F 등) 라우팅 단계 차단
+) -> FileResponse:
+    """원문 PDF 서빙 (#196) — 소재 규약은 resolve_pdf_path(PDF_DIR, BYO 정합).
+
+    파일이 없거나 매핑이 모호하면 404 — React 뷰어는 안내 메시지로 강등한다(DoD 폴백).
+    """
+    pdf_path = resolve_pdf_path(document_id, PDF_DIR)
+    if pdf_path is None:
+        raise HTTPException(status_code=404, detail=f"no pdf for document_id: {document_id}")
+    return FileResponse(pdf_path, media_type="application/pdf", filename=pdf_path.name)

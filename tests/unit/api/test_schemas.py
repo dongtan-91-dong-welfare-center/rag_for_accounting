@@ -19,15 +19,15 @@ from src.models.schemas import (
 )
 
 
-def _rr(chunk_id, score, chapter="6", node_id="gaap-ch6-s1", content="조항 본문"):
-    """reranked chunk 생성 헬퍼 함수"""
+def _rr(chunk_id, score, chapter="6", node_id="gaap-ch6-s1", content="조항 본문", **extra):
+    """reranked chunk 생성 헬퍼 함수 (extra: page_start 등 metadata 비정형 키)"""
     return RerankingResult(
         chunk=RetrievedChunk(
             chunk_id=chunk_id,
             document_id="doc",
             content=content,
             score=score,
-            metadata=ChunkMetadata(chapter=chapter, ontology_node_id=node_id),
+            metadata=ChunkMetadata(chapter=chapter, ontology_node_id=node_id, **extra),
         ),
         rerank_score=1.0,
     )
@@ -111,6 +111,27 @@ class TestDoneResponse:
             "clauses",
             "citations",
         }
+
+    def test_clause_and_citation_pages_from_backfilled_metadata(self):
+        """#196: 백필된 page_start/end를 조항에 노출하고, 인용은 chunk_id로 조회해 결합한다."""
+        result = _done_result(
+            reranked_chunks=[_rr("c1", 0.9, page_start=3, page_end=4), _rr("c2", 0.8)],
+            final_response=FinalResponse(
+                answer="답",
+                citations=[
+                    Citation(document_id="doc", chunk_id="c1", content="…", relevance_score=0.8),
+                    Citation(document_id="doc", chunk_id="없는청크", content="…", relevance_score=0.5),
+                ],
+                is_answerable=True,
+                confidence_score=0.9,
+            ),
+        )
+        res = to_api_response(result)
+        assert (res.clauses[0].page_start, res.clauses[0].page_end) == (3, 4)
+        assert (res.clauses[1].page_start, res.clauses[1].page_end) == (None, None)
+        # 인용의 페이지는 reranked_chunks에서 chunk_id로 결합 — 조회 불가 시 None
+        assert (res.citations[0].page_start, res.citations[0].page_end) == (3, 4)
+        assert (res.citations[1].page_start, res.citations[1].page_end) == (None, None)
 
 
 class TestErrorCode:

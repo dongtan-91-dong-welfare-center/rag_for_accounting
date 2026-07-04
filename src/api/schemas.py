@@ -29,6 +29,9 @@ class ClauseOut(BaseModel):
     node_id: str
     score: float
     content: str
+    document_id: str = ""          # 뷰어가 GET /documents/{document_id}/pdf를 여는 데 사용(#196)
+    page_start: int | None = None  # 원본 PDF 페이지 범위(#196) — 미백필/미매칭이면 None(뷰어 버튼 미표시)
+    page_end: int | None = None
 
 
 class CitationOut(BaseModel):
@@ -38,6 +41,8 @@ class CitationOut(BaseModel):
     chunk_id: str
     content: str
     relevance_score: float
+    page_start: int | None = None  # chunk_id로 reranked_chunks metadata를 조회해 결합(#196)
+    page_end: int | None = None
 
 
 class InterruptOption(BaseModel):
@@ -109,6 +114,12 @@ def to_api_response(result: dict) -> WorkflowResponse:
         )
 
     response = result["final_response"]
+    # 인용의 페이지는 Citation 스키마 불변 원칙(#196)에 따라 chunk_id로 검색 청크 metadata를 조회해 결합한다.
+    pages_by_chunk: dict[str, tuple[int | None, int | None]] = {}
+    for item in result.get("reranked_chunks") or []:
+        extra = item.chunk.metadata.model_extra or {}
+        pages_by_chunk[item.chunk.chunk_id] = (extra.get("page_start"), extra.get("page_end"))
+
     return QueryDoneResponse(
         thread_id=thread_id,
         answer=response.answer,
@@ -122,6 +133,8 @@ def to_api_response(result: dict) -> WorkflowResponse:
                 chunk_id=c.chunk_id,
                 content=c.content,
                 relevance_score=c.relevance_score,
+                page_start=pages_by_chunk.get(c.chunk_id, (None, None))[0],
+                page_end=pages_by_chunk.get(c.chunk_id, (None, None))[1],
             )
             for c in response.citations
         ],

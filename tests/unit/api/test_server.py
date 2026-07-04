@@ -196,3 +196,26 @@ def test_thread_exists_false_for_unknown_thread():
     from src.agent.workflow import thread_exists
 
     assert thread_exists(str(uuid.uuid4())) is False
+
+
+class TestDocumentPdf:
+    """GET /documents/{document_id}/pdf — 원문 PDF 서빙 (#196, BYO 소재 규약)."""
+
+    def test_serves_pdf_when_resolved(self, client, monkeypatch, tmp_path):
+        (tmp_path / "gaap-ch10.pdf").write_bytes(b"%PDF-1.4 test")
+        monkeypatch.setattr("src.api.server.PDF_DIR", str(tmp_path))
+        r = client.get("/documents/gaap-ch10/pdf")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/pdf"
+        assert r.content.startswith(b"%PDF")
+
+    def test_missing_pdf_is_404(self, client, monkeypatch, tmp_path):
+        """BYO 환경에서 PDF 미제공 시 404 — 뷰어는 안내 메시지로 강등한다(DoD)."""
+        monkeypatch.setattr("src.api.server.PDF_DIR", str(tmp_path))
+        assert client.get("/documents/gaap-ch10/pdf").status_code == 404
+
+    def test_path_escape_attempt_is_rejected(self, client, monkeypatch, tmp_path):
+        """document_id는 [a-z0-9-] 패턴만 허용 — 경로 탈출(.. 등)을 라우팅 단계에서 차단."""
+        monkeypatch.setattr("src.api.server.PDF_DIR", str(tmp_path))
+        assert client.get("/documents/..%2Fsecret/pdf").status_code in (404, 422)
+        assert client.get("/documents/GAAP_CH10/pdf").status_code == 422
