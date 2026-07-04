@@ -27,6 +27,8 @@ cp .env.example .env
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | 연결 대상 |
 
+> 기존 팀원 주의: 예전 `.env`에는 `POSTGRES_HOST=database`가 남아 있을 수 있다. `.env`는 개인 파일이라 템플릿(`.env.example`)이 `localhost`로 바뀌어도 자동 반영되지 않는다. 호스트에서 직접 실행한다면 `localhost`로 고쳐야 하며, 그대로 두면 `database` 호스트명 해석 실패로 DB 연결이 즉시 끊긴다.
+
 > 모델·임계치의 기본값 정본은 `src/utils/config.py`다(EMBEDDING_MODEL, OPENAI_MODEL, RRF_K, TOP_K_RETRIEVAL ...). 리랭커(USE_RERANKER·RERANK_THRESHOLD·RERANK_MODEL)와 임베딩 실행 자원(EMBEDDING_DEVICE 등)은 `.env`로 override할 수 있다 — 키 목록은 `.env.example` 참조.
 
 ## 4. 데이터베이스 기동
