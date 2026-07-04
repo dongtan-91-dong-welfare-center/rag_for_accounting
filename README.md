@@ -13,6 +13,20 @@
 
 ## 🛠️ 설치 및 실행
 
+### 빠른 기동 (install.sh / check.sh)
+
+서버 구성: **임베딩 모델(KURE-v1)은 TEI 컨테이너로 분리**하고, **앱 컨테이너 하나가 FastAPI API와 빌드된 React 프론트를 함께 서빙**합니다. PostgreSQL(pgvector)은 별도 데이터베이스 컨테이너입니다. 리랭커는 `USE_RERANKER` 기본 off라 서빙 대상이 아닙니다.
+
+```bash
+cp .env.example .env   # 최초 1회, OPENAI_API_KEY 등 입력
+./install.sh           # docker(database·embedding·app) 빌드 및 기동
+./check.sh             # 시스템 점검 (무변경)
+```
+
+브라우저 진입점은 http://localhost:8000 이고, API 문서는 http://localhost:8000/docs 입니다.
+
+아래는 각 단계를 수동으로 수행하는 방법입니다.
+
 ### 1. 환경 설정 및 의존성 설정
 
 프로젝트 루트 디렉토리에서 가상 환경을 생성하고 활성화합니다.
@@ -62,6 +76,24 @@ uv run python -m src.main query "리스 회계처리" --standard GAAP
 ```
 
 > 컨테이너(`app`) 안에서 실행하려면 `docker compose exec app uv run python -m src.main ...` 형태로 호출합니다.
+
+#### 웹 화면 (FastAPI + React)
+
+컨테이너 기동 시 앱 서버가 API와 React 정적 파일을 함께 제공합니다.
+
+```bash
+docker compose up -d --build
+open http://localhost:8000
+```
+
+호스트에서 프론트 개발 서버를 따로 띄울 때만 Vite를 사용합니다. 이 경우 `frontend/vite.config.ts`가 `/query`, `/resume`, `/documents`를 `localhost:8000`으로 프록시합니다.
+
+```bash
+uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000
+cd frontend && npm install && npm run dev
+```
+
+> 기존 Streamlit 화면(`app.py`)은 React가 동일 기능(질의·조항 표시·HIL 왕복)을 대체하면서 **유지보수 동결(deprecated)** 상태입니다 — 신규 기능은 React에만 추가하며, 제거 시점은 v1.1에서 결정합니다.
 
 ### 4. (선택) LangSmith 트레이싱
 

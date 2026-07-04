@@ -58,6 +58,12 @@ EMBEDDING_MAX_TOKENS: int = 8192    # KURE-v1 컨텍스트 한도 — 초과 청
 # 2048은 33장 실측상 정상 조항 다발(대부분 ≤2048)은 보존하고 거대 clause-less 블록(결론도출근거·실무지침 등)만 분할하는 값.
 CHUNK_MAX_TOKENS: int = 2048
 
+# 임베딩 서빙 분리 설정 — KURE-v1을 기성 서빙 컨테이너(docker-compose `embedding`, TEI)로 분리 실행.
+# EMBEDDING_SERVER_URL 설정 시 embed_texts/count_tokens가 src/client를 통해 해당 서버로 HTTP 위임하고,
+# 미설정(기본)이면 프로세스 내 로드(현행 동작). 리랭커는 USE_RERANKER 기본 off라 서빙 대상이 아니다.
+EMBEDDING_SERVER_URL: str = os.getenv("EMBEDDING_SERVER_URL", "").strip().rstrip("/")
+EMBEDDING_SERVER_TIMEOUT_SECONDS: float = _env_float("EMBEDDING_SERVER_TIMEOUT_SECONDS", 120.0)
+
 # 임베딩 실행 자원 설정 — 대량 적재 시 CPU 포화·메모리 누적 OOM 완화용. 모두 env로 override.
 #   - EMBEDDING_DEVICE: "auto"면 _get_model()이 cuda → mps → cpu 순으로 가용 디바이스를 고른다.
 #     Docker on Mac 컨테이너에는 MPS/Metal이 패스스루되지 않아 자동으로 cpu가 된다. 호스트 네이티브
@@ -76,6 +82,18 @@ MAX_CONTEXT_TOKENS: int = 270000
 
 # 검색 대상 테이블명 — RetrievedChunk 스키마와 컬럼명을 통일
 CHUNKS_TABLE: str = "chunks"
+
+# API 서버(src/api/server.py) CORS 허용 origin — React dev 서버(Vite 기본 5173) 브라우저 호출용.
+# 배포 origin이 다르면 콤마 구분 env로 override 한다(예: API_CORS_ORIGINS=https://rag.example.com).
+API_CORS_ORIGINS: list[str] = [
+    origin.strip()
+    for origin in os.getenv("API_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+    if origin.strip()
+]
+
+# 원본 PDF 소재 디렉토리 — 페이지 백필(scripts/backfill_page_map.py)과 PDF 서빙이 공유하는 BYO 규약.
+# 규약(resolve_pdf_path): {PDF_DIR}/{document_id}.pdf 우선, 없으면 제N장*.pdf 글롭(현행 data/raw 호환).
+PDF_DIR: str = os.getenv("PDF_DIR", "data/raw")
 
 # 시간대(에러 로그 기록 시 한국 표준시(UTC+9)를 기준으로 하기 위함)
 KST = timezone(timedelta(hours=9))

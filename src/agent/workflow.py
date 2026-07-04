@@ -504,6 +504,15 @@ def _timeout_error_log(e: TimeoutError) -> ErrorLog:
     }
 
 
+def thread_exists(thread_id: str) -> bool:
+    """체크포인터에 thread_id의 체크포인트가 존재하는지 여부.
+
+    resume_workflow는 미존재 thread_id에 대한 동작이 정의돼 있지 않으므로(체크포인트 없이
+    Command(resume=...) 주입), API 계층(#195)이 재개 전에 이 함수로 404를 판정한다.
+    """
+    return _CHECKPOINTER.get(_run_config(thread_id)) is not None
+
+
 def run_workflow(
     query: str,
     standard_filter: Literal["GAAP", "KIFRS", "ALL"] = "ALL",

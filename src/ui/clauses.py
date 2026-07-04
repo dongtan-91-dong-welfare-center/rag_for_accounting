@@ -21,6 +21,9 @@ class ClauseRow:
     node_id: str     # 온톨로지 노드 식별자(metadata.ontology_node_id), 결측 시 ""
     score: float     # 검색 점수 = chunk.score(RRF 하이브리드). rerank_score는 no-op(1.0)라 쓰지 않음
     content: str     # 조항 본문 전문
+    document_id: str = ""          # 원문 문서 식별자(chunk.document_id) — 뷰어의 PDF 서빙 경로에 사용(#196)
+    page_start: int | None = None  # 원본 PDF 페이지 범위(#196 백필 metadata) — 미백필/미매칭이면 None
+    page_end: int | None = None
 
 
 def build_clause_rows(
@@ -41,6 +44,7 @@ def build_clause_rows(
     for rank, item in enumerate(reranked[:top_n], start=1):
         chunk = item.chunk
         meta = chunk.metadata
+        extra = meta.model_extra or {}  # page_start/page_end는 #196 백필이 채우는 비정형 키
         rows.append(
             ClauseRow(
                 rank=rank,
@@ -48,6 +52,9 @@ def build_clause_rows(
                 node_id=meta.ontology_node_id or "",
                 score=chunk.score,
                 content=chunk.content,
+                document_id=chunk.document_id,
+                page_start=extra.get("page_start"),
+                page_end=extra.get("page_end"),
             )
         )
     return rows

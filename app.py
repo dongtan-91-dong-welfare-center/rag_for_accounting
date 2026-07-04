@@ -1,5 +1,8 @@
 """회계 기준서 RAG — 사용자 대면 질의 화면 (최소 Streamlit UI).
 
+⚠️ 유지보수 동결(deprecated): React(frontend/) + FastAPI(src/api/server.py)가 이 화면의 기능(질의·조항 표시·HIL 승인/재작성)을 대체한다.
+신규 기능은 React에만 추가하고, 이 파일은 데모·비교용으로만 유지한다. 제거 시점은 v1.1에서 결정.
+
 CLI(`src/main.py query`)와 동일한 워크플로(run_workflow → resume_workflow)를 브라우저에서 실행한다.
 HIL(human_review) interrupt가 발생하면 승인/재작성을 화면에서 받아 재개한다.
 
@@ -16,6 +19,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.agent.interrupts import extract_interrupt_payload, is_interrupt
 from src.agent.workflow import resume_workflow, run_workflow
 from src.db.connection import init_pool
 from src.ui.clauses import build_clause_rows
@@ -49,24 +53,11 @@ def _warmup_embedding() -> bool:
     return True
 
 
-def _is_interrupt(result: dict) -> bool:
-    """워크플로 결과가 HIL interrupt로 중단되었는지 여부."""
-    return isinstance(result, dict) and "__interrupt__" in result
-
-
-def _interrupt_payload(result: dict) -> dict:
-    """invoke 결과의 __interrupt__ 값을 dict 페이로드로 정규화한다(main.py와 동일 규약)."""
-    intr = result["__interrupt__"]
-    item = intr[0] if isinstance(intr, (list, tuple)) and intr else intr
-    payload = getattr(item, "value", item)
-    return payload if isinstance(payload, dict) else {}
-
-
 def _apply(result: dict) -> None:
     """워크플로 결과를 세션 상태에 반영하고 다음 단계(interrupted/done)를 결정한다."""
     st.session_state.result = result
     st.session_state.thread_id = result.get("thread_id")
-    st.session_state.stage = "interrupted" if _is_interrupt(result) else "done"
+    st.session_state.stage = "interrupted" if is_interrupt(result) else "done"
 
 
 def _render_retrieved_clauses(result: dict) -> None:
@@ -145,7 +136,7 @@ if submitted and query.strip():
 
 # HIL interrupt — 재작성 전략 확인(승인/재작성)
 if st.session_state.stage == "interrupted":
-    payload = _interrupt_payload(st.session_state.result)
+    payload = extract_interrupt_payload(st.session_state.result)
     st.info("재작성 전략이 사용자 확인을 요구합니다.")
     st.write(f"**전략:** {payload.get('strategy', '?')}")
     st.write(f"**원질의:** {payload.get('original_query', '')}")

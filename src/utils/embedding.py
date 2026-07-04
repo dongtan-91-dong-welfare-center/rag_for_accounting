@@ -1,5 +1,4 @@
 # FUNC-003/FUNC-005 공유 임베딩 모듈 — KURE-v1 자체호스팅 (이슈 #93 설계 확정)
-#
 # 인덱싱(index_documents)과 검색(embed_query)이 이 모듈의 embed_texts()를 공유하여
 # "인덱싱 모델 = 검색 모델" 일치를 구조적으로 보장한다.
 # KURE-v1은 BAAI/bge-m3를 한국어 검색에 파인튜닝한 모델로, 1024차원 벡터를 출력한다.
@@ -8,6 +7,7 @@
 import os
 import threading
 
+from src.utils import config
 from src.utils.config import (
     EMBEDDING_DEVICE,
     EMBEDDING_ENCODE_BATCH_SIZE,
@@ -83,12 +83,29 @@ def _get_model():
     return _model
 
 
+def _embed_texts_local(texts: list[str]) -> list[list[float]]:
+    """프로세스 내 SentenceTransformer로 임베딩"""
+    model = _get_model()
+    vectors = model.encode(
+        texts,
+        normalize_embeddings=True,
+        batch_size=EMBEDDING_ENCODE_BATCH_SIZE,
+    )
+    return [vector.tolist() for vector in vectors]
+
+
+def _count_tokens_local(text: str) -> int:
+    """프로세스 내 토크나이저로 토큰 수 계산"""
+    model = _get_model()
+    return len(model.tokenizer.encode(text))
+
+
 def embed_texts(texts: list[str], node: NodeType = "index") -> list[list[float]]:
     """텍스트 목록을 KURE-v1로 임베딩하여 벡터 목록을 반환한다.
 
     :param texts: 임베딩할 텍스트 목록 (빈 리스트면 빈 리스트 반환)
     :param node: 실패 시 ErrorLog에 기록할 노드명 (인덱싱="index", 검색="search")
-    :raises LLMAPIConnectionError: 모델 로드(최초 다운로드 포함) 또는 인코딩 실패 시.
+    :raises LLMAPIConnectionError: 모델 로드(최초 다운로드 포함)·인코딩·서빙 서버 호출 실패 시.
         임베딩 실패는 DB 오류(SE-102)가 아니라 임베딩 모델 호출 문제이므로 CM-002로 분류한다.
         ① 로그상 원인이 'DB 쿼리 실패'로 둔갑하지 않고
         ② 검색 노드의 DatabaseQueryError 핸들러가 무의미한 CRAG 재탐색을 트리거하지 않는다.
@@ -96,15 +113,11 @@ def embed_texts(texts: list[str], node: NodeType = "index") -> list[list[float]]
     if not texts:
         return []
     try:
-        model = _get_model()
-        # batch_size로 인코딩 1회 peak 메모리를 묶는다. sentence-transformers가 입력을 길이순
-        # 정렬해 이 크기로 미니배치를 만들므로 긴 노드 1개가 배치 전체를 끌어올리는 패딩 낭비도 준다.
-        vectors = model.encode(
-            texts,
-            normalize_embeddings=True,
-            batch_size=EMBEDDING_ENCODE_BATCH_SIZE,
-        )
-        return [vector.tolist() for vector in vectors]
+        if config.EMBEDDING_SERVER_URL:
+            from src.client import embedding_client
+
+            return embedding_client.embed_texts(texts)
+        return _embed_texts_local(texts)
     except Exception as e:
         logger.error(f"임베딩 생성 실패: {e}")
         raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)
@@ -117,11 +130,14 @@ def count_tokens(text: str, node: NodeType = "index") -> int:
     sentence-transformers는 한도 초과 입력을 조용히 잘라내므로(silent truncation),
     잘린 벡터가 저장되는 것을 막으려면 인코딩 전에 이 함수로 길이를 확인해야 한다.
 
-    :raises LLMAPIConnectionError: 모델(토크나이저) 로드 실패 시 CM-002로 분류
+    :raises LLMAPIConnectionError: 모델(토크나이저) 로드·서빙 서버 호출 실패 시 CM-002로 분류
     """
     try:
-        model = _get_model()
-        return len(model.tokenizer.encode(text))
+        if config.EMBEDDING_SERVER_URL:
+            from src.client import embedding_client
+
+            return embedding_client.count_tokens(text)
+        return _count_tokens_local(text)
     except Exception as e:
         logger.error(f"토큰 수 계산 실패: {e}")
         raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)

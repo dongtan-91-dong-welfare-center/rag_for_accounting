@@ -62,3 +62,26 @@ def test_empty_and_nonpositive_top_n():
     assert build_clause_rows([]) == []
     assert build_clause_rows(None) == []
     assert build_clause_rows([_rr("a", 1.0)], top_n=0) == []
+
+
+def test_page_range_and_document_id_from_metadata():
+    """metadata extra의 page_start/page_end와 chunk.document_id를 노출한다 — #196 뷰어가 소비."""
+    rr = RerankingResult(
+        chunk=RetrievedChunk(
+            chunk_id="a",
+            document_id="gaap-ch10",
+            content="x",
+            score=0.5,
+            metadata=ChunkMetadata(chapter="10", page_start=3, page_end=4),
+        ),
+        rerank_score=1.0,
+    )
+    row = build_clause_rows([rr])[0]
+    assert (row.page_start, row.page_end) == (3, 4)
+    assert row.document_id == "gaap-ch10"
+
+
+def test_page_range_defaults_to_none_when_absent():
+    """백필 전(또는 미매칭) 청크는 페이지가 None — 뷰어 버튼 미표시로 강등된다."""
+    row = build_clause_rows([_rr("a", 0.5)])[0]
+    assert (row.page_start, row.page_end) == (None, None)

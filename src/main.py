@@ -169,14 +169,6 @@ def _prompt_human_decision(payload: dict) -> dict:
     return {"action": "approve"}
 
 
-def _extract_interrupt_payload(result: dict) -> dict:
-    """invoke 결과의 __interrupt__ 값을 dict 페이로드로 정규화한다."""
-    intr = result["__interrupt__"]
-    item = intr[0] if isinstance(intr, (list, tuple)) and intr else intr
-    payload = getattr(item, "value", item)
-    return payload if isinstance(payload, dict) else {}
-
-
 def _print_response(result: dict) -> None:
     """워크플로 결과의 FinalResponse를 사람이 읽기 좋게 출력한다."""
     response = result.get("final_response")
@@ -216,6 +208,7 @@ def _preload_embedding() -> None:
 
 def run_query(args) -> int:
     """질의 경로 실행. HIL interrupt가 발생하면 결정을 받아 재개한다."""
+    from src.agent.interrupts import extract_interrupt_payload
     from src.agent.workflow import resume_workflow, run_workflow
 
     init_pool()
@@ -226,7 +219,7 @@ def run_query(args) -> int:
 
         # human_review interrupt 루프: __interrupt__가 사라질 때까지 결정을 주입해 재개
         while "__interrupt__" in result:
-            decision = _prompt_human_decision(_extract_interrupt_payload(result))
+            decision = _prompt_human_decision(extract_interrupt_payload(result))
             result = resume_workflow(result["thread_id"], decision)
 
         _print_response(result)
