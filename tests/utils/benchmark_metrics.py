@@ -15,7 +15,7 @@ NFR-002 벤치마크 조항정확도 측정 공용 모듈
 "검색이 못 찾은 것"과 "찾았는데 인용에서 누락된 것"을 분리한다.
 함께 Hit@1 / Hit@k / MRR / Recall, CRAG 루프 횟수, 재작성 전략, needs_external 판정, 에러 로그를 기록한다.
 
-전제: pgvector(Docker) + 라이브 LLM. benchmark.jsonl은 K-GAAP 14건이고 적재 데이터도 GAAP뿐이므로,
+전제: pgvector(Docker) + 라이브 LLM. benchmark.jsonl은 K-GAAP 114건이고 적재 데이터도 GAAP뿐이므로,
 gold references 중 "일반기업회계기준 …" 항목만 채점 대상으로 삼는다(K-IFRS 라벨은 미적재 → 채점 제외).
 """
 from __future__ import annotations
