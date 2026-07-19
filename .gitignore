@@ -65,3 +65,8 @@ data/md_data
 
 data/raw_data/*.pdf
 docs/decisions/
+
+# 데모 자산: 인라인 GIF만 커밋하고, 원본(.mov)·고화질(.mp4)은 GitHub 첨부로 올린다.
+# Git LFS를 안 쓰므로 대용량 바이너리를 커밋하면 히스토리에 영구히 남기 때문이다.
+docs/assets/*.mov
+docs/assets/*.mp4
