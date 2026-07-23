@@ -1,6 +1,7 @@
-"""FastAPI 서버 — 회계 기준서 RAG 워크플로의 HTTP 진입점 (#195).
+"""
+FastAPI 서버 — 회계 기준서 RAG 워크플로의 HTTP 진입점
 
-CLI(src/main.py)·Streamlit(app.py)과 동일한 워크플로(run_workflow → resume_workflow)를
+CLI와 동일한 워크플로(run_workflow → resume_workflow)를
 React 프론트엔드가 소비할 수 있게 노출한다. 응답 조립은 src/api/schemas.to_api_response가
 전담하므로 이 모듈은 HTTP 관심사(검증·상태코드·CORS·lifespan)만 다룬다.
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
+import time
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -25,8 +27,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
-from src.api.schemas import WorkflowResponse, to_api_response
+from src.api.schemas import QueryDoneResponse, WorkflowResponse, to_api_response
 from src.db.connection import close_pool, init_pool
+from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.ingest.parse.page_map import resolve_pdf_path
 from src.utils.config import API_CORS_ORIGINS, PDF_DIR
 from src.utils.logger import get_logger
@@ -60,9 +63,51 @@ def _warmup_embedding() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_pool()
+    ensure_interaction_log_table()
     _warmup_embedding()
     yield
     close_pool()
+
+
+def _record_interaction(
+    *,
+    endpoint: str,
+    query_text: str,
+    standard_filter: str | None,
+    response: WorkflowResponse,
+    result: dict,
+    elapsed_ms: int,
+) -> None:
+    """/query·/resume 응답 1건을 interaction_log에 남긴다.
+
+    이 함수의 실패는 log_interaction 내부에서 이미 흡수되므로, 
+    호출자(엔드포인트)는 로깅 실패를 신경 쓸 필요 없이 항상 정상 응답을 반환한다.
+    """
+    if isinstance(response, QueryDoneResponse):
+        evaluation = result.get("evaluation")
+        log_interaction(
+            thread_id=response.thread_id,
+            endpoint=endpoint,
+            query=query_text,
+            standard_filter=standard_filter,
+            status="done",
+            answer=response.answer,
+            is_answerable=response.is_answerable,
+            confidence=response.confidence,
+            error_code=response.error_code,
+            evaluation=evaluation,
+            citations=response.citations,
+            elapsed_ms=elapsed_ms,
+        )
+    else:
+        log_interaction(
+            thread_id=response.thread_id,
+            endpoint=endpoint,
+            query=query_text,
+            standard_filter=standard_filter,
+            status="interrupted",
+            elapsed_ms=elapsed_ms,
+        )
 
 
 app = FastAPI(title="회계 기준서 RAG API", lifespan=lifespan)
@@ -108,8 +153,18 @@ def health() -> dict[str, str]:
 @app.post("/query", response_model=WorkflowResponse)
 def query(req: QueryRequest) -> WorkflowResponse:
     """질의 실행 — 완료(done) 또는 HIL 중단(interrupted) 유니언 응답."""
+    start = time.perf_counter()
     result = run_workflow(req.query, standard_filter=req.standard_filter)
-    return to_api_response(result)
+    response = to_api_response(result)
+    _record_interaction(
+        endpoint="query",
+        query_text=req.query,
+        standard_filter=req.standard_filter,
+        response=response,
+        result=result,
+        elapsed_ms=round((time.perf_counter() - start) * 1000),
+    )
+    return response
 
 
 @app.post("/resume", response_model=WorkflowResponse)
@@ -120,8 +175,18 @@ def resume(req: ResumeRequest) -> WorkflowResponse:
     decision: dict = {"action": req.action}
     if req.feedback is not None:
         decision["feedback"] = req.feedback
+    start = time.perf_counter()
     result = resume_workflow(req.thread_id, decision)
-    return to_api_response(result)
+    response = to_api_response(result)
+    _record_interaction(
+        endpoint="resume",
+        query_text=req.feedback or f"[resume:{req.action}]",
+        standard_filter=None,
+        response=response,
+        result=result,
+        elapsed_ms=round((time.perf_counter() - start) * 1000),
+    )
+    return response
 
 
 @app.get("/documents/{document_id}/pdf")
