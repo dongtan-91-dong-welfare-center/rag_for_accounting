@@ -33,6 +33,14 @@ services:
       - "8080:80"
     volumes:
       - tei_cache:/data
+    # 웜업(CPU에서 약 2분)이 끝나야 /health가 열린다. 
+    # 이 체크가 없으면 app이 먼저 떠서 웜업 동안 들어온 질의가 임베딩 실패(Connection refused)로 "근거 부족" 응답을 만든다.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
     restart: unless-stopped
 
   app:
@@ -61,8 +69,10 @@ services:
     depends_on:
       database:
         condition: service_healthy
+      # service_healthy: TEI 웜업 완료 후에 app을 띄운다
+      # 웜업 중 질의가 임베딩 실패로 흐르는 순서 문제를 compose 수준에서 차단한다.
       embedding:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
