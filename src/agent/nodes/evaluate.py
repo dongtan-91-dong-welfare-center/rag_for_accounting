@@ -261,6 +261,7 @@ def validate_verdict(eval_result: EvaluationResult) -> None:
         1. is_relevant=True이고 confidence < 0.3이면 신뢰도 불일치
         2. needs_external=True이고 is_relevant=True인데 reasoning에 외부 참조 근거가 없으면 불일치
     """
+    # !TODO: config에 confidence 기준 추가
     if eval_result.is_relevant and eval_result.confidence < 0.3:
         raise InconsistentVerdictError(
             f"is_relevant=True이지만 confidence={eval_result.confidence:.2f}로 신뢰도 불일치"
