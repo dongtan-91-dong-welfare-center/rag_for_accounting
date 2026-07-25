@@ -7,6 +7,8 @@
  * NFR-002: 검색된 조항이 1순위 — 답변보다 먼저 노출한다.
  */
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type {
   QueryDoneResponse,
   QueryInterruptedResponse,
@@ -15,6 +17,7 @@ import type {
   WorkflowResponse,
 } from "./api";
 import { checkPdfAvailable, documentPdfUrl, postQuery, postResume } from "./api";
+import { excerptOf, humanNodeTitle, paraChips } from "./clauseDisplay";
 
 const STANDARD_OPTIONS: { value: StandardFilter; label: string }[] = [
   { value: "ALL", label: "전체 기준" },
@@ -519,6 +522,57 @@ function PdfViewerModal({ target, onClose }: { target: ViewerTarget; onClose: ()
   );
 }
 
+/** 문단번호 칩 행 — 다발이면 목록, 개수가 많으면 범위 한 칩으로 축약. */
+function ParaChips({ paras }: { paras: string[] }) {
+  if (paras.length === 0) return null;
+  return (
+    <div className="para-chips">
+      {paraChips(paras).map((p) => (
+        <span key={p} className="para-chip">
+          {p}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** 기준서 마크다운 본문 렌더 — 편집기호(####·**·표 |)를 글자로 내보내지 않고 해석한다. */
+function MarkdownContent({ children }: { children: string }) {
+  return (
+    <div className="md-content">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+    </div>
+  );
+}
+
+/** 조항 본문 — 접힘(첫 문단 발췌) ⇄ 펼침(전문 마크다운 렌더).
+ *  전문을 카드에서 빼지 않는 이유: BYO 환경에서는 PDF가 없어 DB content가 유일한 근거다. */
+function ClauseContent({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  if (open) {
+    return (
+      <div className="clause-expand">
+        <MarkdownContent>{content}</MarkdownContent>
+        <button type="button" className="more-btn" onClick={() => setOpen(false)}>
+          ▴ 접기
+        </button>
+      </div>
+    );
+  }
+  const excerpt = excerptOf(content);
+  return (
+    <div className="clause-expand">
+      {excerpt.kind === "text" && <p className="clause-excerpt">{excerpt.text}</p>}
+      {excerpt.kind === "table-only" && (
+        <p className="clause-excerpt is-table-note">표 형태의 조항입니다 — 펼치면 표로 보입니다.</p>
+      )}
+      <button type="button" className="more-btn" onClick={() => setOpen(true)}>
+        ▾ 더보기
+      </button>
+    </div>
+  );
+}
+
 function Result({ response }: { response: QueryDoneResponse }) {
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
 
@@ -580,28 +634,32 @@ function Result({ response }: { response: QueryDoneResponse }) {
           <p className="muted">검색된 조항 없음</p>
         ) : (
           <div className="clause-list">
-            {response.clauses.map((c) => (
-              <article key={c.rank} className="clause-card">
-                <div className={`clause-rank r${Math.min(c.rank, 3)}`}>
-                  <span className="num">{String(c.rank).padStart(2, "0")}</span>
-                  <span className="score">{c.score.toFixed(3)}</span>
-                </div>
-                <div className="clause-body">
-                  <div className="clause-title-row">
-                    <span className="clause-title">
-                      {c.chapter}장{c.node_id && ` · ${c.node_id}`}
-                    </span>
-                    <PageButton
-                      documentId={c.document_id}
-                      pageStart={c.page_start}
-                      pageEnd={c.page_end}
-                      onOpen={setViewer}
-                    />
+            {response.clauses.map((c) => {
+              const title = humanNodeTitle(c.node_id, c.document_id);
+              return (
+                <article key={c.rank} className="clause-card">
+                  <div className={`clause-rank r${Math.min(c.rank, 3)}`}>
+                    <span className="num">{String(c.rank).padStart(2, "0")}</span>
+                    <span className="score">{c.score.toFixed(3)}</span>
                   </div>
-                  <p className="clause-content">{c.content}</p>
-                </div>
-              </article>
-            ))}
+                  <div className="clause-body">
+                    <div className="clause-title-row">
+                      <span className="clause-title">
+                        제{c.chapter}장{title && ` · ${title}`}
+                      </span>
+                      <PageButton
+                        documentId={c.document_id}
+                        pageStart={c.page_start}
+                        pageEnd={c.page_end}
+                        onOpen={setViewer}
+                      />
+                    </div>
+                    <ParaChips paras={c.paras} />
+                    <ClauseContent content={c.content} />
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
@@ -624,7 +682,10 @@ function Result({ response }: { response: QueryDoneResponse }) {
             {response.citations.map((c, i) => (
               <details key={c.chunk_id} className="cite-card">
                 <summary>
-                  <strong>[{i + 1}]</strong> {c.document_id} / {c.chunk_id}
+                  <strong>[{i + 1}]</strong>
+                  {/* 검색된 조항 카드와 같은 표기(제목·칩) — 두 목록에서 같은 조항이 같은 모양으로 보인다 */}
+                  {c.document_id} · {humanNodeTitle(c.chunk_id, c.document_id) || c.chunk_id}
+                  <ParaChips paras={c.paras} />
                   <span className="rel">관련도 {c.relevance_score.toFixed(2)}</span>
                   <PageButton
                     documentId={c.document_id}
@@ -633,7 +694,9 @@ function Result({ response }: { response: QueryDoneResponse }) {
                     onOpen={setViewer}
                   />
                 </summary>
-                <p className="cite-content">{c.content}</p>
+                <div className="cite-content">
+                  <MarkdownContent>{c.content}</MarkdownContent>
+                </div>
               </details>
             ))}
           </div>

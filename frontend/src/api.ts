@@ -15,6 +15,8 @@ export interface ClauseOut {
   /** 원본 PDF 페이지 범위 — 백필 전/미매칭이면 null(원문 보기 버튼 미표시). */
   page_start: number | null;
   page_end: number | null;
+  /** 문단번호 칩 — 서버 공용 규칙 추출·원형 보존(가지번호 유지). 번호가 없는 청크는 빈 배열. */
+  paras: string[];
 }
 
 export interface CitationOut {
@@ -24,6 +26,8 @@ export interface CitationOut {
   relevance_score: number;
   page_start: number | null;
   page_end: number | null;
+  /** 문단번호 칩 — 검색 조항 목록과 같은 규칙이라 두 목록에서 같은 조항이 같은 모양으로 보인다. */
+  paras: string[];
 }
 
 export type ResumeAction = "approve" | "rewrite";

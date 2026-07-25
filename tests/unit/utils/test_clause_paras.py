@@ -61,6 +61,19 @@ class TestContentParas:
         """allowlist 밖 한글 접두는 미매칭 — 열린 패턴 오탐 차단이 설계 의도다."""
         assert content_paras("#### 부록2.1\n…") == []
 
+    def test_bold_marked_number_recognized(self):
+        """
+        줄 시작 굵게 표기(**실19.1** …)도 문단 라벨이다 — ch19 실무지침 4건
+        (실19.1·실19.5·실19.6·실19.21)은 헤딩·chunk_id 어느 쪽에도 번호가 없어
+        이 표기를 못 읽으면 채점·칩 양쪽에서 영구히 번호 없는 조항이 된다.
+        """
+        assert content_paras("**실19.1** 이 장에서는 부여일을 다음과 같이 정의하고 있다.") == ["실19.1"]
+
+    def test_bold_number_mid_line_or_phrase_ignored(self):
+        """줄 중간의 굵게 언급과 번호가 아닌 굵게 구절(**20X2. 9. 1.(…)**)은 라벨이 아니다."""
+        assert content_paras("본문 중간의 **실19.1** 언급은 라벨이 아니다") == []
+        assert content_paras("**20X2. 9. 1.(분양공사지출에 대한 회계처리)**\n차) 미완성주택") == []
+
     def test_duplicates_removed_order_kept(self):
         assert content_paras("#### 6.13\n…\n#### 6.14\n…\n#### 6.13\n…") == ["6.13", "6.14"]
 

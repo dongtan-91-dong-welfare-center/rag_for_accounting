@@ -62,18 +62,24 @@ def clause_header_re(
     )
 
 
-# 추출 정본 정규식. 줄 시작 앵커라 본문 중간 언급("본문에 결21.15를 인용")은 잡지 않는다.
+# 추출 정본 정규식 — 두 표기를 잡는다:
+#   1) 헤딩:          "#### 실2.24"        (H3~H5, 문단 헤더의 정규 표기)
+#   2) 줄 시작 굵게:  "**실19.1** 이 장…"  (ch19 실무지침 4건이 헤딩 대신 쓰는 표기 — 운영 DB 실측)
+# 둘 다 줄 시작 앵커라 본문 중간 언급("본문에 결21.15를 인용")은 잡지 않고, 굵은 쪽은 **…** 안이 번호 토큰 전체와 일치할 때만 라벨로 본다(**20X2. 9. 1.(…)** 미매칭).
 CONTENT_PARA_RE = clause_header_re()
+_BOLD_PARA_RE = re.compile(rf"^\*\*({TOKEN_PATTERN})\*\*", re.MULTILINE)
 
 
 def content_paras(content: str) -> list[str]:
-    """본문 헤더에서 문단번호를 등장 순서대로, 중복 없이, 원형 그대로 뽑는다.
+    """본문에서 문단번호를 등장 순서대로, 중복 없이, 원형 그대로 뽑는다.
 
-    예: "#### 6.13\\n…\\n#### 실2.24\\n…" → ["6.13", "실2.24"].
+    예: "#### 6.13\\n…\\n**실19.1** …" → ["6.13", "실19.1"].
     """
+    matches = [(m.start(), m.group(1)) for m in CONTENT_PARA_RE.finditer(content)]
+    matches += [(m.start(), m.group(1)) for m in _BOLD_PARA_RE.finditer(content)]
     seen: set[str] = set()
     out: list[str] = []
-    for p in CONTENT_PARA_RE.findall(content):
+    for _, p in sorted(matches):
         if p not in seen:
             seen.add(p)
             out.append(p)

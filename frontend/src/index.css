@@ -84,7 +84,8 @@ a:hover {
 .brand {
   display: flex;
   align-items: baseline;
-  flex-wrap: wrap; /* 브랜드명이 길어 서브 카피는 자연스럽게 다음 줄로 */
+  flex-wrap: wrap;
+  /* 브랜드명이 길어 서브 카피는 자연스럽게 다음 줄로 */
   gap: 2px 10px;
   padding: 0 22px 20px;
 }
@@ -345,9 +346,17 @@ a:hover {
   padding: 12px 0;
 }
 
-.clause-rank.r1 { background: var(--navy); }
-.clause-rank.r2 { background: #5a6b8c; }
-.clause-rank.r3 { background: #8b96ab; }
+.clause-rank.r1 {
+  background: var(--navy);
+}
+
+.clause-rank.r2 {
+  background: #5a6b8c;
+}
+
+.clause-rank.r3 {
+  background: #8b96ab;
+}
 
 .clause-rank .num {
   font-family: var(--mono);
@@ -382,12 +391,116 @@ a:hover {
   font-weight: 700;
 }
 
-.clause-content {
+/* 문단번호 칩 — 회계사가 인용에 쓰는 조항 번호를 카드 머리로 꺼낸다. */
+.para-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.para-chip {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 1px 7px;
+  background: var(--paper-3);
+  border: 1px solid var(--line-2);
+  color: var(--navy);
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+/* 접힘 발췌 — 첫 문단을 최대 3줄까지만 보여준다(줄 수 초과분은 말줄임). */
+.clause-excerpt {
   margin: 0;
   font-size: 13px;
   line-height: 1.7;
   color: #374151;
-  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.clause-excerpt.is-table-note {
+  color: var(--mute);
+}
+
+.clause-expand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.more-btn {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 2px 9px 2px 0;
+  background: none;
+  border: none;
+  color: var(--gold);
+  cursor: pointer;
+}
+
+.more-btn:hover {
+  text-decoration: underline;
+}
+
+/* 마크다운 본문 — 편집기호(####·**·|)를 해석해 소제목·굵게·표로 보여준다. */
+.md-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #374151;
+  min-width: 0;
+}
+
+.md-content> :first-child {
+  margin-top: 0;
+}
+
+.md-content> :last-child {
+  margin-bottom: 0;
+}
+
+.md-content h1,
+.md-content h2,
+.md-content h3,
+.md-content h4,
+.md-content h5,
+.md-content h6 {
+  /* 조항 소제목(#### 6.13 등)은 본문보다 살짝 작은 네이비 모노 제목으로 — 칩과 시각적으로 이어진다. */
+  font-size: 12.5px;
+  font-family: var(--mono);
+  color: var(--navy);
+  margin: 12px 0 4px;
+}
+
+.md-content p {
+  margin: 4px 0;
+}
+
+.md-content table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+  display: block;
+  overflow-x: auto;
+  /* 넓은 표가 카드 폭을 뚫지 않게 표 스스로 가로 스크롤한다 */
+  max-width: 100%;
+}
+
+.md-content th,
+.md-content td {
+  border: 1px solid var(--line-2);
+  padding: 4px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-content th {
+  background: var(--paper-3);
+  color: var(--navy);
+  font-weight: 700;
 }
 
 .page-btn {
@@ -475,7 +588,7 @@ details.cite-card .cite-content {
   font-size: 12.5px;
   line-height: 1.7;
   color: #4b5563;
-  white-space: pre-wrap;
+  /* 본문은 마크다운 렌더(md-content)라 pre-wrap을 쓰지 않는다 — 원시 줄바꿈 보존이 표·목록 렌더와 충돌한다. */
 }
 
 .muted {
@@ -584,7 +697,9 @@ details.cite-card .cite-content {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -751,15 +866,18 @@ details.cite-card .cite-content {
 }
 
 @media (max-width: 860px) {
+
   /* 기본 .sidebar 규칙보다 뒤에 있어야 display: flex를 이긴다(동일 특이도). */
   .sidebar {
     display: none;
   }
+
   .transcript,
   .composer-wrap {
     padding-left: 20px;
     padding-right: 20px;
   }
+
   .main-header {
     padding: 14px 20px;
   }
@@ -811,7 +929,8 @@ details.cite-card .cite-content {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap; /* 좁은 폭에서 내비게이션이 다음 줄로 내려가되 버튼 글자는 깨지지 않게 */
+  flex-wrap: wrap;
+  /* 좁은 폭에서 내비게이션이 다음 줄로 내려가되 버튼 글자는 깨지지 않게 */
   gap: 8px 1rem;
   padding: 12px 16px;
   border-bottom: 2px solid var(--navy);
