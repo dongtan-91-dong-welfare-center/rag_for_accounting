@@ -118,6 +118,13 @@ class TestExtractChunkParas:
         """'결21.15'·'실15.5'처럼 #### 헤더가 아닌 인라인 표기는 추출하지 않는다"""
         assert extract_chunk_paras("본문에 결21.15 또는 실15.5를 인용") == set()
 
+    def test_h5_header_scoring_preserved(self):
+        """
+        ch12의 '##### 12.21~12.26'(실물 6건)은 현행 비앵커 정규식이 잡던 형태
+        새 규칙이 놓치면 채점 회귀가 되므로 고정한다.
+        """
+        assert extract_chunk_paras("##### 12.21\n인식원칙의 예외...") == {"12.21"}
+
 
 @pytest.mark.unit
 class TestParasMatch:
@@ -173,3 +180,69 @@ class TestRankHit:
         first, covered = rank_hit(["#### 1.1\n..."], set(), "exact")
         assert first is None
         assert covered == set()
+
+
+@pytest.mark.unit
+class TestPrefixedParaScoring:
+    """#255: 실·결·소 접두 문단을 gold·청크 양쪽에서 키의 일부로 보존한다.
+
+    운영 DB 실측(2026-07-25, 1,507청크): 실(실무지침) 415·결(결론도출근거) 107·
+    소(중소기업 특례) 6건의 H4 헤더가 실재한다. 접두를 벗기면 같은 장의 일반 문단과
+    구분되지 않아(실2.11 → 2.11) 오탐 매칭이 생긴다.
+    """
+
+    def test_gold_preserves_practice_prefix(self):
+        clauses = parse_gold_clauses(["일반기업회계기준 제2장 실2.11조"])
+        assert clauses[0].chapter == "2"
+        assert clauses[0].paras == {"실2.11"}
+
+    def test_gold_conclusion_prefix_and_plain_mixed(self):
+        clauses = parse_gold_clauses(["일반기업회계기준 제21장 21.13조, 결21.6조, 결21.7조"])
+        assert clauses[0].paras == {"21.13", "결21.6", "결21.7"}
+
+    def test_gold_prefixed_range_expansion(self):
+        """'실2.46조~실2.47조' 범위는 접두를 유지한 채 끝점 포함으로 펼친다."""
+        clauses = parse_gold_clauses(["일반기업회계기준 제2장 실2.46조~실2.47조"])
+        assert clauses[0].paras == {"실2.46", "실2.47"}
+
+    def test_prefixed_and_plain_do_not_cross_match(self):
+        """실2.11 ≠ 2.11 — exact·prefix 어느 모드에서도 서로 매칭되지 않는다."""
+        assert _paras_match({"실2.11"}, {"2.11"}, "exact") == set()
+        assert _paras_match({"실2.11"}, {"2.11"}, "prefix") == set()
+        assert _paras_match({"2.11"}, {"실2.11"}, "prefix") == set()
+
+    def test_chunk_header_with_prefix_matches_gold(self):
+        gold = gold_para_set(parse_gold_clauses(["일반기업회계기준 제12장 실12.1조"]))
+        chunk = extract_chunk_paras("#### 실12.1\n주식기준보상거래에서...")
+        assert _paras_match(gold, chunk, "exact") == {"실12.1"}
+
+    def test_normalize_keeps_prefix_strips_branch(self):
+        assert _normalize_para("실21.5의2") == "실21.5"
+
+
+@pytest.mark.unit
+class TestChunkIdUnionScoring:
+    """#255: 추출을 content 헤더 ∪ chunk_id 유니언으로 확장한다.
+
+    운영 DB 실측: 단일 조항 노드 435건은 번호가 content에 없고 chunk_id에만 있다
+    (예: gaap-ch2-실2.11). content 정규식만 고치면 이들은 여전히 영구 miss다.
+    """
+
+    def test_extract_falls_back_to_chunk_id(self):
+        """TEST-K-GAAP-011 실물 재현: 실2.11 청크는 content에 헤더가 전혀 없다."""
+        body = "동일 또는 유사한 거래나 회계사건에서 발생한 차익, 차손 등은 총액으로 표시하지만..."
+        assert extract_chunk_paras(body, "gaap-ch2-실2.11") == {"실2.11"}
+
+    def test_rank_hit_accepts_content_id_pairs(self):
+        items = [
+            ("#### 2.10\n...", "gaap-ch2-회계정책"),
+            ("동일 또는 유사한 거래나 회계사건에서...", "gaap-ch2-실2.11"),
+        ]
+        first, covered = rank_hit(items, {"실2.11"}, "exact")
+        assert first == 2
+        assert covered == {"실2.11"}
+
+    def test_rank_hit_plain_strings_still_work(self):
+        """재현 하니스(scripts/*_replay.py 7종)의 기존 호출 형태(list[str]) 하위호환."""
+        first, _ = rank_hit(["#### 18.4\n..."], {"18.4"}, "exact")
+        assert first == 1
