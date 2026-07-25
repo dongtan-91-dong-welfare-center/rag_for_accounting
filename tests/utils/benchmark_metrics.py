@@ -29,6 +29,12 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
+from src.utils.clause_paras import (
+    NUM_CORE_PATTERN,
+    PARA_TOKEN_RE,
+    PREFIX_PATTERN,
+    chunk_paras,
+)
 from src.utils.config import KST
 from tests.utils.benchmark_loader import BenchmarkCase
 
@@ -40,29 +46,43 @@ RETRIEVAL_PASS_TOP_N = 5
 
 
 # ════════════════════════════════ 조항키 유틸 ════════════════════════════════
-# 청크 본문의 문단 헤더:  "#### 21.8", "#### 2.6.5", "#### 6.13의2"
-_CHUNK_PARA_RE = re.compile(r"####\s+(\d+\.\d+(?:\.\d+)?(?:의\d+)?)")
+# 문단번호 추출 규칙은 src/utils/clause_paras가 단일 정본
 # gold 라벨에서 장 번호:   "일반기업회계기준 제21장 …"
 _GOLD_CHAPTER_RE = re.compile(r"제\s*(\d+)\s*장")
-# 문단 토큰:               "21.8", "2.6.5", "6.13의2"
-_PARA_TOKEN_RE = re.compile(r"\d+\.\d+(?:\.\d+)?(?:의\d+)?")
-# 범위 표기:               "15.15조~15.16조"
-_RANGE_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?)\s*조?\s*~\s*(\d+\.\d+(?:\.\d+)?)")
+# 문단 토큰:               "21.8", "2.6.5", "6.13의2", "실2.11" (접두 실·결·소 보존)
+_PARA_TOKEN_RE = PARA_TOKEN_RE
+# 범위 표기:               "15.15조~15.16조", "실2.46조~실2.47조"
+_RANGE_RE = re.compile(
+    rf"({PREFIX_PATTERN}?{NUM_CORE_PATTERN})\s*조?\s*~\s*({PREFIX_PATTERN}?{NUM_CORE_PATTERN})"
+)
+# 접두와 숫자 본체 분리용: "실2.46" → ("실", "2.46")
+_PREFIX_SPLIT_RE = re.compile(rf"^({PREFIX_PATTERN}?)(.+)$")
 
 
 def _normalize_para(p: str) -> str:
-    """가지번호 접미사(의N)를 제거해 기준 문단번호로 정규화한다. '21.5의2' → '21.5'."""
+    """
+    가지번호 접미사(의N)를 제거해 기준 문단번호로 정규화한다. '21.5의2' → '21.5'.
+
+    접두(실·결·소)는 키의 일부라 보존한다.
+    """
     return re.sub(r"의\d+$", "", p)
 
 
 def _expand_range(a: str, b: str) -> set[str]:
-    """'15.15'~'15.16' 처럼 같은 prefix의 연속 범위를 끝점 포함으로 펼친다."""
-    pa, pb = a.split("."), b.split(".")
-    if len(pa) == len(pb) == 2 and pa[0] == pb[0]:
+    """'
+    15.15'~'15.16' 처럼 같은 prefix의 연속 범위를 끝점 포함으로 펼친다.
+
+    '실2.46'~'실2.47'처럼 접두가 붙은 범위는 접두가 양끝에서 같을 때만 펼치고, 펼친 문단에도 접두를 유지한다(실2.46 ≠ 2.46).
+    """
+    (pre_a, num_a), (pre_b, num_b) = (
+        _PREFIX_SPLIT_RE.match(x).groups() for x in (a, b)
+    )
+    pa, pb = num_a.split("."), num_b.split(".")
+    if pre_a == pre_b and len(pa) == len(pb) == 2 and pa[0] == pb[0]:
         try:
             lo, hi = int(pa[1]), int(pb[1])
             if 0 <= hi - lo <= 50:
-                return {f"{pa[0]}.{i}" for i in range(lo, hi + 1)}
+                return {f"{pre_a}{pa[0]}.{i}" for i in range(lo, hi + 1)}
         except ValueError:
             pass
     return {a, b}
@@ -104,9 +124,13 @@ def gold_para_set(clauses: list[GoldClause]) -> set[str]:
     return s
 
 
-def extract_chunk_paras(content: str) -> set[str]:
-    """청크/인용 본문에서 문단 헤더 번호를 정규화 집합으로 추출한다."""
-    return {_normalize_para(p) for p in _CHUNK_PARA_RE.findall(content)}
+def extract_chunk_paras(content: str, chunk_id: str = "") -> set[str]:
+    """
+    청크/인용에서 문단번호를 정규화 집합으로 추출한다(content 헤더 ∪ chunk_id).
+
+    chunk_id를 함께 주면 단일 조항 노드(번호가 본문에 없고 id에만 있는 청크, 예: "gaap-ch2-실2.11")도 채점된다.
+    """
+    return {_normalize_para(p) for p in chunk_paras(content, chunk_id)}
 
 
 def _paras_match(gold_paras: set[str], cand_paras: set[str], mode: str) -> set[str]:
@@ -126,14 +150,22 @@ def _paras_match(gold_paras: set[str], cand_paras: set[str], mode: str) -> set[s
     return hits
 
 
-def rank_hit(contents: list[str], gold_paras: set[str], mode: str) -> tuple[int | None, set[str]]:
-    """순위대로 정렬된 후보 본문 리스트에서 첫 hit 순위(1-based)와 누적 커버 문단을 반환한다."""
+def rank_hit(
+    contents: list[str | tuple[str, str]], gold_paras: set[str], mode: str
+) -> tuple[int | None, set[str]]:
+    """
+    순위대로 정렬된 후보 리스트에서 첫 hit 순위(1-based)와 누적 커버 문단을 반환한다.
+
+    항목은 본문 문자열, 또는 (본문, chunk_id) 쌍이다.
+    쌍으로 주면 번호가 chunk_id에만 있는 단일 조항 청크도 hit로 인정된다. 문자열 형태는 기존 재현 하니스(scripts/*_replay.py)의 호출을 깨지 않기 위한 하위호환이다.
+    """
     first_hit: int | None = None
     covered: set[str] = set()
     if not gold_paras:
         return None, covered
-    for rank, content in enumerate(contents, start=1):
-        inter = _paras_match(gold_paras, extract_chunk_paras(content), mode)
+    for rank, item in enumerate(contents, start=1):
+        content, chunk_id = (item, "") if isinstance(item, str) else item
+        inter = _paras_match(gold_paras, extract_chunk_paras(content, chunk_id), mode)
         if inter:
             covered |= inter
             if first_hit is None:
@@ -153,9 +185,15 @@ def resolve_core_paras(case: BenchmarkCase, gold_paras: set[str]) -> set[str]:
 
 
 def retrieval_pass(
-    search_contents: list[str], core_paras: set[str], top_n: int = RETRIEVAL_PASS_TOP_N
+    search_contents: list[str | tuple[str, str]],
+    core_paras: set[str],
+    top_n: int = RETRIEVAL_PASS_TOP_N,
 ) -> bool:
-    """핵심 조항이 검색 결과 상위 top_n 안에 있으면 검색 통과(True)."""
+    """
+    핵심 조항이 검색 결과 상위 top_n 안에 있으면 검색 통과(True).
+
+    항목 형태(본문 문자열 또는 (본문, chunk_id) 쌍)는 rank_hit와 같다.
+    """
     fh, _ = rank_hit(search_contents, core_paras, "exact")
     return fh is not None and fh <= top_n
 
@@ -269,11 +307,13 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
     retrieved = state.get("retrieved_chunks") or []
     citations = list(fr.citations) if fr else []
 
-    search_contents = [r.chunk.content for r in reranked]
-    cite_contents = [c.content for c in citations]
+    # (본문, chunk_id) 쌍으로 채점한다 — 단일 조항 청크(번호가 id에만 있음) 인정
+    search_items = [(r.chunk.content, r.chunk.chunk_id) for r in reranked]
+    cite_items = [(c.content, c.chunk_id) for c in citations]
+    cite_contents = [c.content for c in citations]  # 전문 영속화(diag)용
 
     metrics: dict = {}
-    for stage, contents in (("retrieval", search_contents), ("generation", cite_contents)):
+    for stage, contents in (("retrieval", search_items), ("generation", cite_items)):
         for mode in ("exact", "prefix"):
             fh, cov = rank_hit(contents, gold_paras, mode)
             metrics[f"{stage}_{mode}_hit@1"] = fh == 1
@@ -285,7 +325,7 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
     metrics["legacy_substring"] = legacy_substring_hit(case.references, citations)
     metrics["is_answerable"] = bool(fr.is_answerable) if fr else False
     # 핵심(core) 조항이 검색 Top-5 안에 있으면 통과
-    metrics["retrieval_pass"] = retrieval_pass(search_contents, resolve_core_paras(case, gold_paras))
+    metrics["retrieval_pass"] = retrieval_pass(search_items, resolve_core_paras(case, gold_paras))
     res.metrics = metrics
 
     # 진단 정보(오답 분석용) + 회계사 검토·content 판정용 전문 영속화
@@ -301,7 +341,9 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         "needs_external": getattr(ev, "needs_external", None),
         "eval_reasoning": (getattr(ev, "reasoning", "") or ""),
         "retrieval_chapters": [r.chunk.metadata.chapter for r in reranked][:10],
-        "citation_paras": sorted({p for c in citations for p in extract_chunk_paras(c.content)}),
+        "citation_paras": sorted(
+            {p for c in citations for p in extract_chunk_paras(c.content, c.chunk_id)}
+        ),
         "query": case.query,
         "expected_answer": case.expected_answer,
         "answer": (fr.answer if fr else ""),
