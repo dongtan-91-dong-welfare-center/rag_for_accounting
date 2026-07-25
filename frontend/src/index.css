@@ -298,13 +298,6 @@ a:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.section-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .section-title {
   margin: 0;
   font-family: var(--serif);
@@ -312,86 +305,7 @@ a:hover {
   color: var(--navy);
 }
 
-.section-title .accent {
-  color: var(--gold);
-}
-
-.section-note {
-  font-size: 11.5px;
-  color: var(--mute);
-}
-
-/* 조항 카드 — 랭크 컬럼 + 본문 */
-
-.clause-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.clause-card {
-  display: grid;
-  grid-template-columns: 52px 1fr;
-  border: 1px solid var(--line);
-  background: #fff;
-}
-
-.clause-rank {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: #fff;
-  padding: 12px 0;
-}
-
-.clause-rank.r1 {
-  background: var(--navy);
-}
-
-.clause-rank.r2 {
-  background: #5a6b8c;
-}
-
-.clause-rank.r3 {
-  background: #8b96ab;
-}
-
-.clause-rank .num {
-  font-family: var(--mono);
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.clause-rank .score {
-  font-family: var(--mono);
-  font-size: 10px;
-  opacity: 0.75;
-}
-
-.clause-body {
-  padding: 13px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-}
-
-.clause-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.clause-title {
-  font-size: 13px;
-  color: var(--navy);
-  font-weight: 700;
-}
-
-/* 문단번호 칩 — 회계사가 인용에 쓰는 조항 번호를 카드 머리로 꺼낸다. */
+/* 문단번호 칩 — 회계사가 인용에 쓰는 조항 번호를 사이드 패널에 노출한다. */
 .para-chips {
   display: flex;
   flex-wrap: wrap;
@@ -407,43 +321,6 @@ a:hover {
   color: var(--navy);
   border-radius: 2px;
   white-space: nowrap;
-}
-
-/* 접힘 발췌 — 첫 문단을 최대 3줄까지만 보여준다(줄 수 초과분은 말줄임). */
-.clause-excerpt {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.7;
-  color: #374151;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.clause-excerpt.is-table-note {
-  color: var(--mute);
-}
-
-.clause-expand {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: flex-start;
-}
-
-.more-btn {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  padding: 2px 9px 2px 0;
-  background: none;
-  border: none;
-  color: var(--gold);
-  cursor: pointer;
-}
-
-.more-btn:hover {
-  text-decoration: underline;
 }
 
 /* 마크다운 본문 — 편집기호(####·**·|)를 해석해 소제목·굵게·표로 보여준다. */
@@ -503,21 +380,6 @@ a:hover {
   font-weight: 700;
 }
 
-.page-btn {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  padding: 2px 9px;
-  background: #fff;
-  border: 1px solid var(--navy);
-  color: var(--navy);
-  border-radius: 2px;
-}
-
-.page-btn:hover {
-  background: var(--navy);
-  color: #fff;
-}
-
 /* 답변 */
 
 .answer-block {
@@ -536,64 +398,27 @@ a:hover {
   white-space: pre-wrap;
 }
 
-/* 인용 */
-
-.cite-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-details.cite-card {
-  border: 1px solid var(--line);
-  background: var(--paper-2);
-}
-
-details.cite-card summary {
-  cursor: pointer;
-  padding: 9px 14px;
-  font-size: 12px;
-  color: #4b5563;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  list-style: none;
-}
-
-details.cite-card summary::before {
-  content: "›";
+/* 답변 속 조항 번호 — 인용 마커([1])를 치환한 클릭 가능한 근거 링크. */
+.answer-ref {
   font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 0 2px;
+  background: none;
+  border: none;
   color: var(--gold);
-  transition: transform 0.15s;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-details.cite-card[open] summary::before {
-  transform: rotate(90deg);
-}
-
-details.cite-card summary strong {
+.answer-ref:hover {
+  text-decoration: underline;
   color: var(--navy);
 }
 
-details.cite-card summary .rel {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--gold);
-}
-
-details.cite-card .cite-content {
+.answer-refs-note {
   margin: 0;
-  padding: 0 14px 12px 30px;
-  font-size: 12.5px;
-  line-height: 1.7;
-  color: #4b5563;
-  /* 본문은 마크다운 렌더(md-content)라 pre-wrap을 쓰지 않는다 — 원시 줄바꿈 보존이 표·목록 렌더와 충돌한다. */
-}
-
-.muted {
+  font-size: 11px;
   color: var(--mute);
-  font-size: 12.5px;
 }
 
 /* ── 상태 카드: HIL / 로딩 / 에러 / 공지 ─────────────── */
@@ -906,23 +731,47 @@ details.cite-card .cite-content {
 
 /* ── PDF 뷰어 모달 ───────────────────────────────────── */
 
-.viewer-overlay {
+/* 인용 사이드 패널 — 답변 속 조항 번호를 누르면 오른쪽에 열리는 드로어.
+   답변을 가리지 않도록 오버레이(배경 어둡게) 없이 겹쳐 띄운다. */
+.side-panel {
   position: fixed;
-  inset: 0;
-  background: rgba(22, 41, 77, 0.55);
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 92vw);
+  background: var(--paper);
+  border-left: 1px solid var(--line-2);
+  box-shadow: -12px 0 32px rgba(22, 41, 77, 0.14);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.5rem;
+  flex-direction: column;
   z-index: 10;
 }
 
-.viewer-panel {
-  background: var(--paper);
-  width: min(960px, 100%);
-  height: min(90vh, 100%);
+.side-panel-meta {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 16px 0;
+}
+
+.side-panel-meta .rel {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--gold);
+}
+
+/* 인용 본문(마크다운) — PDF 미배치 시 본문이 근거의 전부이므로 패널 폭에 맞춰 스크롤한다. */
+.side-panel-source {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.side-panel-source summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--mute);
+  padding: 4px 0;
 }
 
 .viewer-header {

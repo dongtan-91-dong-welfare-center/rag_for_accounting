@@ -1,5 +1,5 @@
 /**
- * 조항 카드 표시 규칙 — 칩·제목·발췌를 API 응답에서 파생하는 순수 함수 모음.
+ * 조항 표시 규칙 — 칩·제목·답변 인용 마커 치환을 API 응답에서 파생하는 순수 함수 모음.
  *
  * 문단번호 추출 자체는 서버 공용 규칙(src/utils/clause_paras.py)이 하고 프론트는 paras를 소비만 한다.
  * Python↔TypeScript로 규칙이 두 벌이 되면 채점과 화면이 어긋난다. 여기는 "받은 번호를 어떻게 보여줄지"만 담당한다.
@@ -33,27 +33,48 @@ export function humanNodeTitle(nodeId: string, documentId: string): string {
   return segments.join(" · ").replace(/_/g, " ");
 }
 
-export type Excerpt =
+export type AnswerSegment =
   | { kind: "text"; text: string }
-  | { kind: "table-only" }
-  | { kind: "empty" };
+  | { kind: "ref"; citationIndex: number; label: string };
+
+const MARKER_RE = /\[(\d+)\]/g;
 
 /**
- * 접힘 상태에 보여줄 발췌 — 첫 문단의 본문 첫 줄(마크다운 기호 제거).
+ * 답변 본문의 인용 마커([1]·[2])를 실제 조항 번호 라벨로 바꾼 세그먼트 열을 만든다.
+ * 예: "…한도로 합니다 [2]." + citations[1].paras=["18.12"] → "…한도로 합니다(18.12)."
  *
- * "질의에 걸린 문단 우선"은 파이프라인에 매칭 신호가 없어 v1에서는 첫 문단으로 확정했다(7/25 결정).
- * 표만으로 짜인 조항은 발췌가 표 조각(| … |)이 되어 읽을 수 없으므로, 표가 있다는 사실만 알리고 본문은 펼칠 때 표 모양으로 보여준다.
+ * 마커↔인용 매핑은 백엔드 extract_citations_from_text와 같은 규칙으로 복원한다:
+ * citations 배열은 마커가 본문에 처음 등장한 순서로 쌓이므로, k번째로 처음 등장한 마커 번호가 citations[k-1]이다.
+ * citations 길이를 넘는 마커(모델이 지어낸 번호는 백엔드가 버린다)는 치환하지 않고 본문 텍스트로 남긴다.
+ * 문단번호가 없는 인용(용어 정의 등)은 조항 번호 대신 [k] 표기를 유지하되 클릭은 가능하다.
  */
-export function excerptOf(content: string): Excerpt {
-  let sawTable = false;
-  for (const raw of content.split("\n")) {
-    const line = raw.trim();
-    if (!line || /^#{1,6}\s/.test(line)) continue;
-    if (line.startsWith("|") || /^[-:|\s]+$/.test(line)) {
-      sawTable = true;
-      continue;
-    }
-    return { kind: "text", text: line.replace(/\*\*/g, "") };
+export function answerSegments(
+  answer: string,
+  citations: { paras: string[] }[],
+): AnswerSegment[] {
+  const firstSeen: number[] = []; // 마커 번호의 첫 등장 순서
+  for (const m of answer.matchAll(MARKER_RE)) {
+    const n = Number(m[1]);
+    if (!firstSeen.includes(n)) firstSeen.push(n);
   }
-  return sawTable ? { kind: "table-only" } : { kind: "empty" };
+  const citationIndexOf = new Map<number, number>();
+  firstSeen.slice(0, citations.length).forEach((n, i) => citationIndexOf.set(n, i));
+
+  const segments: AnswerSegment[] = [];
+  let cursor = 0;
+  for (const m of answer.matchAll(MARKER_RE)) {
+    const index = m.index ?? 0;
+    const ci = citationIndexOf.get(Number(m[1]));
+    if (ci === undefined) continue; // 매핑 불가 마커는 텍스트로 남긴다(cursor를 안 움직임)
+    if (index > cursor) {
+      // 마커 앞의 공백은 지운다 — "합니다 [2]." 를 "합니다(18.12)." 로 붙여 쓴다.
+      segments.push({ kind: "text", text: answer.slice(cursor, index).replace(/\s+$/, "") });
+    }
+    const paras = citations[ci].paras;
+    const label = paras.length > 0 ? `(${paras[0]}${paras.length > 1 ? " 외" : ""})` : `[${ci + 1}]`;
+    segments.push({ kind: "ref", citationIndex: ci, label });
+    cursor = index + m[0].length;
+  }
+  if (cursor < answer.length) segments.push({ kind: "text", text: answer.slice(cursor) });
+  return segments;
 }

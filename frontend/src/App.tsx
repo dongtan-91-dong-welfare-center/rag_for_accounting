@@ -4,12 +4,15 @@
  * 상태머신은 기존과 동일: idle → loading → (interrupted ⇄ loading)* → done | error.
  * 완료된 질의는 exchanges[]에 쌓여 트랜스크립트로 렌더되고(채팅형),
  * 진행 중 상태(loading/HIL/error)는 트랜스크립트 말미에 인라인 카드로 표시된다.
- * NFR-002: 검색된 조항이 1순위 — 답변보다 먼저 노출한다.
+ *
+ * 검색 조항·인용 목록 섹션 없이 답변만 보여주고, 답변 속 인용 마커를 실제 조항 번호로 바꿔 클릭하면 사이드 패널에서 원문(PDF, 미배치 시 인용 본문)을 확인한다.
+ * 검색 조항 데이터는 API에 그대로 남아 있어 화면 정책만 되돌리면 재노출할 수 있다.
  */
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
+  CitationOut,
   QueryDoneResponse,
   QueryInterruptedResponse,
   ResumeAction,
@@ -17,7 +20,7 @@ import type {
   WorkflowResponse,
 } from "./api";
 import { checkPdfAvailable, documentPdfUrl, postQuery, postResume } from "./api";
-import { excerptOf, humanNodeTitle, paraChips } from "./clauseDisplay";
+import { answerSegments, humanNodeTitle, paraChips } from "./clauseDisplay";
 
 const STANDARD_OPTIONS: { value: StandardFilter; label: string }[] = [
   { value: "ALL", label: "전체 기준" },
@@ -194,8 +197,8 @@ export default function App() {
             <div className="empty-state">
               <span className="brand-name">K-Accounting</span>
               <p>
-                회계기준에 대해 질의하세요. 관련 조항을 먼저 검색해 보여드리고,
-                <br />그 조항을 근거로 답변을 생성합니다.
+                회계기준에 대해 질의하세요. 관련 조항을 근거로 답변을 생성하며,
+                <br />답변 속 조항 번호를 누르면 원문을 확인할 수 있습니다.
               </p>
             </div>
           )}
@@ -382,52 +385,25 @@ function HumanReview({
   );
 }
 
-interface ViewerTarget {
-  documentId: string;
-  page: number;
-}
-
-function PageButton({
-  documentId,
-  pageStart,
-  pageEnd,
-  onOpen,
-}: {
-  documentId: string;
-  pageStart: number | null;
-  pageEnd: number | null;
-  onOpen: (target: ViewerTarget) => void;
-}) {
-  // 백필 전/미매칭 청크는 페이지가 없어 버튼을 표시하지 않는다(자연 강등).
-  if (pageStart === null) return null;
-  const label = pageEnd !== null && pageEnd !== pageStart ? `p.${pageStart}–${pageEnd}` : `p.${pageStart}`;
-  return (
-    <button
-      type="button"
-      className="page-btn"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onOpen({ documentId, page: pageStart });
-      }}
-    >
-      원문 {label}
-    </button>
-  );
-}
-
-function PdfViewerModal({ target, onClose }: { target: ViewerTarget; onClose: () => void }) {
+/**
+ * 인용 사이드 패널 — 답변 속 조항 번호를 누르면 화면 오른쪽에 열린다.
+ * PDF가 서버에 있으면 해당 페이지(백필 전이면 1쪽)를 iframe으로 띄우고, 없으면(BYO 미배치·스캔본 환경) 인용 청크의 본문을 마크다운으로 보여준다
+ */
+function CitationPanel({ citation, onClose }: { citation: CitationOut; onClose: () => void }) {
   const [available, setAvailable] = useState<boolean | null>(null);
-  const [page, setPage] = useState(target.page);
-  const [pageInput, setPageInput] = useState(String(target.page));
-  const panelRef = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(citation.page_start ?? 1);
+  const [pageInput, setPageInput] = useState(String(citation.page_start ?? 1));
+  const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setAvailable(null);
-    checkPdfAvailable(target.documentId).then(setAvailable);
-  }, [target.documentId]);
+    checkPdfAvailable(citation.document_id).then(setAvailable);
+    const p = citation.page_start ?? 1; // 페이지 백필(#223) 전에는 1쪽부터 연다
+    setPage(p);
+    setPageInput(String(p));
+  }, [citation]);
 
-  // 모달 기본기: 열릴 때 포커스 이동·배경 스크롤 잠금, Escape 닫기, 닫힐 때 포커스 복원.
+  // 패널 기본기: 열릴 때 포커스 이동, Escape 닫기, 닫힐 때 포커스 복원.
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     panelRef.current?.focus();
@@ -435,11 +411,8 @@ function PdfViewerModal({ target, onClose }: { target: ViewerTarget; onClose: ()
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
       opener?.focus();
     };
   }, [onClose]);
@@ -457,22 +430,43 @@ function PdfViewerModal({ target, onClose }: { target: ViewerTarget; onClose: ()
     else setPageInput(String(page));
   };
 
+  const title = humanNodeTitle(citation.chunk_id, citation.document_id) || citation.chunk_id;
+
   return (
-    <div className="viewer-overlay" onClick={onClose}>
-      <div
-        className="viewer-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="viewer-title"
-        tabIndex={-1}
-        ref={panelRef}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="viewer-header">
-          <span className="viewer-title" id="viewer-title">
-            원문 — {target.documentId} · {page}쪽
-          </span>
-          {available && (
+    <aside
+      className="side-panel"
+      role="dialog"
+      aria-labelledby="side-panel-title"
+      tabIndex={-1}
+      ref={panelRef}
+    >
+      <div className="viewer-header">
+        <span className="viewer-title" id="side-panel-title">
+          {citation.document_id} · {title}
+        </span>
+        <button type="button" onClick={onClose}>
+          닫기
+        </button>
+      </div>
+      <div className="side-panel-meta">
+        <ParaChips paras={citation.paras} />
+        <span className="rel">관련도 {citation.relevance_score.toFixed(2)}</span>
+      </div>
+      <div className="viewer-body">
+        {available === null && <p className="notice info">원문 문서를 확인하는 중…</p>}
+        {available === false && (
+          <>
+            <p className="notice warning">
+              원본 PDF가 서버에 없어 인용된 본문으로 대신 보여드립니다.
+              운영 환경에 원본 문서를 배치하면 해당 페이지를 바로 볼 수 있습니다.
+            </p>
+            <div className="side-panel-source">
+              <MarkdownContent>{citation.content}</MarkdownContent>
+            </div>
+          </>
+        )}
+        {available && (
+          <>
             <form className="viewer-nav" onSubmit={submitPage}>
               <button type="button" onClick={() => goTo(page - 1)} disabled={page <= 1}>
                 ◀ 이전
@@ -490,35 +484,25 @@ function PdfViewerModal({ target, onClose }: { target: ViewerTarget; onClose: ()
                 다음 ▶
               </button>
             </form>
-          )}
-          <button type="button" onClick={onClose}>
-            닫기
-          </button>
-        </div>
-        <div className="viewer-body">
-          {available === null && <p className="notice info">원문 문서를 확인하는 중…</p>}
-          {available === false && (
-            <p className="notice warning">
-              원본 PDF가 서버에 없습니다. 운영 환경에 원본 문서(PDF_DIR)를 배치하면 해당 페이지를 바로
-              볼 수 있습니다.
-            </p>
-          )}
-          {available && (
             <iframe
               key={page} /* src의 #page 해시만 바뀌면 내장 PDF 뷰어가 재로딩하지 않아 리마운트로 강제 이동한다 */
               className="viewer-frame"
-              title={`${target.documentId} 원문`}
-              src={documentPdfUrl(target.documentId, page)}
+              title={`${citation.document_id} 원문`}
+              src={documentPdfUrl(citation.document_id, page)}
             />
-          )}
-        </div>
-        {/* 6/14 회의 결정: 한국회계기준원 저작권 표기. PDF 표시 여부(available)와 무관하게 뷰어 모달을 열면 항상 노출한다 */}
-        <p className="viewer-copyright">
-          ⓒ 한국회계기준원. 본 문서의 저작권은 한국회계기준원에 있으며, 조항 원문 확인 용도로만
-          제공됩니다.
-        </p>
+            <details className="side-panel-source">
+              <summary>인용된 본문 텍스트</summary>
+              <MarkdownContent>{citation.content}</MarkdownContent>
+            </details>
+          </>
+        )}
       </div>
-    </div>
+      {/* 6/14 회의 결정: 한국회계기준원 저작권 표기. PDF 표시 여부(available)와 무관하게 패널을 열면 항상 노출한다 */}
+      <p className="viewer-copyright">
+        ⓒ 한국회계기준원. 본 문서의 저작권은 한국회계기준원에 있으며, 조항 원문 확인 용도로만
+        제공됩니다.
+      </p>
+    </aside>
   );
 }
 
@@ -545,36 +529,38 @@ function MarkdownContent({ children }: { children: string }) {
   );
 }
 
-/** 조항 본문 — 접힘(첫 문단 발췌) ⇄ 펼침(전문 마크다운 렌더).
- *  전문을 카드에서 빼지 않는 이유: BYO 환경에서는 PDF가 없어 DB content가 유일한 근거다. */
-function ClauseContent({ content }: { content: string }) {
-  const [open, setOpen] = useState(false);
-  if (open) {
-    return (
-      <div className="clause-expand">
-        <MarkdownContent>{content}</MarkdownContent>
-        <button type="button" className="more-btn" onClick={() => setOpen(false)}>
-          ▴ 접기
-        </button>
-      </div>
-    );
-  }
-  const excerpt = excerptOf(content);
+/** 답변 본문 — 인용 마커([1])를 실제 조항 번호((18.9))로 바꿔 클릭 가능하게 렌더한다. */
+function AnswerBody({
+  answer,
+  citations,
+  onOpenRef,
+}: {
+  answer: string;
+  citations: CitationOut[];
+  onOpenRef: (citationIndex: number) => void;
+}) {
   return (
-    <div className="clause-expand">
-      {excerpt.kind === "text" && <p className="clause-excerpt">{excerpt.text}</p>}
-      {excerpt.kind === "table-only" && (
-        <p className="clause-excerpt is-table-note">표 형태의 조항입니다 — 펼치면 표로 보입니다.</p>
+    <p className="answer-text">
+      {answerSegments(answer, citations).map((s, i) =>
+        s.kind === "text" ? (
+          <span key={i}>{s.text}</span>
+        ) : (
+          <button
+            key={i}
+            type="button"
+            className="answer-ref"
+            onClick={() => onOpenRef(s.citationIndex)}
+          >
+            {s.label}
+          </button>
+        ),
       )}
-      <button type="button" className="more-btn" onClick={() => setOpen(true)}>
-        ▾ 더보기
-      </button>
-    </div>
+    </p>
   );
 }
 
 function Result({ response }: { response: QueryDoneResponse }) {
-  const [viewer, setViewer] = useState<ViewerTarget | null>(null);
+  const [panel, setPanel] = useState<CitationOut | null>(null);
 
   // 타임아웃 폴백은 조항·답변·인용이 모두 비어 있으므로 안내만 간결하게 보여준다.
   if (response.error_code === "TIMEOUT") {
@@ -622,88 +608,21 @@ function Result({ response }: { response: QueryDoneResponse }) {
         </span>
       </div>
 
-      {/* NFR-002: 조항 검색이 1순위이므로 답변보다 먼저 노출한다. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div className="section-head">
-          <h3 className="section-title">
-            검색된 조항 <span className="accent">상위 {response.clauses.length}건</span>
-          </h3>
-          <span className="section-note">답변은 아래 조항을 근거로 생성됩니다</span>
-        </div>
-        {response.clauses.length === 0 ? (
-          <p className="muted">검색된 조항 없음</p>
-        ) : (
-          <div className="clause-list">
-            {response.clauses.map((c) => {
-              const title = humanNodeTitle(c.node_id, c.document_id);
-              return (
-                <article key={c.rank} className="clause-card">
-                  <div className={`clause-rank r${Math.min(c.rank, 3)}`}>
-                    <span className="num">{String(c.rank).padStart(2, "0")}</span>
-                    <span className="score">{c.score.toFixed(3)}</span>
-                  </div>
-                  <div className="clause-body">
-                    <div className="clause-title-row">
-                      <span className="clause-title">
-                        제{c.chapter}장{title && ` · ${title}`}
-                      </span>
-                      <PageButton
-                        documentId={c.document_id}
-                        pageStart={c.page_start}
-                        pageEnd={c.page_end}
-                        onOpen={setViewer}
-                      />
-                    </div>
-                    <ParaChips paras={c.paras} />
-                    <ClauseContent content={c.content} />
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
+      {/* 답변 중심 레이아웃(7/25 결정) — 검색 조항·인용 목록 섹션 없이 답변만 보여주고,
+          근거 확인은 답변 속 조항 번호 클릭 → 사이드 패널(PDF 또는 본문)로 연결한다. */}
       <div className="answer-block">
         <h3 className="section-title">답변</h3>
-        <p className="answer-text">{response.answer}</p>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div className="section-head">
-          <h3 className="section-title">
-            인용 <span className="accent">{response.citations.length}건</span>
-          </h3>
-        </div>
-        {response.citations.length === 0 ? (
-          <p className="muted">인용 없음</p>
-        ) : (
-          <div className="cite-list">
-            {response.citations.map((c, i) => (
-              <details key={c.chunk_id} className="cite-card">
-                <summary>
-                  <strong>[{i + 1}]</strong>
-                  {/* 검색된 조항 카드와 같은 표기(제목·칩) — 두 목록에서 같은 조항이 같은 모양으로 보인다 */}
-                  {c.document_id} · {humanNodeTitle(c.chunk_id, c.document_id) || c.chunk_id}
-                  <ParaChips paras={c.paras} />
-                  <span className="rel">관련도 {c.relevance_score.toFixed(2)}</span>
-                  <PageButton
-                    documentId={c.document_id}
-                    pageStart={c.page_start}
-                    pageEnd={c.page_end}
-                    onOpen={setViewer}
-                  />
-                </summary>
-                <div className="cite-content">
-                  <MarkdownContent>{c.content}</MarkdownContent>
-                </div>
-              </details>
-            ))}
-          </div>
+        <AnswerBody
+          answer={response.answer}
+          citations={response.citations}
+          onOpenRef={(i) => setPanel(response.citations[i])}
+        />
+        {response.citations.length > 0 && (
+          <p className="answer-refs-note">답변 속 조항 번호를 누르면 원문을 확인할 수 있습니다.</p>
         )}
       </div>
 
-      {viewer && <PdfViewerModal target={viewer} onClose={() => setViewer(null)} />}
+      {panel && <CitationPanel citation={panel} onClose={() => setPanel(null)} />}
     </section>
   );
 }
