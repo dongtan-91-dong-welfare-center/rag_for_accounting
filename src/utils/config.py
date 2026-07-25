@@ -37,10 +37,15 @@ OPENAI_MODEL: str = "gpt-5.4-mini"   # FUNC-007, 008, 009: LLM 모델 식별자
 
 # 하이브리드 검색 병합 및 배치 설정
 # Dense/Sparse 결과를 RRF(Reciprocal Rank Fusion)로 병합한다.
-# 점수가 아닌 순위 기반이므로 가중치 튜닝 없이 분포가 다른 두 검색을 안정적으로 결합한다.
+# 점수가 아닌 순위 기반이므로 점수 분포가 다른 두 검색을 정규화 없이 결합할 수 있다.
 # RRF_K가 클수록 상위 순위 간 점수 격차가 완만해지며, 60은 원 논문 권장 기본값이다.
 RRF_K: int = 60                # FUNC-005: RRF 순위 평활 상수
 BATCH_SIZE: int = 100          # 인덱싱 배치 크기
+
+# Sparse 리스트에 줄 RRF 가중치 (dense=1.0 고정). 1.0이면 대칭 RRF다.
+# 순위 기반 병합이어도 "양쪽 리스트에 모두 있는 청크"는 점수가 합산되므로, sparse를 켜면 dense 단독 1위가 청크에 밀리는 회귀가 생긴다 — 이 가중이 그 합산을 억제한다.
+# 0.1은 실측 채택 수치다(#261): 가중을 1.0→0.1로 낮출수록 순증−회귀가 −9→+5로 단조 개선했고, 0.1에서 sparse 단독 청크는 dense top-10을 밀어내지 못해(0.1/61 < 1/70) dense 후보를 키워드 근거로 재정렬하는 신호로만 작동한다.
+SPARSE_FUSION_WEIGHT: float = _env_float("SPARSE_FUSION_WEIGHT", 0.1)
 
 # 검색 타임아웃 (초) — pgvector 쿼리가 이 시간을 초과하면 SearchTimeoutError(SE-101) 발생
 SEARCH_TIMEOUT_SECONDS: int = 5
@@ -82,6 +87,26 @@ MAX_CONTEXT_TOKENS: int = 270000
 
 # 검색 대상 테이블명 — RetrievedChunk 스키마와 컬럼명을 통일
 CHUNKS_TABLE: str = "chunks"
+
+# ── Sparse 형태소 토큰화 ──
+# 현행 sparse는 to_tsvector('simple', …)가 띄어쓰기로만 잘라 조사를 못 떼므로 문장형 질의에서 전 케이스 0건을 반환한다
+# 하이브리드가 사실상 dense 단독으로 동작한 원인이다.
+# 형태소로 사전토큰화한 텍스트를 따로 저장해 이 간극을 메운다. 
+# 적재와 검색이 tokenizer.morph_text()를 공유하므로 색인 토큰과 질의 토큰이 구조적으로 어긋나지 않는다
+# (embedding.embed_texts()를 공유해 모델·차원을 고정하는 것과 같은 규약).
+#
+# 품사 화이트리스트 — 남길 형태소 태그. ts_rank_cd에는 IDF가 없어 흔한 형태소가 자동 감쇠되지 않으므로, 저IDF 노이즈를 걷어내는 수단이 이 필터뿐이다(오프라인 BM25와 다른 점).
+#   CORE : 순수 명사류. NNG 일반명사 · NNP 고유명사 · SL 외국어 · SN 숫자 · SH 한자
+#   WIDE : CORE + 어근·접사. XR 어근("환입액"의 "환") · XSN 명사파생접미사 · XPN 체언접두사
+# 과분할된 복합어("환입액"→환/입/액)의 신호를 살리려면 WIDE가 필요할 수 있어 실측으로 가른다.
+# 길이 필터(1글자 버리기)는 넣지 않는다.
+MORPH_POS_TAGS_CORE: tuple[str, ...] = ("NNG", "NNP", "SL", "SN", "SH")
+MORPH_POS_TAGS_WIDE: tuple[str, ...] = MORPH_POS_TAGS_CORE + ("XR", "XSN", "XPN")
+MORPH_POS_TAGS: tuple[str, ...] = MORPH_POS_TAGS_CORE   # 운영 확정 — #261 실측에서 CORE(46) > WIDE(44)
+
+# 형태소 사전토큰화 컬럼을 담은 측정용 그림자 테이블 — scripts/build_morph_shadow.py가 만든다.
+# 운영 chunks를 건드리지 않고 배포 후보 셀을 재는 격리 지점(sparse_search의 collection 주입점과 같은 용도).
+MORPH_CHUNKS_TABLE: str = os.getenv("MORPH_CHUNKS_TABLE", "chunks_morph")
 
 # API 서버(src/api/server.py) CORS 허용 origin — React dev 서버(Vite 기본 5173) 브라우저 호출용.
 # 배포 origin이 다르면 콤마 구분 env로 override 한다(예: API_CORS_ORIGINS=https://rag.example.com).
