@@ -42,6 +42,11 @@ OPENAI_MODEL: str = "gpt-5.4-mini"   # FUNC-007, 008, 009: LLM 모델 식별자
 RRF_K: int = 60                # FUNC-005: RRF 순위 평활 상수
 BATCH_SIZE: int = 100          # 인덱싱 배치 크기
 
+# Sparse 리스트에 줄 RRF 가중치 (dense=1.0 고정). 1.0이면 대칭 RRF다.
+# 순위 기반 병합이어도 "양쪽 리스트에 모두 있는 청크"는 점수가 합산되므로, sparse를 켜면 dense 단독 1위가 청크에 밀리는 회귀가 생긴다 — 이 가중이 그 합산을 억제한다.
+# 0.1은 실측 채택 수치다(#261): 가중을 1.0→0.1로 낮출수록 순증−회귀가 −9→+5로 단조 개선했고, 0.1에서 sparse 단독 청크는 dense top-10을 밀어내지 못해(0.1/61 < 1/70) dense 후보를 키워드 근거로 재정렬하는 신호로만 작동한다.
+SPARSE_FUSION_WEIGHT: float = _env_float("SPARSE_FUSION_WEIGHT", 0.1)
+
 # 검색 타임아웃 (초) — pgvector 쿼리가 이 시간을 초과하면 SearchTimeoutError(SE-101) 발생
 SEARCH_TIMEOUT_SECONDS: int = 5
 

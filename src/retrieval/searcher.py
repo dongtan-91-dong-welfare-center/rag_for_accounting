@@ -9,7 +9,8 @@ from src.utils.config import (
     RRF_K,
     CHUNKS_TABLE,
     SEARCH_TIMEOUT_SECONDS,
-    EMBEDDING_MODEL
+    EMBEDDING_MODEL,
+    SPARSE_FUSION_WEIGHT
 )
 from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError
 from src.clients.embedding import embed_texts
