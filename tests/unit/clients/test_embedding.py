@@ -10,6 +10,10 @@
 
 torch/SentenceTransformer는 mock으로 차단해 실제 모델 로드 없이 논리만 검증한다.
 """
+import sys
+import types
+from contextlib import contextmanager
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -17,6 +21,34 @@ import numpy as np
 
 from src.utils.config import EMBEDDING_DIM, EMBEDDING_ENCODE_BATCH_SIZE
 from src.utils.exception import LLMAPIConnectionError
+
+
+@contextmanager
+def _fake_torch(*, cuda: bool, mps: bool):
+    """
+    torch 자리에, 가속기 가용성만 답하는 가짜 모듈을 끼워 넣는다.
+
+    왜 필요한가:
+        torch는 선택 의존성(optional dependency: `uv sync --extra local-embedding`으로만 설치되는 무거운 패키지)이다. 
+        기본 개발 환경·운영 이미지에는 없다.
+        그래서 실물 torch를 `patch("torch.cuda.is_available")`처럼 문자열 경로로 가리키면, patch가 대상을 찾으려 torch를 import하다 ModuleNotFoundError로 죽는다.
+        검증하려는 것은 "가용성 → 디바이스" 우선순위 논리뿐이므로, 가짜 모듈로 충분하다.
+
+    어떻게 동작하는가:
+        _resolve_device()는 함수 안에서 `import torch`를 한다(지연 임포트). import 문은
+        sys.modules를 먼저 보므로, 그 자리에 가짜를 넣어두면 실제 설치 여부와 무관하게
+        가짜가 잡힌다.
+
+    예: _fake_torch(cuda=False, mps=True) 안에서 _resolve_device("auto") → "mps"
+    """
+    fake = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: cuda),
+        backends=types.SimpleNamespace(
+            mps=types.SimpleNamespace(is_available=lambda: mps),
+        ),
+    )
+    with patch.dict(sys.modules, {"torch": fake}):
+        yield
 
 
 @pytest.mark.unit
@@ -35,24 +67,21 @@ class TestResolveDevice:
         """auto: CUDA가 가용하면 cuda를 고른다 (최우선)"""
         from src.clients.embedding import _resolve_device
 
-        with patch("torch.cuda.is_available", return_value=True), \
-             patch("torch.backends.mps.is_available", return_value=True):
+        with _fake_torch(cuda=True, mps=True):
             assert _resolve_device("auto") == "cuda"
 
     def test_auto_falls_back_to_mps(self):
         """auto: CUDA가 없고 MPS만 가용하면 mps를 고른다"""
         from src.clients.embedding import _resolve_device
 
-        with patch("torch.cuda.is_available", return_value=False), \
-             patch("torch.backends.mps.is_available", return_value=True):
+        with _fake_torch(cuda=False, mps=True):
             assert _resolve_device("auto") == "mps"
 
     def test_auto_falls_back_to_cpu(self):
         """auto: 가속기가 없으면 cpu (Docker on Mac 컨테이너 경로)"""
         from src.clients.embedding import _resolve_device
 
-        with patch("torch.cuda.is_available", return_value=False), \
-             patch("torch.backends.mps.is_available", return_value=False):
+        with _fake_torch(cuda=False, mps=False):
             assert _resolve_device("auto") == "cpu"
 
 
