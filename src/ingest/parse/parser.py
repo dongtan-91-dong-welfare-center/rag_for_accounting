@@ -15,10 +15,21 @@ Docling이란?
     - Docling을 감싸서(wrapping) 우리 프로젝트에 맞는 인터페이스를 제공합니다.
     - PDF에서 마크다운 텍스트와 표 데이터를 추출하여 ParsedDocument로 반환합니다.
 """
+from __future__ import annotations
+
 import html
 from pathlib import Path
+from typing import TYPE_CHECKING
+
 from src.ingest.parse.parser_dtos import ParsedDocument, _PAGE_TOP_THRESHOLD, _PAGE_BOT_THRESHOLD
-from docling.document_converter import DocumentConverter
+
+# docling은 선택 의존성이다 — `uv sync --extra ingest`로만 설치되고, 운영 이미지·기본 개발 환경에는 없다(용량이 커서 파싱을 실제로 돌리는 환경에만 넣는다).
+# 그래서 모듈 최상단이 아니라 실제로 converter를 만드는 _get_converter()에서 import한다.
+# 이렇게 해두면 파싱 스택이 없는 환경에서도 이 모듈을 import해 DoclingParser를 만들거나 table_to_text() 같은 순수 로직을 쓸 수 있다.
+# 최상단 import였을 때는 모듈을 불러오기만 해도 ModuleNotFoundError가 났다.
+# 타입 표기에 쓰는 이름은 TYPE_CHECKING 블록에서만 가져온다. 이 블록은 pyright 같은 타입 검사기만 읽고 실행 시점에는 건너뛴다.
+if TYPE_CHECKING:
+    from docling.document_converter import DocumentConverter
 
 
 class DoclingParser:
@@ -89,6 +100,7 @@ class DoclingParser:
                 )
             else:
                 # 기본 설정: Docling이 제공하는 기본 DocumentConverter 사용
+                from docling.document_converter import DocumentConverter
                 self._converter = DocumentConverter()
         return self._converter
 
