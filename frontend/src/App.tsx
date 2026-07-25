@@ -69,6 +69,8 @@ export default function App() {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [pending, setPending] = useState<Pending | null>(null);
+  // 패널이 열리면 그리드에 컬럼을 추가해 본문 너비를 줄여야 하는데(본문을 가리지 않기 위해), 그 판단은 최상위 레이아웃의 몫이다.
+  const [citationPanel, setCitationPanel] = useState<CitationOut | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const busy = stage.kind === "loading" || stage.kind === "interrupted";
@@ -138,6 +140,7 @@ export default function App() {
     setStage({ kind: "idle" });
     setQuery("");
     setFeedback("");
+    setCitationPanel(null);
   };
 
   const dismissError = () => {
@@ -147,7 +150,7 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app${citationPanel ? " with-panel" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-name">K-Accounting</span>
@@ -181,9 +184,6 @@ export default function App() {
             </button>
           )}
         </div>
-        <div className="sidebar-foot">
-          답변은 검색된 기준서 조항을 근거로 생성됩니다. 최종 판단 전 원문 확인을 권장합니다.
-        </div>
       </aside>
 
       <main className="main">
@@ -204,7 +204,7 @@ export default function App() {
           )}
 
           {exchanges.map((x, i) => (
-            <ExchangeBlock key={i} index={i} exchange={x} />
+            <ExchangeBlock key={i} index={i} exchange={x} onOpenCitation={setCitationPanel} />
           ))}
 
           {pending && (
@@ -274,6 +274,10 @@ export default function App() {
           </p>
         </div>
       </main>
+
+      {citationPanel && (
+        <CitationPanel citation={citationPanel} onClose={() => setCitationPanel(null)} />
+      )}
     </div>
   );
 }
@@ -303,7 +307,15 @@ function QueryBlock({
   );
 }
 
-function ExchangeBlock({ index, exchange }: { index: number; exchange: Exchange }) {
+function ExchangeBlock({
+  index,
+  exchange,
+  onOpenCitation,
+}: {
+  index: number;
+  exchange: Exchange;
+  onOpenCitation: (c: CitationOut) => void;
+}) {
   return (
     <div id={`exchange-${index}`} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <QueryBlock index={index} query={exchange.query} standard={exchange.standard} time={exchange.time} />
@@ -319,7 +331,7 @@ function ExchangeBlock({ index, exchange }: { index: number; exchange: Exchange 
           </p>
         </div>
       )}
-      <Result response={exchange.response} />
+      <Result response={exchange.response} onOpenCitation={onOpenCitation} />
     </div>
   );
 }
@@ -559,8 +571,13 @@ function AnswerBody({
   );
 }
 
-function Result({ response }: { response: QueryDoneResponse }) {
-  const [panel, setPanel] = useState<CitationOut | null>(null);
+function Result({
+  response,
+  onOpenCitation,
+}: {
+  response: QueryDoneResponse;
+  onOpenCitation: (c: CitationOut) => void;
+}) {
 
   // 타임아웃 폴백은 조항·답변·인용이 모두 비어 있으므로 안내만 간결하게 보여준다.
   if (response.error_code === "TIMEOUT") {
@@ -615,14 +632,9 @@ function Result({ response }: { response: QueryDoneResponse }) {
         <AnswerBody
           answer={response.answer}
           citations={response.citations}
-          onOpenRef={(i) => setPanel(response.citations[i])}
+          onOpenRef={(i) => onOpenCitation(response.citations[i])}
         />
-        {response.citations.length > 0 && (
-          <p className="answer-refs-note">답변 속 조항 번호를 누르면 원문을 확인할 수 있습니다.</p>
-        )}
       </div>
-
-      {panel && <CitationPanel citation={panel} onClose={() => setPanel(null)} />}
     </section>
   );
 }
