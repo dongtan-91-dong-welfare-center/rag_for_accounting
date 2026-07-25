@@ -1,7 +1,7 @@
 [project]
 name = "rag-for-accounting"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "회계기준(K-GAAP) 조항을 근거 인용과 함께 답하는 한국어 RAG 시스템"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
