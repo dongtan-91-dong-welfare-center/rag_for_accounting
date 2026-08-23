@@ -64,7 +64,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data/raw:/app/data/raw:ro
+      - ./data/raw_data:/app/data/raw_data:ro
       - hf_cache:/app/hf_cache   # 리랭커 모델 재생성 시 재다운로드 방지
     depends_on:
       database:
