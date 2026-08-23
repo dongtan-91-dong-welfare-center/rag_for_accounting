@@ -93,6 +93,36 @@ class TestDoneResponse:
         c = res.citations[0]
         assert (c.document_id, c.chunk_id, c.relevance_score) == ("gaap-ch7", "c1", 0.83)
 
+    def test_clause_and_citation_paras_exposed(self):
+        """
+        clauses[]·citations[] 모두 문단번호 목록(paras)을 노출한다.
+
+        화면의 두 목록(검색된 조항·답변 인용)이 같은 조항을 다른 모양으로 보여주지 않도록, 번호 추출은 서버 공용 규칙 한 곳에서 하고 프론트는 소비만 한다.
+        """
+        result = _done_result(
+            reranked_chunks=[
+                _rr("gaap-ch6-s1-최초인식", 0.9, content="#### 6.13\n...\n#### 6.14\n..."),
+                _rr("gaap-ch2-실2.11", 0.8, content="차익, 차손 등은 총액으로..."),
+            ],
+            final_response=FinalResponse(
+                answer="…",
+                citations=[
+                    Citation(
+                        document_id="gaap-ch2",
+                        chunk_id="gaap-ch2-실2.11",
+                        content="차익, 차손 등은 총액으로...",
+                        relevance_score=0.8,
+                    )
+                ],
+                is_answerable=True,
+                confidence_score=0.9,
+            ),
+        )
+        res = to_api_response(result)
+        assert res.clauses[0].paras == ["6.13", "6.14"]
+        assert res.clauses[1].paras == ["실2.11"]
+        assert res.citations[0].paras == ["실2.11"]
+
     def test_empty_reranked_chunks_yield_empty_clauses(self):
         """폴백·조기종료 결과처럼 reranked_chunks가 비어도 안전하게 빈 리스트"""
         res = to_api_response(_done_result(reranked_chunks=[]))

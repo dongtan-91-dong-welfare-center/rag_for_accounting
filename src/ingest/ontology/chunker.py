@@ -24,6 +24,7 @@ from collections.abc import Callable
 
 from src.ingest.ontology.models import OntologyGraph
 from src.models.schemas import ChunkMetadata, RetrievedChunk
+from src.utils.clause_paras import clause_header_re
 from src.utils.config import CHUNK_MAX_TOKENS
 from src.clients.embedding import count_tokens
 from src.utils.exception import OntologyParsingError
@@ -35,8 +36,10 @@ logger = get_logger(__name__)
 _SENTENCE_RE = re.compile(r"(?<=[.。!?！？])\s+")
 
 # 조항 헤더 경계 분할용 — "#### 21.8", "#### 2.6.5", "#### 21.5의2"를 줄 시작에서 잡는다.
-# 채점기(tests/utils/benchmark_metrics._CHUNK_PARA_RE)와 동일 본체라 분할 경계와 채점 기준이 일치한다.
-_CLAUSE_HEADER_RE = re.compile(r"^####\s+\d+\.\d+(?:\.\d+)?(?:의\d+)?", re.MULTILINE)
+# 공용 규칙(clause_paras)에서 생성하되 현행 의미(H4·숫자 전용)를 고정한다 — 접두(실·결·소)나
+# H5까지 경계로 넓히면 다음 재적재부터 청크 구성이 달라져 검색 회귀 검증과 벤치마크 플로어
+# 재시드가 필요해진다. 경계 확장은 별도 이슈에서 A/B 실측으로 판단한다.
+_CLAUSE_HEADER_RE = clause_header_re(levels=(4, 4), prefixes=())
 
 
 def _greedy_pack(units: list[str], sep: str, max_tokens: int, count: Callable[[str], int]) -> list[str]:

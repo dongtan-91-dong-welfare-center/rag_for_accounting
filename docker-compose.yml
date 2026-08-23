@@ -23,11 +23,24 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
     platform: linux/amd64
     container_name: accounting_embedding
-    command: ["--model-id", "nlpai-lab/KURE-v1"]
+    # --max-batch-tokens: 웜업·배치 추론의 토큰 상한. 기본값(16384)은 기동 웜업에서 그 크기의
+    # 더미 배치를 돌려 CPU(amd64 에뮬레이션) 환경에서 OOM으로 죽는다(exit 137 실측).
+    # 모델 최대 입력 길이(8192)보다 낮추려면 --auto-truncate(조용한 절단)가 필요한데, 그러면
+    # 적재 쪽 토큰 상한 규약(IX-201, 8192)과 어긋나므로 절단 없이 8192로만 낮춘다.
+    # 질의 임베딩은 1건씩이라 서빙 성능에는 영향이 없다.
+    command: ["--model-id", "nlpai-lab/KURE-v1", "--max-batch-tokens", "8192"]
     ports:
       - "8080:80"
     volumes:
       - tei_cache:/data
+    # 웜업(CPU에서 약 2분)이 끝나야 /health가 열린다. 
+    # 이 체크가 없으면 app이 먼저 떠서 웜업 동안 들어온 질의가 임베딩 실패(Connection refused)로 "근거 부족" 응답을 만든다.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
     restart: unless-stopped
 
   app:
@@ -51,13 +64,15 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data/raw:/app/data/raw:ro
+      - ./data/raw_data:/app/data/raw_data:ro
       - hf_cache:/app/hf_cache   # 리랭커 모델 재생성 시 재다운로드 방지
     depends_on:
       database:
         condition: service_healthy
+      # service_healthy: TEI 웜업 완료 후에 app을 띄운다
+      # 웜업 중 질의가 임베딩 실패로 흐르는 순서 문제를 compose 수준에서 차단한다.
       embedding:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

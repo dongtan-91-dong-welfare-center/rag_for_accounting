@@ -1,6 +1,6 @@
 # 프로젝트 Docker 환경 구성 및 검증 가이드
 
-> **한 줄 요약(BLUF):** Docker Compose는 `database`(pgvector), `embedding`(KURE-v1 TEI), `app`(FastAPI + React)을 한 번에 띄운다. 일반 사용자는 `./install.sh`로 설치·기동하고 `./check.sh`로 상태를 확인하면 된다.
+> Docker Compose는 `database`(pgvector), `embedding`(KURE-v1 TEI), `app`(FastAPI + React)을 한 번에 띄운다. 일반 사용자는 `./install.sh`로 설치·기동하고 `./check.sh`로 상태를 확인하면 된다.
 
 ## 1. 개요 및 목적
 

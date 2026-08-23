@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from src.agent.interrupts import extract_interrupt_payload, is_interrupt
 from src.ui.clauses import build_clause_rows
+from src.utils.clause_paras import chunk_paras
 
 
 class ClauseOut(BaseModel):
@@ -32,6 +33,7 @@ class ClauseOut(BaseModel):
     document_id: str = ""          # 뷰어가 GET /documents/{document_id}/pdf를 여는 데 사용(#196)
     page_start: int | None = None  # 원본 PDF 페이지 범위(#196) — 미백필/미매칭이면 None(뷰어 버튼 미표시)
     page_end: int | None = None
+    paras: list[str] = []          # 문단번호 칩(#260) — 공용 규칙(clause_paras) 추출, 원형 보존
 
 
 class CitationOut(BaseModel):
@@ -43,6 +45,9 @@ class CitationOut(BaseModel):
     relevance_score: float
     page_start: int | None = None  # chunk_id로 reranked_chunks metadata를 조회해 결합(#196)
     page_end: int | None = None
+    # 문단번호 칩 — 검색 조항 목록과 같은 규칙으로 뽑아야 화면의 두 목록에서 같은 조항이 같은 모양으로 보인다.
+    # Citation 스키마 불변 원칙에 따라 여기서 파생한다.
+    paras: list[str] = []
 
 
 class InterruptOption(BaseModel):
@@ -138,6 +143,7 @@ def to_api_response(result: dict) -> WorkflowResponse:
                 relevance_score=c.relevance_score,
                 page_start=pages_by_chunk.get(c.chunk_id, (None, None))[0],
                 page_end=pages_by_chunk.get(c.chunk_id, (None, None))[1],
+                paras=chunk_paras(c.content, c.chunk_id),
             )
             for c in response.citations
         ],

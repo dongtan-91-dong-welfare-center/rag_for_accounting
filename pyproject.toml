@@ -1,7 +1,7 @@
 [project]
 name = "rag-for-accounting"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "회계기준(K-GAAP) 조항을 근거 인용과 함께 답하는 한국어 RAG 시스템"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -21,6 +21,8 @@ dependencies = [
     "httpx>=0.27.0",
     # MCP 서버(src/mcp_server/server.py) — RAG 질의를 MCP 도구로 노출
     "fastmcp>=3.4.0",
+    # 형태소 토큰화 — sparse 검색이 질의를, 색인이 본문을 같은 함수로 쪼갠다. 검색이 운영 핵심 경로라 dev 그룹이 아닌 본 의존성이다.
+    "kiwipiepy>=0.23.2",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +46,6 @@ reranker = [
 # reranker·ingest·local-embedding 등 무거운 스택은 해당 --extra를 명시한 환경에서만 설치한다.
 [dependency-groups]
 dev = [
-    "kiwipiepy>=0.23.2",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
     "rank-bm25>=0.2.2",

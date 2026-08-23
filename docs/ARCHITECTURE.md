@@ -115,7 +115,7 @@ rewrite
 | 임베딩 서빙 | Docker TEI 컨테이너(`embedding`) 또는 프로세스 내 로드 |
 | LLM 모델 | `OPENAI_MODEL` 설정값 |
 
-원문 PDF는 저작권 문제로 저장소에 포함하지 않는다. `PDF_DIR` 기본값은 `data/raw_data`이며, API의 PDF 서빙은 `resolve_pdf_path(document_id, PDF_DIR)` 규칙을 따른다.
+원문 PDF는 저장소에 포함하지 않는다. 원문은 배포 주체인 한국회계기준원에서 각자 받는 것을 원칙으로 하고, 파싱·청킹 결과처럼 팀이 가공한 데이터는 팀 작업물 보호 방침에 따라 공개하지 않는다. `PDF_DIR` 기본값은 `data/raw_data`이며, API의 PDF 서빙은 `resolve_pdf_path(document_id, PDF_DIR)` 규칙을 따른다.
 
 ## 8. 배포/개발 형태
 

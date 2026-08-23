@@ -96,6 +96,23 @@ class TestIndexDocuments:
         assert "ON CONFLICT" in query_obj.as_string(None)
         assert len(params) == 2     # 청크 2건 모두 파라미터로 전달
 
+    def test_upsert_fills_content_morph(self, mock_db_pool, mock_embedding):
+        """
+        upsert가 content_morph(형태소 사본)를 함께 저장하는지 검증 — 비면 그 청크는 sparse 검색에서 빠진다.
+
+        값은 검색 쪽 질의 토큰화와 같은 함수의 출력이어야 한다
+        색인과 질의가 다른 토큰화를 타면 매칭이 조용히 깨진다.
+        """
+        from src.db.vector_store import index_documents
+        from src.retrieval.tokenizer import morph_text
+
+        chunks = make_chunks(1)
+        index_documents(chunks, collection="test_collection")
+
+        query_obj, params = mock_db_pool.executemany.call_args[0]
+        assert "content_morph" in query_obj.as_string(None)
+        assert params[0][-1] == morph_text(chunks[0].content)
+
     def test_batch_split_by_batch_size(self, mock_db_pool, mock_embedding):
         """BATCH_SIZE를 초과하는 입력이 배치로 나뉘어 처리되는지 검증"""
         from src.db.vector_store import index_documents

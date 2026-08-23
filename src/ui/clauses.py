@@ -5,9 +5,10 @@ NFR-002: 조항 검색이 1순위, LLM 답변은 참고용 — app.py는 이 모
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.models.schemas import RerankingResult
+from src.utils.clause_paras import chunk_paras
 
 DEFAULT_TOP_N = 5
 
@@ -24,6 +25,10 @@ class ClauseRow:
     document_id: str = ""          # 원문 문서 식별자(chunk.document_id) — 뷰어의 PDF 서빙 경로에 사용(#196)
     page_start: int | None = None  # 원본 PDF 페이지 범위(#196 백필 metadata) — 미백필/미매칭이면 None
     page_end: int | None = None
+    # 문단번호 목록
+    # 공용 규칙이 content 헤더 ∪ chunk_id에서 원형 그대로(가지번호 유지) 뽑는다.
+    # 용어 정의처럼 번호가 본래 없는 청크는 빈 목록.
+    paras: list[str] = field(default_factory=list)
 
 
 def build_clause_rows(
@@ -56,6 +61,7 @@ def build_clause_rows(
                 document_id=chunk.document_id,
                 page_start=extra.get("page_start"),
                 page_end=extra.get("page_end"),
+                paras=chunk_paras(chunk.content, chunk.chunk_id),
             )
         )
     return rows
