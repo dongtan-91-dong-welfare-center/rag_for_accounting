@@ -18,7 +18,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_float(name: str, default: float) -> float:
-    """환경변수를 float로 파싱한다. 미설정이면 기본값, 숫자가 아니면 ValueError(fail-fast)."""
+    """환경변수를 float로 파싱한다. 미설정이면 기본값, 숫자가 아니면 ValueError"""
     value = os.getenv(name)
     return default if value is None else float(value)
 
@@ -47,14 +47,36 @@ BATCH_SIZE: int = 100          # 인덱싱 배치 크기
 # 0.1은 실측 채택 수치다(#261): 가중을 1.0→0.1로 낮출수록 순증−회귀가 −9→+5로 단조 개선했고, 0.1에서 sparse 단독 청크는 dense top-10을 밀어내지 못해(0.1/61 < 1/70) dense 후보를 키워드 근거로 재정렬하는 신호로만 작동한다.
 SPARSE_FUSION_WEIGHT: float = _env_float("SPARSE_FUSION_WEIGHT", 0.1)
 
-# 검색 타임아웃 (초) — pgvector 쿼리가 이 시간을 초과하면 SearchTimeoutError(SE-101) 발생
-SEARCH_TIMEOUT_SECONDS: int = 5
+# 타임아웃 SSoT 및 계층 구조
+# 시스템 전체 타임아웃 계층 원칙:
+#   Layer 1 (개별 I/O Fast-Fail): SEARCH_TIMEOUT_SECONDS (10s), DB_POOL_TIMEOUT_SECONDS (10s) < LLM_TIMEOUT_SECONDS (45s)
+#   Layer 2 (노드 워크플로우): GRAPH_STEP_TIMEOUT_SECONDS (60s)
+#   Layer 3 (서브시스템/서버): EMBEDDING_SERVER_TIMEOUT_SECONDS (120s)
+# 안쪽(개별 I/O) 타임아웃이 바깥쪽(LangGraph step_timeout)보다 짧아야 개별 에러(SE-101, SE-102, CM-002)가 명확히 포착되며,
+# 바깥쪽 step_timeout이 먼저 터져 고아 HTTP/DB 요청이 백그라운드에서 자원을 누수하는 현상을 차단합니다.
+# LangSmith/운영 실측 데이터 수집 전 정상적인 긴 답변 생성이 타임아웃되는 오발동을 막기 위해 여유 마진을 부여합니다.
+# !TODO 실측 후 타임아웃 세부 수치 조정 필요합니다.
 
-# 임베딩 모델 설정 — 이슈 #93에서 KURE-v1(자체호스팅, MIT 라이선스)로 확정
+# 검색 타임아웃 (초) — pgvector 쿼리가 이 시간을 초과하면 SearchTimeoutError(SE-101) 발생
+SEARCH_TIMEOUT_SECONDS: int = int(_env_float("SEARCH_TIMEOUT_SECONDS", 10.0))
+
+# DB 커넥션 풀 대기 타임아웃 (초)
+DB_POOL_TIMEOUT_SECONDS: float = _env_float("DB_POOL_TIMEOUT_SECONDS", 10.0)
+
+# OpenAI LLM API 요청 타임아웃 (초)
+LLM_TIMEOUT_SECONDS: float = _env_float("LLM_TIMEOUT_SECONDS", 45.0)
+
+# OpenAI SDK 차원 재시도 상한
+LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "1"))
+
+# LangGraph 노드 실행 타임아웃 (초)
+GRAPH_STEP_TIMEOUT_SECONDS: int = int(_env_float("GRAPH_STEP_TIMEOUT_SECONDS", 60.0))
+
+# 임베딩 모델 설정
 # 인덱싱(FUNC-003)과 검색(FUNC-005)이 src/clients/embedding.embed_texts()를 공유하므로
 # 모델·차원 불일치가 구조적으로 발생하지 않는다.
 EMBEDDING_MODEL: str = "nlpai-lab/KURE-v1"
-EMBEDDING_DIM: int = 1024   # KURE-v1(bge-m3 기반) 벡터 차원 수 → pgvector vector(1024)
+EMBEDDING_DIM: int = 1024   # KURE-v1 벡터 차원 수 → pgvector vector(1024)
 EMBEDDING_MAX_TOKENS: int = 8192    # KURE-v1 컨텍스트 한도 — 초과 청크는 IX-201로 스킵(부분 커밋)
 
 # 청킹 분할 상한 — 노드를 이 토큰 수 이하 조각으로 분할해 적재한다(chunk_graph 기본값).
