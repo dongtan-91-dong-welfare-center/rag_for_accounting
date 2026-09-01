@@ -16,7 +16,7 @@ from src.agent.nodes.evaluate import evaluate_context as evaluate
 from src.retrieval.searcher import search_chunks as _search_impl
 from src.retrieval.reranker import rerank_chunks as _rerank_impl
 from src.utils import config
-from src.utils.config import MAX_REWRITE_COUNT, MAX_HIL_COUNT, KST, TOP_K_RETRIEVAL
+from src.utils.config import MAX_REWRITE_COUNT, MAX_HIL_COUNT, KST, TOP_K_RETRIEVAL, GRAPH_STEP_TIMEOUT_SECONDS
 from src.utils.exception import (
     AccountingRAGError,
     RerankFailureError,
@@ -543,8 +543,8 @@ def run_workflow(
     """
     app = build_workflow(checkpointer=_CHECKPOINTER)
 
-    # 노드별 30초 타임아웃 설정 (LangGraph CompiledStateGraph 속성)
-    app.step_timeout = 30
+    # 노드별 타임아웃 설정 (LangGraph CompiledStateGraph 속성)
+    app.step_timeout = GRAPH_STEP_TIMEOUT_SECONDS
 
     if thread_id is None:
         thread_id = str(uuid.uuid4())
@@ -594,7 +594,7 @@ def resume_workflow(
     호출자가 run_workflow에 넘긴 값을 그대로 전달하면 한 케이스의 run/resume 트레이스가 동일 메타데이터를 공유한다.
     """
     app = build_workflow(checkpointer=_CHECKPOINTER)
-    app.step_timeout = 30
+    app.step_timeout = GRAPH_STEP_TIMEOUT_SECONDS
 
     try:
         result = app.invoke(Command(resume=resume_value), config=_run_config(thread_id, metadata))
