@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build and run the containerized stack:
+# 컨테이너화된 스택 빌드 및 실행:
 # - database: PostgreSQL + pgvector
-# - embedding: TEI serving nlpai-lab/KURE-v1
-# - app: FastAPI API + built React frontend on port 8000
+# - embedding: nlpai-lab/KURE-v1을 서빙하는 TEI
+# - app: FastAPI API + 빌드된 React 프론트엔드 (8000번 포트)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,34 +19,40 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+# 아래의 헬스 체크가 스택이 실제로 오픈한 주소를 바라보도록 .env에서 호스트 포트를 읽어옵니다.
+# 이 작업이 없으면, APP_HOST_PORT를 변경할 때 스택은 정상 동작하더라도 이 스크립트에서 실패로 보고하게 됩니다.
+set -a && source .env && set +a
+APP_URL="http://localhost:${APP_HOST_PORT:-8000}"
+EMBEDDING_URL="http://localhost:${EMBEDDING_HOST_PORT:-8080}"
+
 echo "[1/3] Building and starting containers"
 docker compose up -d --build
 
 echo "[2/3] Waiting for embedding and app servers"
 echo "Waiting for embedding server. First KURE-v1 download can take several minutes."
 for _ in $(seq 1 180); do
-  if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+  if curl -fsS "$EMBEDDING_URL/health" >/dev/null 2>&1; then
     break
   fi
   sleep 5
 done
-curl -fsS http://localhost:8080/health >/dev/null 2>&1 \
+curl -fsS "$EMBEDDING_URL/health" >/dev/null 2>&1 \
   || { echo "embedding server is not ready. Check: docker compose logs embedding" >&2; exit 1; }
 
 for _ in $(seq 1 60); do
-  if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+  if curl -fsS "$APP_URL/health" >/dev/null 2>&1; then
     break
   fi
   sleep 2
 done
-curl -fsS http://localhost:8000/health >/dev/null 2>&1 \
+curl -fsS "$APP_URL/health" >/dev/null 2>&1 \
   || { echo "app server is not ready. Check: docker compose logs app" >&2; exit 1; }
 
 echo "[3/3] Stack is running"
-echo "  App/API   : http://localhost:8000"
-echo "  API docs  : http://localhost:8000/docs"
-echo "  Embedding : http://localhost:8080"
-echo "  DB        : localhost:5432"
+echo "  App/API   : $APP_URL"
+echo "  API docs  : $APP_URL/docs"
+echo "  Embedding : $EMBEDDING_URL"
+echo "  DB        : localhost:${DB_HOST_PORT:-5432}"
 echo
 echo "Useful commands:"
 echo "  ./check.sh"
