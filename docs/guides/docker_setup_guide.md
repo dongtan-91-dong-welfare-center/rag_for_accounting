@@ -28,11 +28,21 @@ docker compose up --build -d
 
 서비스 구성은 다음과 같다.
 
-| 서비스 | 컨테이너 | 역할 | 포트 |
+| 서비스 | 컨테이너 | 역할 | 기본 공개 주소 |
 |---|---|---|---|
-| `database` | `accounting_db` | PostgreSQL + pgvector | `5432` |
-| `embedding` | `accounting_embedding` | KURE-v1 TEI 임베딩 서버 | `8080` |
-| `app` | `accounting_app` | FastAPI API + React 정적 파일 | `8000` |
+| `database` | `accounting_db` | PostgreSQL + pgvector | `127.0.0.1:5432` |
+| `embedding` | `accounting_embedding` | KURE-v1 TEI 임베딩 서버 | `127.0.0.1:8080` |
+| `app` | `accounting_app` | FastAPI API + React 정적 파일 | `127.0.0.1:8000` |
+
+세 서비스 모두 기본값이 루프백이다. 
+사설망의 다른 서버나 인터넷에서는 보이지 않는다.
+
+공개 범위를 바꿔야 하면 `docker-compose.yml`을 고치지 말고 `.env`에 값을 넣는다. 
+
+| 변수 | 기본값 | 언제 바꾸는가 |
+|---|---|---|
+| `APP_BIND_ADDR` · `DB_BIND_ADDR` · `EMBEDDING_BIND_ADDR` | `127.0.0.1` | 다른 장비에서 직접 접속해야 할 때 `0.0.0.0`으로 연다. 방화벽 규칙을 함께 확인한다. |
+| `APP_HOST_PORT` · `DB_HOST_PORT` · `EMBEDDING_HOST_PORT` | `8000` · `5432` · `8080` | 그 번호를 이미 다른 프로그램이 쓰거나, 클라우드 방화벽이 특정 번호만 허용할 때 바꾼다. |
 
 ### 2단계: 자동화된 인프라 환경 검증 테스트
 인프라 검증은 `tests/utils/infra_check.py`의 `check_docker_infrastructure()`에 위임되어 있습니다. `tests/integration/conftest.py`의 세션 픽스처가 **통합 테스트 진입 전 자동으로 실행**하여 Docker 데몬·컨테이너 구동·`pgvector` 확장 로드를 점검하고, 문제가 있으면 통합 테스트를 건너뜁니다.

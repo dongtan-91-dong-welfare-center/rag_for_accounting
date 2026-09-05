@@ -5,6 +5,13 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# 아래 체크들이 스택이 실제로 오픈한 DB 계정과 호스트 포트를 사용하도록 .env 파일을 읽어옵니다.
+# 이 과정이 없으면, 사용자가 POSTGRES_USER나 APP_HOST_PORT를 변경했을 때
+# 스택은 정상인데 이 스크립트에서만 실패로 보고되는 상황이 발생합니다.
+[ -f .env ] && { set -a && source .env && set +a; }
+APP_URL="http://localhost:${APP_HOST_PORT:-8000}"
+EMBEDDING_URL="http://localhost:${EMBEDDING_HOST_PORT:-8080}"
+
 FAIL=0
 pass() { printf "  [PASS] %s\n" "$1"; }
 fail() { printf "  [FAIL] %s\n" "$1"; FAIL=1; }
@@ -36,7 +43,7 @@ done
 
 echo "-- 4. Services"
 if docker compose exec -T database pg_isready -U "${POSTGRES_USER:-accounting_user}" >/dev/null 2>&1; then
-  pass "PostgreSQL responds on localhost:5432"
+  pass "PostgreSQL responds on localhost:${DB_HOST_PORT:-5432}"
   if docker compose exec -T database psql -U "${POSTGRES_USER:-accounting_user}" -d "${POSTGRES_DB:-accounting_db}" \
       -tAc "SELECT 1 FROM pg_available_extensions WHERE name='vector'" 2>/dev/null | grep -q 1; then
     pass "pgvector extension is available"
@@ -47,19 +54,19 @@ else
   fail "PostgreSQL is not ready"
 fi
 
-if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
-  pass "embedding server responds on localhost:8080"
+if curl -fsS "$EMBEDDING_URL/health" >/dev/null 2>&1; then
+  pass "embedding server responds on ${EMBEDDING_URL#http://}"
 else
   warn "embedding server is not healthy yet; first KURE-v1 download can take several minutes"
 fi
 
-if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
-  pass "app health endpoint responds on localhost:8000"
+if curl -fsS "$APP_URL/health" >/dev/null 2>&1; then
+  pass "app health endpoint responds on ${APP_URL#http://}"
 else
   fail "app health endpoint is not responding"
 fi
 
-if curl -fsS http://localhost:8000/ >/dev/null 2>&1; then
+if curl -fsS "$APP_URL/" >/dev/null 2>&1; then
   pass "React frontend is served by app container"
 else
   fail "React frontend is not served by app container"
