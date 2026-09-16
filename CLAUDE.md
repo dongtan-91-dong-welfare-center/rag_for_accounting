@@ -10,9 +10,9 @@
 ## 길찾기
 
 - **무엇을·어떻게** → [docs/README.md](docs/README.md) (결정트리·용어 사전)
-- **현행 아키텍처(단일 진실)** → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **현행 아키텍처(단일 진실)** → [docs/architecture/architecture_overview.md](docs/architecture/architecture_overview.md)
 - **설치·실행** → 루트 [README.md](README.md) · [docs/guides/](docs/guides/)
-- **왜 폐기됐나(GraphRAG/AGE)** → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) "변경 이력" 절 (상세 설계 문서는 삭제됐고, 이 표가 남은 기록의 전부다)
+- **왜 폐기됐나(GraphRAG/AGE)** → [docs/archive/README.md](docs/archive/README.md)
 
 ## 임계값·설정 SSoT
 
