@@ -203,7 +203,14 @@ def document_pdf(
     pdf_path = resolve_pdf_path(document_id, PDF_DIR)
     if pdf_path is None:
         raise HTTPException(status_code=404, detail=f"no pdf for document_id: {document_id}")
-    return FileResponse(pdf_path, media_type="application/pdf", filename=pdf_path.name)
+    # filename을 넘기면 Starlette이 표지를 attachment로 기본 설정해 뷰어 iframe이 PDF를 표시하지 못한다
+    # inline으로 명시해 화면 표시를 되살린다
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=pdf_path.name,
+        content_disposition_type="inline",
+    )
 
 
 @app.get("/favicon.svg")

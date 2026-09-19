@@ -11,9 +11,20 @@ DTO란?
     2. 리스트 마커(번호 매기기 기호)를 인식하기 위한 정규표현식 패턴
     3. ParsedDocument — 파싱 결과 DTO (정본은 src/models/schemas.py, 여기서 재노출)
 """
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from docling_core.types.doc.document import RefItem
+from typing import TYPE_CHECKING
+
+# docling_core(파싱 라이브러리 docling의 타입 패키지)는 선택 의존성이다. 
+# `uv sync --extra ingest`로만 설치되고, 운영 이미지·기본 개발 환경에는 없다.
+# 아래 RefItem은 _ItemInfo의 필드 타입 표기에만 쓰이므로, 실행에는 필요하지 않다.
+# TYPE_CHECKING 블록은 pyright 같은 타입 검사기만 읽고 실행 시점에는 건너뛰므로, 파싱 스택이 없는 환경에서도 이 모듈을 import할 수 있다.
+# 없으면 이 모듈을 거쳐 가는 모든 코드가 ModuleNotFoundError로 죽는다.
+# 파일 첫 줄의 `from __future__ import annotations`가 모든 타입 표기를 문자열로 미뤄 주기 때문에 성립한다.
+if TYPE_CHECKING:
+    from docling_core.types.doc.document import RefItem
 
 # ParsedDocument의 단일 정본은 src/models/schemas.py. 
 # 기존 import 경로(src.ingest.parse.parser_dtos) 호환을 위해 재노출한다. 

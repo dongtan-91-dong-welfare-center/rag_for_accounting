@@ -3,7 +3,10 @@
 # 설계 결정 요약:
 #   - 임베딩: KURE-v1 1024차원, 인덱싱·검색이 src/clients/embedding.embed_texts()를 공유
 #   - 스키마: chunk_id TEXT PK / document_id / content / metadata JSONB / embedding vector(1024)
+#     / content_morph TEXT — content를 형태소 명사류로 사전토큰화한 sparse 검색용 사본.
+#     임베딩과 같은 규약으로 색인·검색이 tokenizer.morph_text()를 공유해 토큰 불일치를 구조적으로 막는다.
 #   - 인덱스: HNSW + vector_cosine_ops (코사인 거리 <=> 연산자와 정합)
+#     / content_morph에 GIN 표현식 인덱스 — sparse가 형태소 매칭으로 행을 실제 반환하게 되면서 순차 스캔 비용이 드러나므로 함께 건다
 #   - upsert: INSERT ... ON CONFLICT(chunk_id) DO UPDATE — 재실행 멱등성 보장
 #   - 부분 실패 정책: 배치 단위 부분 커밋. 실패 배치는 건너뛰고 계속 진행하며,
 #     upsert 멱등성 덕분에 전체 재실행으로 누락분을 복구할 수 있다.
@@ -21,6 +24,7 @@ from src.db.connection import get_pool
 from src.models.schemas import RetrievedChunk, IndexingResult, SkippedChunk
 from src.utils.config import BATCH_SIZE, EMBEDDING_DIM, EMBEDDING_MAX_TOKENS, SEARCH_TIMEOUT_SECONDS
 from src.clients.embedding import embed_texts, count_tokens
+from src.retrieval.tokenizer import morph_text
 from src.utils.exception import (
     AccountingRAGError,
     DatabaseQueryError,
@@ -42,6 +46,7 @@ def _ensure_collection(collection: str) -> None:
     """
     table = sql.Identifier(collection)
     index = sql.Identifier(f"{collection}_embedding_hnsw_idx")
+    morph_index = sql.Identifier(f"{collection}_content_morph_gin_idx")
     try:
         with get_pool().connection() as conn:
             with conn.cursor() as cur:
@@ -54,16 +59,30 @@ def _ensure_collection(collection: str) -> None:
                             document_id TEXT NOT NULL,
                             content TEXT NOT NULL,
                             metadata JSONB,
-                            embedding vector({dim}) NOT NULL
+                            embedding vector({dim}) NOT NULL,
+                            content_morph TEXT
                         )
                         """
                     ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
+                )
+                # 위 CREATE TABLE IF NOT EXISTS는 기존 테이블에 새 컬럼을 더해 주지 않으므로,컬럼 추가 이전에 만들어진 테이블을 위해 멱등 ALTER를 함께 실행한다.
+                # 값 채우기는 여기서 하지 않는다. 기존 행은 scripts/backfill_content_morph.py 담당.
+                cur.execute(
+                    sql.SQL("ALTER TABLE {table} ADD COLUMN IF NOT EXISTS content_morph TEXT").format(
+                        table=table
+                    )
                 )
                 cur.execute(
                     sql.SQL(
                         "CREATE INDEX IF NOT EXISTS {index} ON {table} "
                         "USING hnsw (embedding vector_cosine_ops)"
                     ).format(index=index, table=table)
+                )
+                cur.execute(
+                    sql.SQL(
+                        "CREATE INDEX IF NOT EXISTS {index} ON {table} "
+                        "USING GIN (to_tsvector('simple', content_morph))"
+                    ).format(index=morph_index, table=table)
                 )
     except Exception as e:
         logger.error(f"컬렉션 생성 실패: collection={collection}, {e}")
@@ -94,13 +113,14 @@ def _upsert_batch(collection: str, batch: list[RetrievedChunk], vectors: list[li
     """
     query = sql.SQL(
         """
-        INSERT INTO {table} (chunk_id, document_id, content, metadata, embedding)
-        VALUES (%s, %s, %s, %s, %s::vector)
+        INSERT INTO {table} (chunk_id, document_id, content, metadata, embedding, content_morph)
+        VALUES (%s, %s, %s, %s, %s::vector, %s)
         ON CONFLICT (chunk_id) DO UPDATE SET
             document_id = EXCLUDED.document_id,
             content = EXCLUDED.content,
             metadata = EXCLUDED.metadata,
-            embedding = EXCLUDED.embedding
+            embedding = EXCLUDED.embedding,
+            content_morph = EXCLUDED.content_morph
         """
     ).format(table=sql.Identifier(collection))
 
@@ -112,6 +132,9 @@ def _upsert_batch(collection: str, batch: list[RetrievedChunk], vectors: list[li
             # 명시 필드 중 None은 제외하고, extra="allow" 비정형 키(source 등)는 포함해 저장
             Jsonb(chunk.metadata.model_dump(exclude_none=True)),
             vector,
+            # sparse 검색용 형태소 사본 — 질의 쪽과 같은 함수로 만들어야 색인 토큰과 질의 토큰이 어긋나지 않는다.
+            # 여기서 안 채우면 이 청크는 sparse에 안 잡힌다.
+            morph_text(chunk.content),
         )
         for chunk, vector in zip(batch, vectors)
     ]

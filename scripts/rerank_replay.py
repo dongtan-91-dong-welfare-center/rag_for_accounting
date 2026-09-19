@@ -9,14 +9,18 @@ RRF-k {30,60,90,120} × 후보 리랭커 매트릭스를 재검색·LLM 없이 �
   uv run python scripts/rerank_replay.py dump
   uv run python scripts/rerank_replay.py replay --dump-file docs/measurements/rerank_replay_dump_<stamp>.json
 
-채택/롤백 기준(2026-07-04 사전 확정, 지연 기준 1s→5s로 완화):
-  retrieval Hit@1 순증 ≥ +2건 AND 기존 hit 회귀 0건 AND MRR 순증 > 0 AND 쿼리당 지연 p50 ≤ 5s.
+채택/롤백 기준(2026-07-25 개정 — 벤치마크가 14건에서 114건으로 늘어난 것을 반영):
+  retrieval Hit@1 순증(net) ≥ 모집단 비례 기준선 AND MRR 순증 > 0 AND 쿼리당 지연 p50 ≤ 5s.
+  여기서 순증(net)은 "1위로 새로 올라온 질의 수 − 1위에서 밀려난 질의 수"이고, 기준선은 min_net_gain()이 모집단 크기에서 계산한다(11건 → 2건, 114건 → 4건).
+  구 기준의 "회귀 0건" 조건은 폐기했다 — 114건 표본에서는 달성이 사실상 불가능해 순증 20건·회귀 1건짜리 개선안까지 기각되는 비대칭이 있었다. 
+  회귀를 허용하는 대신 MRR 순증 조건이 "전체 순위가 나빠지는 교환"을 막는 안전장치 역할을 한다.
   #183 gold 확정 대기 케이스는 델타만 기록하고 판정 모집단에서 제외한다.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime
@@ -29,12 +33,27 @@ from src.models.schemas import RetrievedChunk  # noqa: E402
 from src.retrieval.searcher import reciprocal_rank_fusion  # noqa: E402
 from src.utils.config import KST, RRF_K  # noqa: E402
 
-# gold 확정 대기 — 델타는 기록하되 채택 판정 모집단에서 제외
+# gold 확정 대기 — 델타는 기록하되 채택 판정 모집단에서 제외.
+# 벤치마크가 114건으로 늘어난 뒤 이 3건은 모집단의 2.6%에 불과해 판정을 좌우하지 않는다.
 EXCLUDED_CASE_IDS = frozenset({"TEST-K-GAAP-003", "TEST-K-GAAP-005", "TEST-K-GAAP-012"})
-ADOPT_MIN_GAINS = 2      # retrieval Hit@1 순증 최소 건수
+ADOPT_NET_GAIN_FLOOR = 2   # 순증(net) 기준선의 하한 — 표본이 아무리 작아도 1건 개선으로는 채택하지 않는다
+ADOPT_NET_GAIN_RATIO = 0.03  # 순증(net) 기준선의 모집단 대비 비율 — 114건이면 4건(=3.42 올림)을 요구한다
 ADOPT_MAX_P50_S = 5.0    # 쿼리당 rerank 지연 p50 상한(초) — #228: 1s→5s 완화, 고객 요구에 따라 추후 조정
 SWEEP_KS = (30, 60, 90, 120)  # RRF-k 스윕 통합
 TOP_N = 10
+
+
+def min_net_gain(population_size: int) -> int:
+    """모집단 크기에 비례하는 Hit@1 순증(net) 기준선을 돌려준다.
+
+    순증(net)은 "1위로 새로 올라온 질의 수 − 1위에서 밀려난 질의 수"다.
+    기준선을 고정 건수로 두면 표본 크기에 따라 의미가 달라진다
+    2건은 모집단 11건에서는 18%짜리 개선이지만 114건에서는 1.8%로 잡음과 구분되지 않는다.
+    그래서 비율(3%)로 잡고, 표본이 작을 때 1건 개선이 통과하지 않도록 하한(2건)을 함께 둔다.
+
+    예: 11건 → 2건(하한이 이긴다) · 67건 → 3건 · 114건 → 4건.
+    """
+    return max(ADOPT_NET_GAIN_FLOOR, math.ceil(population_size * ADOPT_NET_GAIN_RATIO))
 
 
 def fuse_top_n(
@@ -65,13 +84,16 @@ def judge_adoption(
     population = sorted((set(base_first_hits) & set(cand_first_hits)) - set(excluded_ids))
     gains = [cid for cid in population if base_first_hits[cid] != 1 and cand_first_hits[cid] == 1]
     regressions = [cid for cid in population if base_first_hits[cid] == 1 and cand_first_hits[cid] != 1]
+    net_gain = len(gains) - len(regressions)
+    threshold = min_net_gain(len(population))
     mrr_delta = _mrr(cand_first_hits, population) - _mrr(base_first_hits, population)
 
     reasons = []
-    if len(gains) < ADOPT_MIN_GAINS:
-        reasons.append(f"Hit@1 순증 {len(gains)}건 < 기준 {ADOPT_MIN_GAINS}건")
-    if regressions:
-        reasons.append(f"기존 hit@1 회귀 {len(regressions)}건: {', '.join(regressions)}")
+    if net_gain < threshold:
+        detail = f"순증 {len(gains)}건 − 회귀 {len(regressions)}건"
+        if regressions:
+            detail += f"({', '.join(regressions)})"
+        reasons.append(f"Hit@1 순증(net) {net_gain}건 < 기준 {threshold}건 [{detail}]")
     if mrr_delta <= 0:
         reasons.append(f"MRR 순증 없음 (Δ={mrr_delta:+.4f})")
     if p50_latency_s > ADOPT_MAX_P50_S:
@@ -81,6 +103,8 @@ def judge_adoption(
         "adopt": not reasons,
         "gains": gains,
         "regressions": regressions,
+        "net_gain": net_gain,
+        "min_net_gain": threshold,
         "mrr_delta": mrr_delta,
         "population": population,
         "reasons": reasons,
