@@ -19,6 +19,8 @@ APP_HOST_PORT="${APP_HOST_PORT:-$(read_env APP_HOST_PORT)}"
 EMBEDDING_HOST_PORT="${EMBEDDING_HOST_PORT:-$(read_env EMBEDDING_HOST_PORT)}"
 POSTGRES_USER="${POSTGRES_USER:-$(read_env POSTGRES_USER)}"
 POSTGRES_DB="${POSTGRES_DB:-$(read_env POSTGRES_DB)}"
+# TODO(ISSUE): 현재 헬스체크 주소는 localhost로 고정되어 있어, APP_BIND_ADDR/EMBEDDING_BIND_ADDR를
+# 127.0.0.1이나 0.0.0.0이 아닌 특정 물리 IP(예: 192.168.x.x)로 지정할 경우 localhost 연결이 실패할 수 있음
 APP_URL="http://localhost:${APP_HOST_PORT:-8000}"
 EMBEDDING_URL="http://localhost:${EMBEDDING_HOST_PORT:-8080}"
 
@@ -44,8 +46,8 @@ fi
 # "${CONTAINER[@]}" (실행할 때): 배열의 각 요소를 독립된 인자로 보존하여 안전하게 명령어로 실행합니다.
 # "${CONTAINER[*]}" (출력할 때): 배열의 모든 요소를 하나의 문자열로 합쳐 화면에 깔끔하게 보여줄 때 씁니다.
 "${CONTAINER[@]}" info >/dev/null 2>&1 \
-  && pass "${CONTAINER[*]} 가 반응하고 있습니다." \
-  || fail "${CONTAINER[*]} 가 반응하지 않습니다."
+  && pass "${CONTAINER[*]}가 반응하고 있습니다." \
+  || fail "${CONTAINER[*]}가 반응하지 않습니다."
 
 echo "-- 2. Environment"
 if [ -f .env ]; then
@@ -83,7 +85,7 @@ echo "-- 4. Services"
 if "${CONTAINER[@]}" exec accounting_db pg_isready -U "${POSTGRES_USER:-accounting_user}" >/dev/null 2>&1; then
   # exec은 컨테이너 안에서 유닉스 소켓으로 물어보므로, 호스트에 열린 포트를 확인한 것이 아니다.
   # 그래서 "localhost:5432가 응답한다"고 적으면 확인하지 않은 것을 확인했다고 말하는 셈이 된다.
-  pass "PostgreSQL는 연결 가능한 상태입니다."
+  pass "PostgreSQL은 연결 가능한 상태입니다."
   # psql -U ... -d ... 실행은 "지정한 사용자 계정과 데이터베이스 이름으로 실제 SQL 쿼리를 날릴 수 있는 인증/권한 상태인지" 한 단계 더 깊게 검증
   if "${CONTAINER[@]}" exec accounting_db psql -U "${POSTGRES_USER:-accounting_user}" -d "${POSTGRES_DB:-accounting_db}" \
       -tAc "SELECT 1 FROM pg_available_extensions WHERE name='vector'" 2>/dev/null | grep -q 1; then
@@ -92,7 +94,7 @@ if "${CONTAINER[@]}" exec accounting_db pg_isready -U "${POSTGRES_USER:-accounti
     fail "pgvector extension이 사용 불가능합니다."
   fi
 else
-  fail "PostgreSQL는 연결 가능한 상태가 아닙니다."
+  fail "PostgreSQL은 연결 가능한 상태가 아닙니다."
 fi
 
 if curl -fsS "$EMBEDDING_URL/health" >/dev/null 2>&1; then
