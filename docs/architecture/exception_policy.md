@@ -6,13 +6,14 @@
 
 ## 1. 예외 분류 체계
 
-모든 커스텀 예외는 `AccountingRAGError`([src/utils/exception.py])를 상속하며, 발생한 노드와 카테고리별 에러 코드를 보유하여 `ErrorLog` 스키마로 구조화됩니다.
+모든 커스텀 예외는 `AccountingRAGError`([src/utils/exception.py](../../src/utils/exception.py))를 상속하며, 발생한 노드와 카테고리별 에러 코드를 보유하여 `ErrorLog` 스키마로 구조화됩니다.
 
 | 카테고리 | 에러 코드 | 예외 클래스 | 설명 |
 |---|---|---|---|
 | **Common (CM)** | `CM-001` | `ConfigNotFoundError` | 필수 환경변수 또는 설정 파일 누락 |
 | | `CM-002` | `LLMAPIConnectionError` | OpenAI/임베딩 API 연결 실패, 타임아웃, 인코딩 실패 |
 | | `CM-003` | `DocumentParseError` | 문서 파일 파싱 실패 |
+| **Ontology (OT)** | `OT-103` | `OntologyParsingError` | 비정형 텍스트 구조 파악 실패 |
 | **Search (SE)** | `SE-101` | `SearchTimeoutError` | pgvector 쿼리 실행 시간 초과 |
 | | `SE-102` | `DatabaseQueryError` | DB 커넥션 풀 고갈/연결 실패 또는 쿼리 실행 오류 |
 | | `SE-103` | `NoContextFoundError` | 검색 결과 부재 또는 검색 임계치 미달 |

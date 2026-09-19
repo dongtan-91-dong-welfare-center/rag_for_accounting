@@ -67,7 +67,7 @@ DB_POOL_TIMEOUT_SECONDS: float = _env_float("DB_POOL_TIMEOUT_SECONDS", 10.0)
 LLM_TIMEOUT_SECONDS: float = _env_float("LLM_TIMEOUT_SECONDS", 45.0)
 
 # OpenAI SDK 차원 재시도 상한
-LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "1"))
+LLM_MAX_RETRIES: int = int(_env_float("LLM_MAX_RETRIES", 1.0))
 
 # LangGraph 노드 실행 타임아웃 (초)
 GRAPH_STEP_TIMEOUT_SECONDS: int = int(_env_float("GRAPH_STEP_TIMEOUT_SECONDS", 60.0))
