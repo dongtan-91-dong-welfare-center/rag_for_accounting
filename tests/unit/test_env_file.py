@@ -224,4 +224,4 @@ class TestEntryScriptsSurviveHostileEnv:
 
         assert "unbound variable" not in proc.stderr    # 실행중에 바인드되지 않는 변수 에러 확인
         assert "1. Required tools" in proc.stdout   # bash 실행 확인
-        assert "Check complete" in proc.stdout    # 점검 완료 확인
+        assert "확인 완료" in proc.stdout    # 점검 완료 확인
