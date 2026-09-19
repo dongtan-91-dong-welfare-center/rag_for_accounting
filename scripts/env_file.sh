@@ -52,6 +52,8 @@
   # [[:space:]]*$ : 줄 끝($)에 붙어 있는 공백이나 탭([[:space:]]*)
   # 괄호 앞에 역슬래시를 붙여 \( ... \) 형태로 감싸면, 그 안쪽에 매칭된 내용을 메모리에 순서대로 임시 저장
   
+# TODO(ISSUE): 현재 정규식은 'KEY=val' 형식만 매칭하므로 'export KEY=val'처럼 export 키워드가 붙은 줄은 인식하지 못함
+# 추후 필요 시 '^[[:space:]]*(export[[:space:]]+)?$1=' 형태로 정규식 확장 고려
 read_env() {
   [ -f .env ] || return 0
   sed -n "s/^[[:space:]]*$1=//p" .env \

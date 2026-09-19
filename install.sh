@@ -32,6 +32,8 @@ fi
 APP_HOST_PORT="${APP_HOST_PORT:-$(read_env APP_HOST_PORT)}"
 EMBEDDING_HOST_PORT="${EMBEDDING_HOST_PORT:-$(read_env EMBEDDING_HOST_PORT)}"
 DB_HOST_PORT="${DB_HOST_PORT:-$(read_env DB_HOST_PORT)}"
+# TODO(ISSUE): 현재 헬스체크 주소는 localhost로 고정되어 있어, APP_BIND_ADDR/EMBEDDING_BIND_ADDR를
+# 127.0.0.1이나 0.0.0.0이 아닌 특정 물리 IP(예: 192.168.x.x)로 지정할 경우 localhost 연결이 실패할 수 있음
 APP_URL="http://localhost:${APP_HOST_PORT:-8000}"
 EMBEDDING_URL="http://localhost:${EMBEDDING_HOST_PORT:-8080}"
 
