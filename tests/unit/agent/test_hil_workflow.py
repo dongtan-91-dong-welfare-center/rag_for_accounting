@@ -13,7 +13,7 @@ from src.agent.workflow import (
 )
 from src.models.state import GraphState
 from src.models.schemas import RetrievedChunk, RewrittenQuery
-from src.utils.config import MAX_HIL_COUNT
+from src.utils.config import MAX_HIL_COUNT, GRAPH_STEP_TIMEOUT_SECONDS
 
 # TODO: Fixture를 testconf.py에서 정의할 수 있는지 점검
 
@@ -203,7 +203,7 @@ class TestRunResumeWorkflow:
             result = run_workflow("영업권 손상차손 인식 기준은?")
         assert "thread_id" in result    # thread_id 포함 확인
         assert isinstance(result["thread_id"], str) and result["thread_id"] # thread_id 유효성 확인
-        assert mock_app.step_timeout == 30 # step_timeout 확인
+        assert mock_app.step_timeout == GRAPH_STEP_TIMEOUT_SECONDS # step_timeout 확인
 
     def test_run_workflow_reuses_given_thread_id(self):
         """thread_id를 명시하면 그대로 사용한다"""

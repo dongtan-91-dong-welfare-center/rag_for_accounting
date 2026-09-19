@@ -11,7 +11,7 @@ from src.agent.workflow import (
     _run_config,
 )
 from src.models.state import GraphState
-from src.utils.config import MAX_REWRITE_COUNT
+from src.utils.config import MAX_REWRITE_COUNT, GRAPH_STEP_TIMEOUT_SECONDS
 from src.models.schemas import EvaluationResult, FinalResponse
 from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError, LLMAPIConnectionError
 
@@ -379,7 +379,7 @@ class TestRunWorkflow:
         result = run_workflow("영업권 손상차손 인식 기준은?")
         assert result["original_query"] == "영업권 손상차손 인식 기준은?"
         assert result["final_response"] == "영업권의 장부금액이 배분된 현금창출단위(CGU)의 회수가능액에 미달할 때..."
-        assert mock_app.step_timeout == 30
+        assert mock_app.step_timeout == GRAPH_STEP_TIMEOUT_SECONDS
 
     @patch("src.agent.workflow.build_workflow")
     def test_run_workflow_recursion_fallback(self, mock_build_workflow):
