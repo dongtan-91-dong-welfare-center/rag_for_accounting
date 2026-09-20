@@ -12,7 +12,8 @@
 
 - **의존성 동기화**: `uv sync`
 - **단위 테스트 실행**: `uv run pytest tests/unit` (또는 `uv run pytest -m unit`)
-- **시스템 통합 테스트 실행**: `uv run pytest tests/integration`
+- **시스템 통합 테스트 실행**: `uv run pytest tests/integration` (또는 `uv run pytest -m system`)
+  - `근거:` 시스템 통합 테스트는 로컬 환경에 PostgreSQL 및 임베딩 서버 컨테이너가 기동되어 있어야 성공하므로, 컨테이너 실행 상태를 사전에 확인하거나 단위 테스트(`tests/unit`)를 우선 실행하는 것을 권장합니다.
 - **테스트 마커 (`pyproject.toml` 기준)**:
   - `unit`: 개별 함수 논리 검증, 외부 의존성이 없는 단위 테스트 (Phase 0: Unit)
   - `system`: 가짜 데이터를 기반으로 한 예외 경로 및 데이터 규격 검증 (Phase 1: Fast Fail)
@@ -45,7 +46,7 @@ AI 에이전트가 작업을 수행할 때 승인 없이 자율적으로 진행�
 
 | 구분 | 허용 범위 |
 |---|---|
-| **승인 없이 진행 가능** | <ul><li>`data/test_data` 기반 `pytest -m unit` 및 `tests/integration` 실행과 재실행</li><li>테스트 실패 원인의 로컬 재현 및 분석</li><li>문서 내부 링크와 설명 문구의 오류 수정</li><li>린트 및 코드 포매팅 관련 수정</li><li>사용자로부터 요청받은 코드 변경으로 인해 발생한 테스트 실패를 해결하기 위한 수정 및 관련 테스트 재실행</li></ul> |
+| **승인 없이 진행 가능** | <ul><li>`data/test_data` 기반 `pytest -m unit`, `pytest -m system` 및 `tests/integration` 실행과 재실행 (단, `tests/integration`은 로컬 컨테이너 기동 상태를 사전에 확인해야 하며 단위 테스트 우선 실행을 권장합니다)</li><li>테스트 실패 원인의 로컬 재현 및 분석</li><li>문서 내부 링크와 설명 문구의 오류 수정</li><li>린트 및 코드 포매팅 관련 수정</li><li>사용자로부터 요청받은 코드 변경으로 인해 발생한 테스트 실패를 해결하기 위한 수정 및 관련 테스트 재실행</li></ul> |
 | **사전 확인 필요** | <ul><li>`benchmark` 마커 테스트 실행 (외부 API 호출 비용 발생)</li><li>데이터 스키마 및 마이그레이션 관련 변경</li><li>`git push` 및 원격 저장소 쓰기 작업</li><li>운영 데이터베이스 접근 및 변경</li><li>배포 설정 파일 및 시크릿(비밀값) 정보 변경</li></ul> |
 
 ## 6. 길찾기
