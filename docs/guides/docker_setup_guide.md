@@ -111,3 +111,8 @@ Compose에서 PDF volume을 다른 위치로 마운트하면 `PDF_DIR`도 같은
    ```bash
    docker compose up --build -d
    ```
+
+## 6. 서버 간 데이터베이스 이관 및 백업/복원
+
+다른 서버에 이미 적재된 데이터를 신속하게 이관하거나 복원하려면 `db_dump.sh` 및 `db_restore.sh` 도구를 사용합니다.
+자세한 절차, 필수 제약사항 및 Podman 호환 안내는 [서버 간 DB 이관 가이드](db_migration_guide.md)를 참고하세요.

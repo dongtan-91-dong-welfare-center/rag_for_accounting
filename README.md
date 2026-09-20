@@ -102,6 +102,11 @@ uv run python -m src.main ingest --pdf data/raw_data/제6장.pdf --standard-id g
 
 원본 회계기준 PDF는 저작권 문제로 저장소에 포함하지 않습니다. `data/raw_data/README.md` BYO(Bring Your Own) 방식을 따릅니다.
 
+### DB 이관 및 복원 (권장 배포 경로)
+
+이미 임베딩 적재가 완료된 데이터베이스를 다른 서버로 이관할 때는 `db_dump.sh`와 `db_restore.sh`를 사용합니다. 새 서버에서 무거운 파싱이나 임베딩 재연산 없이 즉시 데이터를 복원할 수 있습니다.
+자세한 절차는 [서버 간 DB 이관 가이드](docs/guides/db_migration_guide.md)를 참고하세요.
+
 ### 질의
 
 적재된 데이터를 기반으로 `rewrite → search → rerank → evaluate → generate` 워크플로를 실행합니다.
