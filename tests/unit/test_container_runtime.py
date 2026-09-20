@@ -23,16 +23,15 @@ PATH를 그 디렉터리 하나로 좁힌 뒤 판정 함수를 돌린다.
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from tests.utils.shell_test_helpers import BASH_PATH as _BASH, make_bin as _make_bin
+
 _ROOT = Path(__file__).resolve().parents[2]
 _LIB = _ROOT / "scripts" / "container_runtime.sh"
-# PATH를 가짜 디렉터리로 좁히면 bash 자체도 찾지 못하므로, 좁히기 전에 절대 경로로 붙잡아 둔다.
-_BASH = shutil.which("bash") or "/bin/bash"
 
 # `docker compose version`이 성공하는 가짜 docker — Docker Compose v2가 깔린 환경을 흉내 낸다.
 _DOCKER_WITH_COMPOSE = """#!/bin/sh
@@ -67,17 +66,6 @@ exit 0
 _STUB = """#!/bin/sh
 exit 0
 """
-
-
-def _make_bin(tmp_path: Path, files: dict[str, str]) -> Path:
-    """가짜 실행 파일들을 담은 디렉터리를 만들어 그 경로를 돌려준다."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    for name, body in files.items():
-        target = bin_dir / name
-        target.write_text(body)
-        target.chmod(0o755)
-    return bin_dir
 
 
 def _detect(bin_dir: Path) -> tuple[int, str, str, str]:

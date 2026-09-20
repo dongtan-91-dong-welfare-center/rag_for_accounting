@@ -19,15 +19,16 @@ Compose는 세 경우 모두 글자 그대로 읽는다. 그래서 스택은 멀
 """
 from __future__ import annotations
 
-import shutil   # 고수준 파일 및 디렉터리 조작 (Shell Utility)
+import shutil
 import subprocess   # 외부 프로세스 실행 및 관리 (Shell Execution)
 from pathlib import Path
 
 import pytest
 
+from tests.utils.shell_test_helpers import BASH_PATH as _BASH
+
 _ROOT = Path(__file__).resolve().parents[2]
 _LIB = _ROOT / "scripts" / "env_file.sh"
-_BASH = shutil.which("bash") or "/bin/bash"
 
 
 def _read_env(tmp_path: Path, env_body: str, key: str) -> tuple[int, str, str]:
