@@ -76,3 +76,10 @@ docs/assets/*.mp4
 CLAUDE.local.md
 AGENTS.override.md
 *.local.md
+
+# DB 백업 덤프(db_dump.sh 산출물)는 회계기준서 전문 텍스트가 통째로 들어있어 용량이 크고,
+# 코드 변경과 무관한 바이너리라 커밋 대상이 아니다. 
+# 서버 간 이관은 파일을 직접 복사해서 한다.
+backups/
+*.dump
+*.dump.meta
