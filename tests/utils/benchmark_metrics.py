@@ -275,6 +275,7 @@ class CaseResult:
     metrics: dict = field(default_factory=dict)
     diag: dict = field(default_factory=dict)
     error: str | None = None
+    elapsed_sec: float | None = None  # NFR-001 소요 시간 (초 단위)
 
 
 def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
