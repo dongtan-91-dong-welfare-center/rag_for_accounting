@@ -96,10 +96,10 @@ rewrite
 | HIL 조건 | 전략이 `decompose` 또는 `stepback`이고 아직 승인되지 않은 경우 |
 | HIL 한도 | `MAX_HIL_COUNT=5` |
 | CRAG 재작성 한도 | `MAX_REWRITE_COUNT=3` |
-| 노드 타임아웃 | `step_timeout=30`초 |
+| 노드 타임아웃 | `GRAPH_STEP_TIMEOUT_SECONDS=60`초 (`src/utils/config.py` 정본) |
 | 리랭커 | `USE_RERANKER=false` 기본값. 켜면 `BAAI/bge-reranker-v2-m3`를 사용한다. |
 
-`evaluate`가 근거 부족을 판단하거나 rerank 임계값 미달로 `needs_reretrieval=True`가 세워지면 rewrite로 되돌아간다. 한도를 넘으면 현재 근거로 답변 생성 단계에 진입하거나 폴백 응답을 반환한다.
+`evaluate`가 근거 부족을 판단하거나 rerank 임계값 미달로 `needs_reretrieval=True`가 세워지면 rewrite로 되돌아간다. 한도를 넘으면 현재 근거로 답변 생성 단계에 진입하거나 폴백 응답을 반환한다. 노드별 예외 분류 체계와 계층적 타임아웃(Layer 1 I/O 10~45초 < Layer 2 노드 60초 < Layer 3 서브시스템 120초) 상세 규약은 [예외 처리 및 런타임 타임아웃 정책](architecture/exception_policy.md)을 참조한다.
 
 ## 7. 데이터베이스와 모델
 
@@ -139,8 +139,8 @@ HIL 체크포인터는 현재 프로세스 로컬 `MemorySaver`다. 따라서 Fa
 |---|---|---|
 | 검색 통과 | 핵심 조항 Top-5 기준 구현 | `docs/benchmark/eval_pass_rules.md`, `tests/utils/benchmark_metrics.py` |
 | 내용 통과 | 별도 judge 미구현 | 같은 문서의 `content_pass` 섹션 |
-| 속도 | API/검색/답변 속도 정식 리포트 미작성 | 향후 측정 산출물은 `docs/measurements/`에 둔다. |
-| 리랭커 실험 | 2026-07-05 측정 문서가 있었으나 현재 문서 트리에는 포함되어 있지 않다 | 측정 산출물은 `docs/measurements/`에 둔다. |
+| 속도 | API/검색/답변 속도 정식 리포트 미작성 | 측정 산출물은 `docs/benchmark/`에 둔다. |
+| 리랭커 실험 | 2026-07-05 측정 문서가 있었으나 현재 문서 트리에는 포함되어 있지 않다 | 초기 측정 이력은 `docs/measurements/`에 보존하고, 향후 리포트는 `docs/benchmark/`에 기록한다. |
 
 검증되지 않은 숫자를 README나 아키텍처 문서에 박제하지 않는다. 벤치마크 데이터셋이 교정되면 측정 명령, 환경, 데이터셋 버전, 결과 해석을 함께 남긴다.
 
