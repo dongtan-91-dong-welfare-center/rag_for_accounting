@@ -16,30 +16,31 @@ def run_command(command):
     """지정된 쉘 명령어를 실행하고 결과를 반환합니다."""
     return subprocess.run(command, shell=True, capture_output=True, text=True)
 
-def check_docker_infrastructure():
+def check_docker_infrastructure(require_app: bool = False):
     """
     1. Docker 데몬 실행 여부
-    2. accounting_app 컨테이너 구동 상태
+    2. accounting_app 컨테이너 구동 상태 (require_app=True 일 때만)
     3. DB 컨테이너 구동 상태
     4. PostgreSQL 확장(vector) 로드 상태
     를 점검하고, 실패 사유를 반환합니다. 정상이면 None을 반환
     """
     try:
-        res_info = subprocess.run("docker info", shell=True, capture_output=True, text=True, timeout=5)
+        res_info = subprocess.run("docker version", shell=True, capture_output=True, text=True, timeout=15)
         if res_info.returncode != 0:
             return "Docker 데몬이 실행 중이지 않습니다."
     except Exception as e:
         return f"Docker 실행 점검 중 에러 발생: {e}"
 
-    res_app = run_command(f"docker inspect -f '{{{{.State.Running}}}}' accounting_app")
-    if res_app.returncode != 0 or "true" not in res_app.stdout.lower():
-        return "accounting_app 컨테이너가 실행 중이 아닙니다."
+    if require_app:
+        res_app = run_command("docker inspect -f '{{.State.Running}}' accounting_app")
+        if res_app.returncode != 0 or "true" not in res_app.stdout.lower():
+            return "accounting_app 컨테이너가 실행 중이 아닙니다."
 
     res_db = run_command(f"docker inspect -f '{{{{.State.Running}}}}' {DB_NAME}")
     if res_db.returncode != 0 or "true" not in res_db.stdout.lower():
         return f"{DB_NAME} 컨테이너가 실행 중이 아닙니다."
 
-    res_vector = run_command(f"docker exec {DB_NAME} psql -U {DB_USER} -d {DB_NAME} -c 'CREATE EXTENSION IF NOT EXISTS vector;'")
+    res_vector = run_command(f'docker exec {DB_NAME} psql -U {DB_USER} -d {DB_NAME} -c "CREATE EXTENSION IF NOT EXISTS vector;"')
     if res_vector.returncode != 0:
         return "vector 확장 생성/조회에 실패했습니다."
 

@@ -29,9 +29,9 @@ sys.path.insert(0, str(_ROOT))
 from dotenv import load_dotenv
 
 load_dotenv()
-# tests/integration/conftest.py 와 동일하게, 호스트 실행 시 DB 호스트를 localhost로 보정한다.
-if os.getenv("POSTGRES_HOST") == "database":
-    os.environ["POSTGRES_HOST"] = "localhost"
+# 호스트 실행 시 IPv6 해석 지연 방지를 위해 DB 호스트를 127.0.0.1로 보정한다.
+if os.getenv("POSTGRES_HOST") in ("database", "localhost"):
+    os.environ["POSTGRES_HOST"] = "127.0.0.1"
 
 from datetime import datetime  # noqa: E402
 
@@ -124,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--judge-content", action="store_true", help="#183 답변 내용 적절성 평가 병행")
     parser.add_argument("--resume", action="store_true", help="중단된 체크포인트가 있으면 이어서 측정")
     parser.add_argument("--no-warmup", action="store_true", help="사전 워밍업 질의 실행 생략")
+    parser.add_argument("--limit", type=int, default=None, help="측정할 최대 케이스 수 (표본/스모크 검증용)")
     args = parser.parse_args(argv)
 
     if args.judge_content:
@@ -150,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
             if not cases:
                 print(f"[중단] 케이스를 찾지 못함: {args.case}")
                 return 2
+        elif args.limit:
+            cases = cases[:args.limit]
 
         out_dir = Path(args.out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
