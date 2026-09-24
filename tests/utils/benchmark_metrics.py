@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -35,7 +36,7 @@ from src.utils.clause_paras import (
     PREFIX_PATTERN,
     chunk_paras,
 )
-from src.utils.config import KST
+from src.utils.config import KST, TARGET_LATENCY_TOTAL_SEC
 from tests.utils.benchmark_loader import BenchmarkCase
 
 # NFR-002 정확도 목표(리포트 갭 표기용, 하드게이트 아님)
@@ -43,6 +44,22 @@ NFR_002_TARGET = 0.90
 
 # 검색 통과 기준: 핵심 조항이 검색 Top-N 안에 있으면 통과
 RETRIEVAL_PASS_TOP_N = 5
+
+
+def _percentile(data: list[float], percentile: float) -> float:
+    """정렬된 데이터 리스트에서 지정한 백분위수(0~100) 값을 선형 보간하여 산출한다."""
+    if not data:
+        return 0.0
+    if len(data) == 1:
+        return data[0]
+    k = (len(data) - 1) * (percentile / 100.0)
+    f = int(k)
+    c = f + 1
+    if c >= len(data):
+        return data[-1]
+    d0 = data[f] * (c - k)
+    d1 = data[c] * (k - f)
+    return d0 + d1
 
 
 # ════════════════════════════════ 조항키 유틸 ════════════════════════════════
@@ -291,6 +308,7 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         measurable=True,
         gold_paras=sorted(gold_paras),
     )
+    t0 = time.perf_counter()
     try:
         # 케이스 식별 정보를 LangSmith 트레이스에 부착. 트레이싱 비활성 시 무해하게 무시됨.
         state = run_workflow_to_completion(
@@ -299,9 +317,16 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
             metadata={"case_id": case.id, "gold": sorted(gold_paras)},
         )
     except Exception as e:  # 케이스 격리: 한 건 실패해도 전체 측정 계속
+        dt = time.perf_counter() - t0
+        res.elapsed_sec = round(dt, 2)
+        res.diag["elapsed_sec"] = res.elapsed_sec
         res.error = f"{type(e).__name__}: {e}"
         res.diag["traceback"] = traceback.format_exc()[-1500:]
         return res
+
+    dt = time.perf_counter() - t0
+    res.elapsed_sec = round(dt, 2)
+    res.diag["elapsed_sec"] = res.elapsed_sec
 
     fr = state.get("final_response")
     reranked = state.get("reranked_chunks") or []
@@ -406,6 +431,21 @@ def aggregate(results: list[CaseResult], k: int) -> dict:
             "rate": round(ch / len(content_rows), 4),
             "n": len(content_rows),
         }
+
+    # 지연 시간 통계 (NFR-001)
+    latencies = sorted(
+        r.elapsed_sec for r in rows
+        if r.elapsed_sec is not None
+    )
+    if latencies:
+        summary["latency"] = {
+            "p50": round(_percentile(latencies, 50.0), 2),
+            "p95": round(_percentile(latencies, 95.0), 2),
+            "max": round(max(latencies), 2),
+            "min": round(min(latencies), 2),
+            "avg": round(sum(latencies) / len(latencies), 2),
+            "target_sec": TARGET_LATENCY_TOTAL_SEC,
+        }
     return summary
 
 
@@ -433,20 +473,20 @@ def write_markdown_report(
     indexed_chapters: list[str],
     n_chunks: int | None,
     use_reranker: bool,
-    out_dir: Path | str = "docs/measurements",
+    out_dir: Path | str = "docs/benchmark",
     generated_at: datetime | None = None,
 ) -> Path:
     """사람이 읽을 수 있는 측정 결과 리포트(.md)를 생성하고 경로를 반환한다.
 
     요약표 + 케이스별 hit/miss + 90% 목표 대비 갭 + USE_RERANKER/적재청크수 메타에 더해,
-    검색 미적중 케이스 진단 목록과 회계사가 직접 채워 검토할 케이스별 대조표(질문·예상정답·실제답변·판정 체크박스)까지 포함한다.
+    NFR-001 지연 시간 통계(p50, p95, max), 검색 미적중 케이스 진단 목록과 회계사가 직접 채워 검토할 케이스별 대조표까지 포함한다.
     """
     ts = generated_at or datetime.now(KST)
     stamp = ts.strftime("%Y%m%d_%H%M")
     n = summary.get("n_measured", 0)
 
     lines: list[str] = []
-    lines.append("# 벤치마크 조항정확도 리포트 (NFR-002)")
+    lines.append("# 벤치마크 평가 리포트 (NFR-001 성능 / NFR-002 정확도)")
     lines.append("")
     lines.append(f"- 생성 시각: {ts.isoformat()}")
     lines.append(f"- Hit@k 의 k: {k}")
@@ -454,6 +494,23 @@ def write_markdown_report(
     lines.append(f"- 적재 청크 수: {n_chunks if n_chunks is not None else '미상'}")
     lines.append(f"- USE_RERANKER: {use_reranker}")
     lines.append(f"- 측정 케이스: {n}건")
+    lines.append("")
+
+    # ── 지연 시간 요약 (NFR-001) ──
+    target_sec = TARGET_LATENCY_TOTAL_SEC
+    lines.append(f"## 지연 시간 요약 (NFR-001 목표 {target_sec:.1f}초)")
+    lines.append("")
+    lat = summary.get("latency")
+    if lat and isinstance(lat, dict):
+        lines.append("| 지표 | 측정값(초) | 목표(초) | 여유 마진 |")
+        lines.append("|------|------------|----------|-----------|")
+        lines.append(f"| 중위 지연 시간 (p50) | {lat['p50']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p50']:+.2f}s |")
+        lines.append(f"| 95 백분위수 (p95) | {lat['p95']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p95']:+.2f}s |")
+        lines.append(f"| 최대 지연 시간 (Max) | {lat['max']:.2f}s | {target_sec:.1f}s | {target_sec - lat['max']:+.2f}s |")
+        lines.append(f"| 최소 지연 시간 (Min) | {lat['min']:.2f}s | — | — |")
+        lines.append(f"| 평균 지연 시간 (Avg) | {lat['avg']:.2f}s | — | — |")
+    else:
+        lines.append("- 지연 시간 측정 데이터 없음")
     lines.append("")
 
     # ── 지표 요약 (90% 목표 갭 포함) ──
@@ -478,14 +535,15 @@ def write_markdown_report(
     # ── 케이스별 결과 ──
     lines.append("## 케이스별 결과")
     lines.append("")
-    lines.append("| 케이스 | 장 | gold 문단 | 검색 exact@k | 생성 exact@1 | answerable | CRAG | 상태 |")
-    lines.append("|--------|----|-----------|--------------|--------------|------------|------|------|")
+    lines.append("| 케이스 | 장 | gold 문단 | 검색 exact@k | 생성 exact@1 | answerable | CRAG | 소요(초) | 상태 |")
+    lines.append("|--------|----|-----------|--------------|--------------|------------|------|----------|------|")
     for r in results:
+        elapsed_str = f"{r.elapsed_sec:.2f}s" if r.elapsed_sec is not None else "—"
         if not r.measurable:
-            lines.append(f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | 미적재 SKIP |")
+            lines.append(f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | — | 미적재 SKIP |")
             continue
         if r.error:
-            lines.append(f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | ✗ {r.error[:40]} |")
+            lines.append(f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | {elapsed_str} | ✗ {r.error[:40]} |")
             continue
         m = r.metrics
         def _mark(b: bool) -> str:
@@ -493,7 +551,7 @@ def write_markdown_report(
         lines.append(
             f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | "
             f"{_mark(m.get(f'retrieval_exact_hit@{k}'))} | {_mark(m.get('generation_exact_hit@1'))} | "
-            f"{_mark(m.get('is_answerable'))} | {r.diag.get('rewrite_count')} | OK |"
+            f"{_mark(m.get('is_answerable'))} | {r.diag.get('rewrite_count')} | {elapsed_str} | OK |"
         )
     lines.append("")
 
@@ -510,6 +568,23 @@ def write_markdown_report(
                 f"- **{r.case_id}** (제{r.chapter}장, gold={r.gold_paras}): "
                 f"검색 장={r.diag.get('retrieval_chapters')}, 인용 문단={r.diag.get('citation_paras')}, "
                 f"전략={r.diag.get('strategy')}, needs_external={r.diag.get('needs_external')}"
+            )
+        lines.append("")
+
+    # ── 최악 지연 시간 진단 (상위 5건) ──
+    slowest = sorted(
+        [r for r in results if r.measurable and r.error is None and r.elapsed_sec is not None],
+        key=lambda x: x.elapsed_sec or 0.0,
+        reverse=True,
+    )[:5]
+    if slowest:
+        lines.append(f"## 최악 지연 시간 진단 (상위 {len(slowest)}건)")
+        lines.append("")
+        for r in slowest:
+            lines.append(
+                f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): "
+                f"전략={r.diag.get('strategy')}, CRAG={r.diag.get('rewrite_count')}, "
+                f"인용={r.diag.get('n_citations')}건, 검색={r.diag.get('n_retrieved')}건"
             )
         lines.append("")
 
