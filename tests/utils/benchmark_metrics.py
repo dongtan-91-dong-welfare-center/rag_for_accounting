@@ -375,6 +375,7 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         "answer": (fr.answer if fr else ""),
         "citations": cite_contents,
         "error_logs": state.get("error_logs") or [],
+        "elapsed_sec": res.elapsed_sec,
     }
 
     # content_pass(내용 통과) 판정 — 옵트인(CONTENT_JUDGE). 검색축과 분리된 별도 LLM 판정 축.
