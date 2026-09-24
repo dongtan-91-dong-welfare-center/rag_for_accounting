@@ -42,17 +42,28 @@
 - **웹 화면 제공**: FastAPI와 React 정적 파일을 하나의 앱 컨테이너에서 제공하며, 원문 PDF(Portable Document Format) 조회 엔드포인트도 함께 제공합니다.
 
 ## 시스템 아키텍처
-<!-- Mermaid 기반으로 정리 -->
+
+본 시스템은 자연어로 입력된 회계 질의를 LangGraph 기반 5단계 파이프라인(`질의 재작성 → 하이브리드 검색 → 선택적 리랭킹 → 품질 평가 → 인용 답변 생성`)으로 처리합니다. PostgreSQL pgvector를 활용한 Dense 검색과 전문검색(Full-text) 기반 Sparse 검색을 결합하여 조항 검색의 정확도를 극대화합니다.
+
+전체 워크플로 다이어그램, 계층별 타임아웃 구조, 런타임 구성 등 상세한 설계는 [전체 아키텍처 문서](docs/ARCHITECTURE.md)를 참고하세요.
 
 ## 성능 지표
-<!-- 실제 답변 비교 및 RAGAS에 대한 평가 지표 제공. -->
+
+회계 실무에서 가장 중요한 기준은 질의에 부합하는 **핵심 조항이 검색 상위(Top-5)에 정확히 포함되는가**입니다. 본 프로젝트는 정량화된 벤치마크 데이터셋을 기반으로 검색 통과(`retrieval_pass`) 및 답변 정확도를 지속적으로 측정하고 검증합니다.
+
+구체적인 평가 통과 기준과 측정 방법론은 [평가 통과 규칙](docs/benchmark/eval_pass_rules.md)을 참고하고, 형태소 토큰화 및 가중치 최적화 결과는 [실측 리포트 색인](docs/README.md#3-평가-및-벤치마크-리포트)에서 확인할 수 있습니다.
 
 ## 활용법
-<!-- 사용자 UI 및 기본 질문에 대한 화면 필요-->
+
+시스템은 개발 및 실무 환경에 맞춰 다양한 인터페이스로 활용할 수 있습니다.
+
+1. **웹 브라우저 화면**: 앱 컨테이너 기동 후 `http://localhost:8000`에 접속하여 대화형 화면에서 조항 검색, 답변 생성 및 원문 PDF 조회를 원스톱으로 이용합니다.
+2. **터미널 CLI**: `uv run python -m src.main query "금융자산 최초 인식 시점"` 명령으로 신속하게 터미널에서 기준서 질의를 수행합니다.
+3. **MCP 및 Codex 플러그인**: Claude Desktop 또는 Codex 개발 환경에 MCP 도구로 연결하여 코딩 및 감사 업무 중 즉시 기준서 조항을 인용합니다.
 
 ## 🛠️ 빠른 시작
 
-기본 구성은 PostgreSQL + pgvector 데이터베이스, TEI(Text Embeddings Inference) 임베딩 서버, FastAPI + React 앱 서버로 나뉩니다. 임베딩 모델은 `nlpai-lab/KURE-v1`이며, 리랭커는 기본적으로 비활성 처리.
+기본 구성은 PostgreSQL + pgvector 데이터베이스, TEI(Text Embeddings Inference) 임베딩 서버, FastAPI + React 앱 서버로 나뉩니다. 임베딩 모델은 `nlpai-lab/KURE-v1`이며, 리랭커는 기본적으로 비활성화되어 있습니다.
 
 ```bash
 cp .env.example .env   # 최초 1회, OPENAI_API_KEY 등 입력
@@ -100,7 +111,7 @@ uv run python -m src.main ingest --reset
 uv run python -m src.main ingest --pdf data/raw_data/제6장.pdf --standard-id gaap-ch6 --standard-type GAAP
 ```
 
-원본 회계기준 PDF는 저작권 문제로 저장소에 포함하지 않습니다. `data/raw_data/README.md` BYO(Bring Your Own) 방식을 따릅니다.
+원본 회계기준 PDF는 한국회계기준원(KASB) 이용 규약에 따라 저장소에 포함하지 않으며, 사용자가 직접 다운로드하여 배치하는 BYO(Bring Your Own) 방식을 따릅니다. 상세 배치 절차는 [data/raw_data/README.md](data/raw_data/README.md)를 참고하세요.
 
 ### DB 이관 및 복원 (권장 배포 경로)
 
