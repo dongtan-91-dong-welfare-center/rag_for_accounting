@@ -95,7 +95,7 @@ docker exec -it accounting_db psql -U accounting_user -d accounting_db
 
 Compose에서 PDF volume을 다른 위치로 마운트하면 `PDF_DIR`도 같은 위치로 맞춘다. 경로가 맞지 않으면 질의와 조항 표시는 되지만 PDF 보기 버튼은 404가 난다.
 
-## 5. 트러블슈팅 — 의존성을 바꿨는데 컨테이너가 옛 버전을 쓸 때
+## 5. 트러블슈팅: 의존성 변경 후 컨테이너가 이전 버전을 참조할 때
 
 **증상**: `pyproject.toml`에 패키지를 추가했거나 원격에서 받은 `uv.lock`이 바뀌었는데, 컨테이너 안에서는 여전히 이전 패키지 상태로 동작한다.
 

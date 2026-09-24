@@ -52,7 +52,7 @@ to_tsvector('simple', content) @@ plainto_tsquery('simple', query)
 
 ## 4. RRF 병합 및 가중치 설정
 
-Dense와 Sparse 결과는 점수 체계가 다르므로 직접 합산하지 않고, 각 검색 채널의 순위(rank)를 기반으로 RRF(Reciprocal Rank Fusion) 점수를 계산합니다:
+Dense와 Sparse 결과는 점수 체계가 다르므로 직접 합산하지 않고, 각 검색 채널의 순위를 기반으로 RRF(Reciprocal Rank Fusion) 점수를 계산합니다:
 
 ```text
 score(doc) = Σ wᵢ / (RRF_K + rankᵢ(doc))
