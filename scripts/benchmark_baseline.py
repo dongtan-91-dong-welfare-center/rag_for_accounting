@@ -49,14 +49,85 @@ from tests.utils.benchmark_metrics import (  # noqa: E402
 )
 
 
+def _warmup_pipeline() -> None:
+    """콜드 로드(Cold Load) 지연 방지를 위해 K-GAAP 회계 질의로 파이프라인을 1회 사전 구동한다."""
+    from tests.integration.helpers import run_workflow_to_completion
+
+    warmup_query = "일반기업회계기준 재무제표 작성 원칙을 요약해 주세요."
+    print(f"[워밍업] 임베딩 모델 및 서빙 컨테이너 사전 로드 중 ('{warmup_query}')…", flush=True)
+    t0 = time.perf_counter()
+    try:
+        run_workflow_to_completion(warmup_query, standard_filter="GAAP")
+        dt = time.perf_counter() - t0
+        print(f"[워밍업 완료] 소요 시간: {dt:.2f}초 (본 벤치마크 통계 집계에서 제외됨)\n", flush=True)
+    except Exception as e:
+        dt = time.perf_counter() - t0
+        print(f"[워밍업 경고] 워밍업 중 오류 발생 ({e}), 본 벤치마크를 계속 진행합니다. ({dt:.2f}초)\n", flush=True)
+
+
+def _load_checkpoint(path: Path) -> list[CaseResult]:
+    """체크포인트 파일에서 이미 완료된 케이스 결과들을 복구한다."""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return [
+            CaseResult(
+                case_id=c["case_id"],
+                chapter=c["chapter"],
+                measurable=c["measurable"],
+                gold_paras=c["gold_paras"],
+                metrics=c["metrics"],
+                diag=c["diag"],
+                error=c.get("error"),
+                elapsed_sec=c.get("elapsed_sec"),
+            )
+            for c in data.get("cases", [])
+        ]
+    except Exception as e:
+        print(f"[경고] 체크포인트 로드 실패 ({e}), 처음부터 시작합니다.")
+        return []
+
+
+def _save_checkpoint(path: Path, results: list[CaseResult], k: int, indexed: list[str]) -> None:
+    """원자적 파일 교체(Atomic Write) 방식으로 체크포인트를 안전하게 저장한다."""
+    tmp_path = path.with_suffix(".tmp")
+    payload = {
+        "updated_at": datetime.now(KST).isoformat(),
+        "k": k,
+        "indexed_chapters": indexed,
+        "cases": [
+            {
+                "case_id": r.case_id,
+                "chapter": r.chapter,
+                "measurable": r.measurable,
+                "gold_paras": r.gold_paras,
+                "metrics": r.metrics,
+                "diag": r.diag,
+                "error": r.error,
+                "elapsed_sec": r.elapsed_sec,
+            }
+            for r in results
+        ],
+    }
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="NFR-002 벤치마크 베이스라인 측정")
+    parser = argparse.ArgumentParser(description="NFR-001 성능 / NFR-002 정확도 벤치마크 베이스라인 측정")
     parser.add_argument("--k", type=int, default=10, help="Hit@k 의 k (기본 10 = TOP_K_RETRIEVAL)")
     parser.add_argument("--case", help="특정 케이스 ID만 측정")
     parser.add_argument("--all-cases", action="store_true", help="미적재 장 케이스도 강제 측정")
-    parser.add_argument("--out-dir", default="docs/measurements", help="결과 저장 디렉토리")
+    parser.add_argument("--out-dir", default="docs/benchmark", help="결과 저장 디렉토리 (기본 docs/benchmark)")
     parser.add_argument("--no-report", action="store_true", help="마크다운 리포트 생성 생략")
+    parser.add_argument("--judge-content", action="store_true", help="#183 답변 내용 적절성 평가 병행")
+    parser.add_argument("--resume", action="store_true", help="중단된 체크포인트가 있으면 이어서 측정")
+    parser.add_argument("--no-warmup", action="store_true", help="사전 워밍업 질의 실행 생략")
     args = parser.parse_args(argv)
+
+    if args.judge_content:
+        os.environ["CONTENT_JUDGE"] = "1"
 
     from src.db.connection import init_pool, close_pool
     from tests.utils.infra_check import check_docker_infrastructure
@@ -72,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     init_pool()
     try:
         indexed = get_indexed_chapters()
+        sorted_indexed = sorted(indexed, key=lambda x: int(x))
         cases = load_benchmark()
         if args.case:
             cases = [c for c in cases if c.id == args.case]
@@ -79,39 +151,61 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[중단] 케이스를 찾지 못함: {args.case}")
                 return 2
 
-        print(f"적재된 장: {sorted(indexed, key=lambda x: int(x))}")
-        print(f"측정 대상 케이스: {len(cases)}건 (k={args.k})\n")
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = out_dir / "checkpoint_benchmark.json"
+
+        # 사전 워밍업
+        if not args.no_warmup and not args.case:
+            _warmup_pipeline()
 
         results: list[CaseResult] = []
+        completed_ids: set[str] = set()
+        if args.resume:
+            results = _load_checkpoint(checkpoint_path)
+            completed_ids = {r.case_id for r in results}
+            if completed_ids:
+                print(f"[체크포인트 복구] 기존 완료된 {len(completed_ids)}건 건너뛰고 진행합니다.\n")
+
+        print(f"적재된 장: {sorted_indexed}")
+        print(f"측정 대상 케이스: {len(cases)}건 (k={args.k}, 기완료 {len(completed_ids)}건)\n")
+
         for i, case in enumerate(cases, 1):
+            if case.id in completed_ids:
+                continue
+
             clauses = parse_gold_clauses(case.references)
             chapter = clauses[0].chapter if clauses else "?"
             if chapter not in indexed and not args.all_cases:
                 print(f"[{i}/{len(cases)}] {case.id} (제{chapter}장) — 미적재 → SKIP")
-                results.append(
-                    CaseResult(case_id=case.id, chapter=chapter, measurable=False,
-                               gold_paras=sorted(gold_para_set(clauses)))
+                skip_res = CaseResult(
+                    case_id=case.id,
+                    chapter=chapter,
+                    measurable=False,
+                    gold_paras=sorted(gold_para_set(clauses)),
                 )
+                results.append(skip_res)
+                _save_checkpoint(checkpoint_path, results, args.k, sorted_indexed)
                 continue
 
-            t0 = time.time()
             print(f"[{i}/{len(cases)}] {case.id} (제{chapter}장) 측정 중…", flush=True)
             res = measure_case(case, args.k)
-            dt = time.time() - t0
-            res.diag["elapsed_sec"] = round(dt, 1)
+            sec_str = f"{res.elapsed_sec:.2f}s" if res.elapsed_sec is not None else "—"
             if res.error:
-                print(f"    ✗ 에러: {res.error} ({dt:.1f}s)")
+                print(f"    ✗ 에러: {res.error} ({sec_str})")
             else:
                 m = res.metrics
                 print(
-                    f"    legacy={m['legacy_substring']!s:5} | "
+                    f"    소요={sec_str} | "
+                    f"legacy={m['legacy_substring']!s:5} | "
                     f"검색 exact@{args.k}={m[f'retrieval_exact_hit@{args.k}']!s:5} "
                     f"prefix@{args.k}={m[f'retrieval_prefix_hit@{args.k}']!s:5} | "
                     f"생성 exact@{args.k}={m[f'generation_exact_hit@{args.k}']!s:5} | "
                     f"answerable={m['is_answerable']!s:5} | "
-                    f"CRAG={res.diag.get('rewrite_count')} ({dt:.1f}s)"
+                    f"CRAG={res.diag.get('rewrite_count')}"
                 )
             results.append(res)
+            _save_checkpoint(checkpoint_path, results, args.k, sorted_indexed)
 
         summary = aggregate(results, args.k)
         print("\n" + "=" * 64)
@@ -120,19 +214,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"측정 건수: {summary['n_measured']}")
         for key, v in summary.items():
             if isinstance(v, dict):
-                print(f"  {key:32} {v['hits']:>2}/{summary['n_measured']}  ({v['rate']:.1%})")
+                if "hits" in v:
+                    print(f"  {key:32} {v['hits']:>2}/{summary['n_measured']}  ({v['rate']:.1%})")
+                elif key == "latency":
+                    print(
+                        f"  {'지연 시간(p50/p95/max)':32} "
+                        f"{v['p50']:.2f}s / {v['p95']:.2f}s / {v['max']:.2f}s (목표: {v['target_sec']:.1f}s)"
+                    )
         print(f"  {'retrieval_exact_mrr_avg':32} {summary['retrieval_exact_mrr_avg']}")
 
         # 결과 저장 (raw JSON)
         ts = datetime.now(KST)
         stamp = ts.strftime("%Y%m%d_%H%M")
-        out_dir = Path(args.out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"baseline_{stamp}.json"
         payload = {
             "generated_at": ts.isoformat(),
             "k": args.k,
-            "indexed_chapters": sorted(indexed, key=lambda x: int(x)),
+            "indexed_chapters": sorted_indexed,
             "summary": summary,
             "cases": [
                 {
@@ -143,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
                     "metrics": r.metrics,
                     "diag": r.diag,
                     "error": r.error,
+                    "elapsed_sec": r.elapsed_sec,
                 }
                 for r in results
             ],
@@ -156,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
                 results,
                 summary,
                 k=args.k,
-                indexed_chapters=sorted(indexed, key=lambda x: int(x)),
+                indexed_chapters=sorted_indexed,
                 n_chunks=get_chunk_count(),
                 use_reranker=USE_RERANKER,
                 out_dir=out_dir,
@@ -170,3 +269,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
