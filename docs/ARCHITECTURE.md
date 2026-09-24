@@ -1,6 +1,6 @@
 # 회계 기준서 RAG 서비스 아키텍처
 
-> **한 줄 요약(BLUF):** 현행 서비스는 K-GAAP 중심 회계 기준서 원문을 온톨로지 노드로 구조화해 pgvector에 적재하고, LangGraph 워크플로가 질의 재작성 → 하이브리드 검색 → 선택적 리랭킹 → CRAG 평가 → 인용 답변 생성을 수행한다. 2026-07-11 회의의 문서 업데이트 요구사항(아키텍처·로직·설치·성능 지표)을 기준으로 현행 코드 상태를 정리한다.
+본 문서는 K-GAAP 중심의 회계 기준서 원문을 온톨로지 구조로 변환하여 pgvector에 적재하고, LangGraph 워크플로를 통해 질의 재작성, 하이브리드 검색, 선택적 리랭킹, 품질 평가, 인용 답변 생성을 수행하는 전체 서비스 아키텍처를 정의합니다.
 
 ## 1. 서비스 목적
 
@@ -72,7 +72,7 @@ API 응답 스키마의 정본은 `src/api/schemas.py`다. 내부 `GraphState` �
 |---|---|
 | Dense | KURE-v1 질의 임베딩과 pgvector cosine distance를 사용한다. |
 | Sparse | PostgreSQL `to_tsvector('simple', content)` + `plainto_tsquery('simple', query)` + `ts_rank_cd`를 사용한다. |
-| 병합 | Dense/Sparse 결과를 RRF(`RRF_K=60`)로 병합한다. |
+| 병합 | Dense/Sparse 결과를 가중 RRF(RRF_K=60, SPARSE_FUSION_WEIGHT=0.1)로 병합한다. |
 | 장애 처리 | 한쪽 검색이 실패하면 다른 쪽 단독 결과로 진행한다. 양쪽 모두 실패하면 DB 오류로 처리한다. |
 | 재탐색 | 결과가 0건이면 `top_k * 2`로 한 번 더 검색한다. |
 
@@ -96,10 +96,10 @@ rewrite
 | HIL 조건 | 전략이 `decompose` 또는 `stepback`이고 아직 승인되지 않은 경우 |
 | HIL 한도 | `MAX_HIL_COUNT=5` |
 | CRAG 재작성 한도 | `MAX_REWRITE_COUNT=3` |
-| 노드 타임아웃 | `GRAPH_STEP_TIMEOUT_SECONDS=60`초 (`src/utils/config.py` 정본) |
+| 노드 타임아웃 | `GRAPH_STEP_TIMEOUT_SECONDS=60`초 |
 | 리랭커 | `USE_RERANKER=false` 기본값. 켜면 `BAAI/bge-reranker-v2-m3`를 사용한다. |
 
-`evaluate`가 근거 부족을 판단하거나 rerank 임계값 미달로 `needs_reretrieval=True`가 세워지면 rewrite로 되돌아간다. 한도를 넘으면 현재 근거로 답변 생성 단계에 진입하거나 폴백 응답을 반환한다. 노드별 예외 분류 체계와 계층적 타임아웃(Layer 1 I/O 10~45초 < Layer 2 노드 60초 < Layer 3 서브시스템 120초) 상세 규약은 [예외 처리 및 런타임 타임아웃 정책](architecture/exception_policy.md)을 참조한다.
+`evaluate`가 근거 부족을 판단하거나 rerank 임계값 미달로 `needs_reretrieval=True`가 세워지면 rewrite로 되돌아간다. 한도를 넘으면 현재 근거로 답변 생성 단계에 진입하거나 폴백 응답을 반환한다. 노드별 예외 분류 체계와 계층적 타임아웃 상세 규약은 [예외 처리 및 런타임 타임아웃 정책](architecture/exception_policy.md)을 참조한다.
 
 ## 7. 데이터베이스와 모델
 
@@ -113,7 +113,7 @@ rewrite
 | 벡터 인덱스 | HNSW `vector_cosine_ops` |
 | 임베딩 모델 | `nlpai-lab/KURE-v1` |
 | 임베딩 서빙 | Docker TEI 컨테이너(`embedding`) 또는 프로세스 내 로드 |
-| LLM 모델 | `OPENAI_MODEL` 설정값 |
+| LLM 모델 | `OPENAI_MODEL` 설정값 (기본값: gpt-5.4-mini) |
 
 원문 PDF는 저장소에 포함하지 않는다. 원문은 배포 주체인 한국회계기준원에서 각자 받는 것을 원칙으로 하고, 파싱·청킹 결과처럼 팀이 가공한 데이터는 팀 작업물 보호 방침에 따라 공개하지 않는다. `PDF_DIR` 기본값은 `data/raw_data`이며, API의 PDF 서빙은 `resolve_pdf_path(document_id, PDF_DIR)` 규칙을 따른다.
 
@@ -140,7 +140,7 @@ HIL 체크포인터는 현재 프로세스 로컬 `MemorySaver`다. 따라서 Fa
 | 검색 통과 | 핵심 조항 Top-5 기준 구현 | `docs/benchmark/eval_pass_rules.md`, `tests/utils/benchmark_metrics.py` |
 | 내용 통과 | 별도 judge 미구현 | 같은 문서의 `content_pass` 섹션 |
 | 속도 | API/검색/답변 속도 정식 리포트 미작성 | 측정 산출물은 `docs/benchmark/`에 둔다. |
-| 리랭커 실험 | 2026-07-05 측정 문서가 있었으나 현재 문서 트리에는 포함되어 있지 않다 | 초기 측정 이력은 `docs/measurements/`에 보존하고, 향후 리포트는 `docs/benchmark/`에 기록한다. |
+| 리랭커 실험 | Cross-Encoder 적용 전후 비교 | 초기 측정 이력은 `docs/measurements/`에 보존하고, 향후 리포트는 `docs/benchmark/`에 기록한다. |
 
 검증되지 않은 숫자를 README나 아키텍처 문서에 박제하지 않는다. 벤치마크 데이터셋이 교정되면 측정 명령, 환경, 데이터셋 버전, 결과 해석을 함께 남긴다.
 

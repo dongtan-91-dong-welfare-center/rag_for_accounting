@@ -4,12 +4,7 @@
 
 데이터 타입과 상태 스키마의 단일 진실 공급원(SSoT)은 [src/models/schemas.py](../src/models/schemas.py)와 [src/models/state.py](../src/models/state.py)입니다.
 
-> **주요 개념 및 약어**: HNSW(근사최근접 벡터 인덱스), tsvector(PostgreSQL 전문검색 토큰), upsert(충돌 시 갱신, 부재 시 삽입). 시스템 공통 용어(조항·RRF·HIL·CRAG) 및 파이프라인 전체 흐름은 [전체 아키텍처](ARCHITECTURE.md)를 참조합니다.
-
-## 데이터 스키마
-
-각 기능 노드가 주고받는 데이터 타입은 `src/models/schemas.py`(공용 스키마)와 `src/models/state.py`(`GraphState`)가 정본입니다.
-필드 정의를 본 문서에 중복 기술하면 코드 변경 시 문서가 쉽게 뒤처지므로, 상세 필드 명세는 소스 코드를 직접 확인합니다.
+> **주요 개념 및 약어**: HNSW(근사최근접 벡터 인덱스), tsvector(PostgreSQL 전문검색 토큰), upsert(충돌 시 갱신, 부재 시 삽입). 시스템 공통 용어(조항, RRF, HIL, CRAG) 및 파이프라인 전체 흐름은 [전체 아키텍처](ARCHITECTURE.md)를 참조합니다.
 
 ---
 
