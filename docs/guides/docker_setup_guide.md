@@ -68,7 +68,7 @@ docker exec -it accounting_app bash
 # 1. 컨테이너에 최종적으로 설치된 패키지 확인
 uv pip list
 # 2. 내부에서 별도로 파이썬 단위 테스트 직접 통과 여부 수행
-pytest src/ingest/ontology/models.py
+pytest tests/unit/ingest/ontology/test_models.py
 ```
 
 #### DB 컨테이너 (`accounting_db`) 조회

@@ -1,12 +1,12 @@
 # 로컬 개발 셋업 가이드
 
-> 본 문서는 데이터셋 구성을 위해 구성된 로컬 개발에 대한 셋업 가이드를 작성됨.
+본 문서는 로컬 개발 환경 구축을 위한 의존성 설치, Docker 서비스 기동 및 ingest·query 파이프라인 실행 절차를 설명합니다.
 
 ## 1. 사전 요구
 - Python 3.12+ (`.python-version` 참조)
 - uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- Docker / Docker Compose (PostgreSQL·임베딩 서버·통합 앱용)
-- OpenAI API 키 (rewrite/evaluate/generate 노드용)
+- Docker 및 Docker Compose (PostgreSQL, 임베딩 서버, 통합 앱 실행용)
+- OpenAI API 키 (rewrite, evaluate, generate 노드용)
 
 ### 권장 하드웨어
 
@@ -18,19 +18,19 @@
 | 로컬 임베딩 직접 실행 | Apple Silicon MPS 또는 CUDA GPU가 있으면 유리하다. 없으면 TEI CPU 컨테이너를 사용한다. |
 | 리랭커 사용 | `BAAI/bge-reranker-v2-m3` 모델 캐시와 메모리 여유가 필요하다. 기본은 OFF다. |
 
-처음 실행 시 KURE-v1 모델 다운로드 때문에 임베딩 서버 준비가 몇 분 걸릴 수 있다. `./check.sh`는 이 상태를 감안해 헬스체크를 수행한다.
+처음 실행 시 KURE-v1 모델 다운로드 때문에 임베딩 서버 준비가 몇 분 걸릴 수 있습니다. `./check.sh` 스크립트는 이 상태를 감안하여 헬스체크를 수행합니다.
 
 ## 2. 의존성 설치
 ```bash
-uv sync          # .venv 생성 + 의존성(dev 포함) 설치
+uv sync          # .venv 생성 및 기본 개발 의존성 설치
 ```
-> 모든 Python 실행은 `uv run ...`로 한다(예: `uv run pytest`, `uv run python -m src.main ...`).
+> 모든 Python 실행은 `uv run ...` 명령으로 수행합니다 (예: `uv run pytest`, `uv run python -m src.main ...`).
 >
-> 위 기본 설치는 가볍다 — 임베딩은 Docker의 TEI 서버에 맡기고, PDF 파싱·로컬 임베딩처럼 무거운 라이브러리는 설치하지 않는다. 두 경우는 추가로 설치해야 한다.
-> - PDF를 직접 파싱해 적재하려면: `uv sync --extra ingest` (Docling 파싱 라이브러리 추가)
-> - `EMBEDDING_SERVER_URL`을 쓰지 않고 호스트에서 KURE-v1을 직접 돌리려면: `uv sync --extra local-embedding`
+> 기본 설치는 가볍게 유지됩니다: 임베딩 연산은 Docker의 TEI 컨테이너에 위임하며, 무거운 PDF 파싱 라이브러리(Docling)나 로컬 임베딩 의존성은 제외되어 있습니다. 작업 목적에 따라 다음 추가 옵션을 설치합니다:
+> - 원본 PDF를 직접 파싱하여 적재하는 경우: `uv sync --extra ingest`
+> - Docker 임베딩 서버 없이 호스트 머신에서 KURE-v1을 직접 구동하는 경우: `uv sync --extra local-embedding`
 >
-> 테스트를 전부 돌리려면 `--extra ingest`가 먼저 필요하다: `uv sync --extra ingest && uv run pytest`. 이 extra 없이 기본 설치만 하고 테스트를 돌리면, `tests/unit/ingest/parse`가 Docling을 쓰는 `src/ingest/parse`를 가져오려다 실패해 7건이 `ModuleNotFoundError: docling_core`로 떨어진다.
+> 전체 단위 테스트를 수행하려면 파싱 라이브러리가 필요하므로 `uv sync --extra ingest && uv run pytest` 순서로 실행합니다. 이 옵션 없이 기본 설치만으로 테스트를 실행하면 파싱 모듈 7건이 `ModuleNotFoundError: docling_core`로 실패합니다.
 
 ## 3. 환경 변수
 ```bash
@@ -45,7 +45,7 @@ cp .env.example .env
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | 연결 대상 |
 
-> 모델·임계치의 기본값 정본은 `src/utils/config.py`다(EMBEDDING_MODEL, OPENAI_MODEL, RRF_K, TOP_K_RETRIEVAL ...). 리랭커(USE_RERANKER·RERANK_THRESHOLD·RERANK_MODEL)와 임베딩 실행 자원(EMBEDDING_DEVICE 등)은 `.env`로 override할 수 있다 — 키 목록은 `.env.example` 참조.
+> 모델명 및 임계값 기본값의 정본(SSoT)은 `src/utils/config.py`입니다 (`EMBEDDING_MODEL`, `OPENAI_MODEL`, `RRF_K`, `TOP_K_RETRIEVAL` 등). 리랭커 설정과 임베딩 실행 자원은 `.env`로 덮어쓸 수 있으며, 상세 키 목록은 `.env.example`을 참조합니다.
 
 ## 4. Docker 스택 기동
 ```bash
