@@ -27,7 +27,7 @@ import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Iterable, Literal
 
 from pydantic import BaseModel
 from src.utils.clause_paras import (
@@ -271,6 +271,14 @@ def get_indexed_chapters() -> set[str]:
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT DISTINCT metadata->>'chapter' FROM chunks")
         return {r[0] for r in cur.fetchall() if r[0]}
+
+
+def sort_chapters(chapters: Iterable[str]) -> list[str]:
+    """장 번호 목록을 정수 장 번호 오름차순, 비정수 장(예: '부록') 문자열 오름차순으로 정렬합니다.
+
+    근거: 코퍼스에 비정수 장이 포함되었을 때 int(x) 변환 시 발생하는 ValueError를 방어합니다.
+    """
+    return sorted(chapters, key=lambda x: (0, int(x)) if str(x).isdigit() else (1, str(x)))
 
 
 def get_chunk_count() -> int:

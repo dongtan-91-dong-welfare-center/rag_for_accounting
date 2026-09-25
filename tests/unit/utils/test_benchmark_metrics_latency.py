@@ -18,6 +18,7 @@ from tests.utils.benchmark_metrics import (
     _percentile,
     aggregate,
     measure_case,
+    sort_chapters,
     write_markdown_report,
 )
 
@@ -203,3 +204,18 @@ class TestWriteMarkdownReportLatency:
         assert "## 최악 지연 시간 진단 (상위 1건)" in content
         assert "TEST-001" in content
         assert "소요 12.34s" in content
+
+
+@pytest.mark.unit
+class TestSortChapters:
+    """sort_chapters(): 장 번호 목록을 숫자 장 오름차순, 비정수 장 문자열 오름차순으로 정렬합니다."""
+
+    def test_sort_chapters_supports_non_numeric(self):
+        chapters = ["10", "2", "부록", "1", "부록2", "33"]
+        sorted_ch = sort_chapters(chapters)
+        assert sorted_ch == ["1", "2", "10", "33", "부록", "부록2"]
+
+    def test_sort_chapters_empty_and_single(self):
+        assert sort_chapters([]) == []
+        assert sort_chapters(["부록"]) == ["부록"]
+        assert sort_chapters(["2"]) == ["2"]

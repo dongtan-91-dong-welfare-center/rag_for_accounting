@@ -45,6 +45,7 @@ from tests.utils.benchmark_metrics import (  # noqa: E402
     gold_para_set,
     measure_case,
     parse_gold_clauses,
+    sort_chapters,
     write_markdown_report,
 )
 
@@ -144,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     init_pool()
     try:
         indexed = get_indexed_chapters()
-        sorted_indexed = sorted(indexed, key=lambda x: int(x))
+        sorted_indexed = sort_chapters(indexed)
         cases = load_benchmark()
         if args.case:
             cases = [c for c in cases if c.id == args.case]
