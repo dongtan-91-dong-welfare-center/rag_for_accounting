@@ -11,6 +11,7 @@ import time
 from unittest.mock import patch
 
 import pytest
+from scripts.benchmark_baseline import _load_checkpoint, _save_checkpoint
 from src.utils.config import TARGET_LATENCY_TOTAL_SEC
 from tests.utils.benchmark_loader import BenchmarkCase
 from tests.utils.benchmark_metrics import (
@@ -282,3 +283,37 @@ class TestSortChapters:
         assert sort_chapters([]) == []
         assert sort_chapters(["부록"]) == ["부록"]
         assert sort_chapters(["2"]) == ["2"]
+
+
+@pytest.mark.unit
+class TestCheckpointParameterGuard:
+    """_load_checkpoint(): k 불일치 시 ValueError 발생 및 동일 k 시 정상 복구를 검증합니다."""
+
+    def test_load_checkpoint_mismatched_k_raises_error(self, tmp_path):
+        chk_file = tmp_path / "checkpoint_benchmark.json"
+        sample_results = [
+            CaseResult(case_id="C-1", chapter="2", measurable=True, gold_paras=["2.1"], elapsed_sec=5.0)
+        ]
+        _save_checkpoint(chk_file, sample_results, k=5, indexed=["2"])
+
+        with pytest.raises(ValueError) as excinfo:
+            _load_checkpoint(chk_file, expected_k=10)
+
+        assert "k(5)" in str(excinfo.value)
+        assert "k(10)" in str(excinfo.value)
+
+    def test_load_checkpoint_matching_k_loads_results(self, tmp_path):
+        chk_file = tmp_path / "checkpoint_benchmark.json"
+        sample_results = [
+            CaseResult(case_id="C-1", chapter="2", measurable=True, gold_paras=["2.1"], elapsed_sec=5.0)
+        ]
+        _save_checkpoint(chk_file, sample_results, k=10, indexed=["2"])
+
+        loaded = _load_checkpoint(chk_file, expected_k=10)
+        assert len(loaded) == 1
+        assert loaded[0].case_id == "C-1"
+        assert loaded[0].elapsed_sec == 5.0
+
+    def test_load_checkpoint_non_existent_file_returns_empty(self, tmp_path):
+        chk_file = tmp_path / "non_existent.json"
+        assert _load_checkpoint(chk_file, expected_k=10) == []
