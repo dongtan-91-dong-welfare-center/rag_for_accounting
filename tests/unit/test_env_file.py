@@ -226,3 +226,20 @@ class TestEntryScriptsSurviveHostileEnv:
         assert "unbound variable" not in proc.stderr    # 실행중에 바인드되지 않는 변수 에러 확인
         assert "1. Required tools" in proc.stdout   # bash 실행 확인
         assert "확인 완료" in proc.stdout    # 점검 완료 확인
+
+
+@pytest.mark.unit
+class TestEnvExampleCompleteness:
+    """프로젝트 .env.example 파일의 필수 환경 변수 및 TEI 기동 설정 무결성 검증."""
+
+    def test_env_example_contains_tei_parameters(self):
+        """.env.example에 TEI 기동 파라미터 3종 및 권장값이 올바르게 선언되어 있어야 한다."""
+        env_example_path = _ROOT / ".env.example"
+        assert env_example_path.exists()
+        content = env_example_path.read_text(encoding="utf-8")
+
+        assert "TEI_MAX_BATCH_TOKENS=8192" in content
+        assert "TEI_MAX_INPUT_LENGTH=4096" in content
+        assert "TEI_MAX_CLIENT_BATCH_SIZE=8" in content
+        assert "저사양 권장: 4096" in content
+
