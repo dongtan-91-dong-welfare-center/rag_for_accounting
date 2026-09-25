@@ -26,7 +26,7 @@ from tests.utils.benchmark_metrics import (
 
 @pytest.mark.unit
 class TestPercentileInterpolation:
-    """_percentile() — 선형 보간 백분위수 산출 검증"""
+    """_percentile(): 선형 보간 백분위수 산출을 검증합니다."""
 
     def test_empty_and_single_element(self):
         assert _percentile([], 50.0) == 0.0
@@ -52,7 +52,7 @@ class TestPercentileInterpolation:
 
 @pytest.mark.unit
 class TestMeasureCaseLatency:
-    """measure_case() — time.perf_counter() 기반 소요 시간 계측 검증"""
+    """measure_case(): time.perf_counter() 기반 소요 시간 계측을 검증합니다."""
 
     def test_measure_case_records_elapsed_sec(self):
         case = BenchmarkCase(
@@ -110,7 +110,7 @@ class TestMeasureCaseLatency:
 
 @pytest.mark.unit
 class TestAggregateLatency:
-    """aggregate() — NFR-001 지연 시간 통계 산출 검증"""
+    """aggregate(): NFR-001 지연 시간 통계 산출을 검증합니다."""
 
     def test_aggregate_computes_latency_metrics(self):
         results = [
@@ -176,7 +176,7 @@ class TestAggregateLatency:
 
 @pytest.mark.unit
 class TestWriteMarkdownReportLatency:
-    """write_markdown_report() — 지연 시간 요약 및 컬럼 렌더링 검증"""
+    """write_markdown_report(): 지연 시간 요약 및 컬럼 렌더링을 검증합니다."""
 
     def test_report_includes_latency_section_and_columns(self, tmp_path):
         results = [
