@@ -96,11 +96,12 @@ EMBEDDING_SERVER_TIMEOUT_SECONDS: float = _env_float("EMBEDDING_SERVER_TIMEOUT_S
 #     Docker on Mac 컨테이너에는 MPS/Metal이 패스스루되지 않아 자동으로 cpu가 된다. 호스트 네이티브
 #     실행 시 mps로 잡혀 CPU 부하를 GPU로 넘긴다. "cpu"/"mps"/"cuda"로 강제 지정도 가능.
 #   - EMBEDDING_NUM_THREADS: torch intra-op 스레드 상한. 0이면 max(1, cpu_count-2)로 자동 산정해 전 코어 점유(오버서브스크립션, 관측된 1000%+ CPU)를 막는다.
-#   - EMBEDDING_ENCODE_BATCH_SIZE: model.encode 미니배치 크기. 작을수록 인코딩 1회 peak 메모리가 준다
-#     (sentence-transformers는 길이순 정렬 후 이 크기로 쪼개 패딩 낭비도 함께 줄인다).
+#   - EMBEDDING_ENCODE_BATCH_SIZE: model.encode 미니배치 및 원격 서빙(TEI) 요청 분할 크기.
+#     로컬 프로세스 내 로드 시 피크 메모리를 억제하고, 원격 TEI 서빙 호출 시 TEI_MAX_CLIENT_BATCH_SIZE(8)
+#     초과로 인한 HTTP 422 오류를 방지하기 위해 이 크기 단위로 요청을 분할합니다.
 EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "auto")
 EMBEDDING_NUM_THREADS: int = int(os.getenv("EMBEDDING_NUM_THREADS", "0"))
-EMBEDDING_ENCODE_BATCH_SIZE: int = int(os.getenv("EMBEDDING_ENCODE_BATCH_SIZE", "16"))
+EMBEDDING_ENCODE_BATCH_SIZE: int = int(os.getenv("EMBEDDING_ENCODE_BATCH_SIZE", "8"))
 
 # gpt-5.4-mini 컨텍스트 윈도우(400K) 중 컨텍스트 입력에 할당할 안전 한도
 # o200k_base 토크나이저 기준 한국어 ~0.5 토큰/글자 (즉 1 토큰 ≈ 2~3 글자)
