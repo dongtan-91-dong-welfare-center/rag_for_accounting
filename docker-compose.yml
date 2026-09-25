@@ -42,6 +42,7 @@ services:
     #   검색 품질 저하를 숨기므로 사용하지 않습니다.
     # - --max-client-batch-size: 1회 요청당 최대 배치 크기를 제한하여 저사양 환경의 메모리 급증을 방지합니다.
     command:
+      # TODO: 모델 ID 환경변수화(EMBEDDING_MODEL) 시 pgvector 차원(EMBEDDING_DIM: 1024), DDL 마이그레이션 및 토크나이저 정합성 영향도를 함께 검토하여 연계 분리 필요
       - --model-id
       - nlpai-lab/KURE-v1
       - --max-batch-tokens
