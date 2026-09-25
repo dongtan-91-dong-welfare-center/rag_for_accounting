@@ -59,12 +59,14 @@ Thumbs.db
 # 하니스 이름별로 나열하지 않고 확장자로 막는다 — 새 하니스가 추가될 때 규칙이 뒤처져
 # 산출물이 무시되지 않는 상태가 실제로 발생했다(15MB JSON 1건 커밋).
 docs/benchmark/*.json
+docs/benchmark/*.tmp
 # 하니스의 --out-dir 기본값이 아직 이 경로를 가리킨다(경로 통일은 #232) — 실수 커밋을 막는 안전망.
 docs/measurements/
 data/ontology
 data/md_data
 
 data/raw_data/*.pdf
+data/raw_data/*.md
 docs/decisions/
 
 # 데모 자산: 인라인 GIF만 커밋하고, 원본(.mov)·고화질(.mp4)은 GitHub 첨부로 올린다.

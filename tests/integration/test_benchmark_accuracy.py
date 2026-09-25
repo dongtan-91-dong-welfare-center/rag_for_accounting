@@ -30,6 +30,7 @@ from tests.utils.benchmark_metrics import (
     get_indexed_chapters,
     measure_case,
     parse_gold_clauses,
+    sort_chapters,
     write_markdown_report,
 )
 
@@ -77,7 +78,7 @@ def benchmark_measurement():
             results,
             summary,
             k=k,
-            indexed_chapters=sorted(indexed, key=lambda x: int(x)),
+            indexed_chapters=sort_chapters(indexed),
             n_chunks=n_chunks,
             use_reranker=USE_RERANKER,
         )
@@ -86,7 +87,7 @@ def benchmark_measurement():
             "k": k,
             "results": results,
             "summary": summary,
-            "indexed_chapters": sorted(indexed, key=lambda x: int(x)),
+            "indexed_chapters": sort_chapters(indexed),
             "n_chunks": n_chunks,
             "report_path": report_path,
         }
@@ -106,7 +107,7 @@ class TestBenchmarkAccuracy:
         if exp_chapters and exp_chapters != act_chapters:
             pytest.skip(
                 f"코퍼스 불일치 → 플로어 단언 skip. "
-                f"적재 장 baseline={sorted(exp_chapters, key=int)} vs 현재={sorted(act_chapters, key=int)}. "
+                f"적재 장 baseline={sort_chapters(exp_chapters)} vs 현재={sort_chapters(act_chapters)}. "
                 f"재적재했다면 benchmark_floor.json을 재시드하십시오."
             )
         exp_chunks = corpus.get("n_chunks")
