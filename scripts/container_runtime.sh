@@ -37,32 +37,40 @@ _COMPOSE_UP_FLAGS_PODMAN=(-d --build --force-recreate)
 # compose 실행 방식과 컨테이너 조작 명령을 정한다.
 # 찾았으면 0, 아무것도 못 찾았으면 1을 돌려준다.
 detect_container_runtime() {
-  local version_output
+  local version_output=""
 
-  # Docker를 가장 먼저 확인한다.
-  # 기존 Docker 사용자의 동작이 그대로 유지되어야 하기 때문이다.
-  # `docker --version`이 아니라 `docker compose version`을 실제로 실행해 보는 이유는 
-  # docker라는 명령이 있다는 사실만으로는 compose가 되는지 알 수 없어서다.
-  # 위에 적은 podman-docker 래퍼가 정확히 "명령은 있는데 compose는 안 되는" 경우다.
+  # 1. 순수 Docker Compose v2 확인
+  # 기존 Docker 사용자의 동작이 그대로 유지되어야 하므로 Docker를 가장 먼저 확인합니다.
+  # 근거: Podman 4.4.x 환경의 podman-docker 래퍼는 compose 서브커맨드가 없음에도
+  # 에러 메시지를 stderr로만 내보내고 종료 코드 0을 반환하거나 빈 출력을 생성할 수 있습니다.
+  # 따라서 단순 종료 코드 0만으로 판정하지 않고, stdout 출력에 "Docker Compose" 식별자가 포함되어 있으며
+  # podman 관련 문자열이 섞여 있지 않은 순수 Docker Compose v2 환경인지 명시적으로 검증합니다.
   if version_output="$(docker compose version 2>/dev/null)"; then
-    COMPOSE=(docker compose)
-    CONTAINER=(docker)
-    # Podman 4.7부터는 compose 하위 명령이 생겨서 이 확인이 성공할 수도 있다.
-    # 다만 그때 실제로 일하는 것은 podman이 뒤에서 부르는 podman-compose이므로 위의 재생성 문제를 똑같이 안는다.
-    # 버전 출력에 podman이라는 이름이 남으므로 그것으로 가려낸다.
     case "$version_output" in
-      *podman*|*Podman*) COMPOSE_UP_FLAGS=("${_COMPOSE_UP_FLAGS_PODMAN[@]}") ;;
-      *) COMPOSE_UP_FLAGS=(-d --build) ;;
+      *"Docker Compose"*)
+        case "$version_output" in
+          *podman*|*Podman*) ;;
+          *)
+            COMPOSE=(docker compose)
+            CONTAINER=(docker)
+            COMPOSE_UP_FLAGS=(-d --build)
+            return 0
+            ;;
+        esac
+        ;;
     esac
-    return 0
   fi
 
+  # 2. podman-compose 확인
+  # Rocky Linux 및 RHEL 계열 서버의 Podman 환경에서는 podman-compose를 직접 호출하는 방식이 가장 안전합니다.
+  # 근거: podman-docker 래퍼를 거쳐 `docker compose up -d`를 호출하면 `podman compose up -d`로 넘어가면서
+  # Podman 4.4.x에서 최상위 플래그 파싱 에러(unknown shorthand flag: 'd' in -d)가 발생하므로 직접 호출해야 합니다.
   if command -v podman-compose >/dev/null 2>&1; then
     COMPOSE=(podman-compose)
     COMPOSE_UP_FLAGS=("${_COMPOSE_UP_FLAGS_PODMAN[@]}")
-    # ps·exec·inspect는 podman을 직접 부른다.
-    # 래퍼를 거치면 환경에 따라 안내 문구가 함께 나와서 출력을 파싱하는 자리에서 걸릴 수 있다.
-    # podman 명령이 없는 환경이라면 래퍼라도 쓴다.
+    # ps·exec·inspect는 podman을 직접 부릅니다.
+    # 래퍼를 거치면 환경에 따라 안내 문구가 함께 나와서 출력을 파싱하는 자리에서 걸릴 수 있습니다.
+    # podman 명령이 없는 환경이라면 래퍼라도 씁니다.
     if command -v podman >/dev/null 2>&1; then
       CONTAINER=(podman)
     else
@@ -71,9 +79,23 @@ detect_container_runtime() {
     return 0
   fi
 
-  # 판정에 실패해도 세 배열을 비우지는 않는다.
-  # `set -u`가 켜진 셸에서 빈 배열을 "${COMPOSE[@]}"로 펼치면 bash 4.4 미만(macOS 기본 3.2 포함)이 "unbound variable" 오류를 내며 죽는다.
-  # 호출한 쪽이 실패를 사람에게 알리고 나머지 점검을 이어 갈 수 있도록 무해한 기본값을 남긴다.
+  # 3. Podman 4.7+ 외부 compose 위임 환경 (podman-compose가 PATH에 직접 노출되지 않은 특수 환경)
+  # Podman 4.7부터 생긴 compose 하위 명령이 동작하여 버전 출력에 podman이 남는 경우입니다.
+  # 근거: Podman이 외부 compose 공급자를 통해 동작할 때는 컨테이너 재생성 문제를 동일하게 가지므로
+  # --force-recreate 플래그를 포함한 옵션을 지정합니다.
+  case "$version_output" in
+    *podman*|*Podman*)
+      COMPOSE=(docker compose)
+      CONTAINER=(docker)
+      COMPOSE_UP_FLAGS=("${_COMPOSE_UP_FLAGS_PODMAN[@]}")
+      return 0
+      ;;
+  esac
+
+  # 4. 아무것도 찾지 못한 경우
+  # 판정에 실패해도 세 배열을 비우지는 않습니다.
+  # `set -u`가 켜진 셸에서 빈 배열을 "${COMPOSE[@]}"로 펼치면 bash 4.4 미만(macOS 기본 3.2 포함)이 "unbound variable" 오류를 내며 종료됩니다.
+  # 호출한 쪽이 실패를 사용자에게 알리고 나머지 점검을 이어 갈 수 있도록 안전한 기본값을 남깁니다.
   COMPOSE=(docker compose)
   CONTAINER=(docker)
   COMPOSE_UP_FLAGS=(-d --build)
