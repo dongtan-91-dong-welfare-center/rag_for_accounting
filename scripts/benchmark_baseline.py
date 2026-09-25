@@ -66,12 +66,21 @@ def _warmup_pipeline() -> None:
         print(f"[워밍업 경고] 워밍업 중 오류 발생 ({e}), 본 벤치마크를 계속 진행합니다. ({dt:.2f}초)\n", flush=True)
 
 
-def _load_checkpoint(path: Path) -> list[CaseResult]:
-    """체크포인트 파일에서 이미 완료된 케이스 결과들을 복구한다."""
+def _load_checkpoint(path: Path, expected_k: int | None = None) -> list[CaseResult]:
+    """체크포인트 파일에서 이미 완료된 케이스 결과들을 복구한다.
+
+    근거: 체크포인트의 k와 현재 실행의 k가 다르면 retrieval_exact_hit@k 등의 지표 키가
+    불일치하여 통계가 왜곡되므로, k 불일치 감지 시 ValueError를 발생시켜 잘못된 재개로 인한 데이터 손상을 방어합니다.
+    """
     if not path.exists():
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        saved_k = data.get("k")
+        if expected_k is not None and saved_k is not None and saved_k != expected_k:
+            raise ValueError(
+                f"체크포인트의 k({saved_k})와 현재 지정된 k({expected_k})가 일치하지 않습니다."
+            )
         return [
             CaseResult(
                 case_id=c["case_id"],
@@ -85,6 +94,8 @@ def _load_checkpoint(path: Path) -> list[CaseResult]:
             )
             for c in data.get("cases", [])
         ]
+    except ValueError:
+        raise
     except Exception as e:
         print(f"[경고] 체크포인트 로드 실패 ({e}), 처음부터 시작합니다.")
         return []
@@ -166,7 +177,15 @@ def main(argv: list[str] | None = None) -> int:
         results: list[CaseResult] = []
         completed_ids: set[str] = set()
         if args.resume:
-            results = _load_checkpoint(checkpoint_path)
+            try:
+                results = _load_checkpoint(checkpoint_path, expected_k=args.k)
+            except ValueError as e:
+                print(f"[중단] {e}")
+                print(
+                    f"기존 체크포인트의 k 값과 일치하도록 --k 옵션을 지정하거나, "
+                    f"기존 체크포인트({checkpoint_path})를 백업 또는 삭제한 후 재실행하십시오."
+                )
+                return 2
             completed_ids = {r.case_id for r in results}
             if completed_ids:
                 print(f"[체크포인트 복구] 기존 완료된 {len(completed_ids)}건 건너뛰고 진행합니다.\n")
