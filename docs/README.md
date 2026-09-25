@@ -22,6 +22,7 @@
 |---|---|---|
 | 로컬 개발 환경 셋업 | uv 의존성 설치, 환경변수 설정, ingest 및 query CLI 실행, 개발 서버 구동 | [guides/local_dev_setup.md](guides/local_dev_setup.md) |
 | Docker 환경 구성 | Docker Compose 스택(`database`, `embedding`, `app`) 빌드 및 인프라 검증 | [guides/docker_setup_guide.md](guides/docker_setup_guide.md) |
+| Rocky/RHEL 서버 배포 가이드 | Rocky Linux 및 RHEL 환경에서 Podman 기반 컨테이너 스택 배포, SELinux, 방화벽 및 운영 절차 | [guides/server_deploy_guide.md](guides/server_deploy_guide.md) |
 | 서버 간 DB 이관 가이드 | `db_dump.sh` 및 `db_restore.sh`를 활용한 임베딩 데이터베이스 덤프 및 복원 | [guides/db_migration_guide.md](guides/db_migration_guide.md) |
 | 하이브리드 검색 가이드 | Dense 및 Sparse 검색 원리, RRF 병합 가중치 설정, 장애 시 폴백 처리 | [guides/retrieval_guide.md](guides/retrieval_guide.md) |
 | 문서 온톨로지 가이드 | 기준서 계층 구조화, 온톨로지 노드 청킹, 결정적 `chunk_id` 및 메타데이터 전파 | [guides/ontology_guide.md](guides/ontology_guide.md) |
