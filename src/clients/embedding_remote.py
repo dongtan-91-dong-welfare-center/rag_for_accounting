@@ -27,7 +27,10 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     results: list[list[float]] = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
+        # normalize=True: 로컬 sentence-transformers 및 pgvector 코사인 유사도 정합성 보장
+        # truncate=False: 토큰 한도 초과 시 무음 절단(silent truncation)을 방지하고 상위 예외 처리로 전파
         payload = {"inputs": batch, "normalize": True, "truncate": False}
+        # TEI /embed 엔드포인트로 미니배치 전송 후 임베딩 벡터 목록을 수신하여 병합
         batch_embeddings = _post("/embed", payload).json()
         results.extend(batch_embeddings)
     return results

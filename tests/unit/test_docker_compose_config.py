@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from src.utils import config
+
 _ROOT = Path(__file__).resolve().parents[2]
 _COMPOSE_FILE = _ROOT / "docker-compose.yml"
 
@@ -45,9 +47,10 @@ class TestDockerComposeConfig:
         assert isinstance(command, list), "embedding command는 리스트 형식이어야 합니다."
 
         # 플래그 및 기본값 보간 문자열 확인
+        # TODO: 모델 ID 환경변수화(EMBEDDING_MODEL) 시 pgvector 차원(EMBEDDING_DIM: 1024), DDL 마이그레이션 및 토크나이저 정합성 영향도를 함께 검토하여 연계 분리 필요
         assert "--model-id" in command
         model_idx = command.index("--model-id")
-        assert command[model_idx + 1] == "nlpai-lab/KURE-v1"
+        assert command[model_idx + 1] == config.EMBEDDING_MODEL
 
         assert "--max-batch-tokens" in command
         batch_idx = command.index("--max-batch-tokens")
