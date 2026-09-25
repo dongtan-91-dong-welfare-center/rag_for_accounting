@@ -90,6 +90,9 @@ class DoclingParser:
             3. 아무 설정도 없으면 → Docling 기본 converter를 생성
         """
         if self._converter is None:
+            import os
+            # Windows 환경에서 심볼릭 링크 생성 권한 부재로 인한 WinError 1314 에러를 방지한다.
+            os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
             if self._overlap_threshold is not None or self._containment_threshold is not None:
                 # 커스텀 임계값이 지정된 경우: 레이아웃 후처리를 패치한 converter 생성
                 # (layout_config.py의 create_converter 참고)
