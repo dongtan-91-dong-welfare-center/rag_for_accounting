@@ -441,10 +441,10 @@ def aggregate(results: list[CaseResult], k: int) -> dict:
             "n": len(content_rows),
         }
 
-    # 지연 시간 통계 (NFR-001)
+    # 지연 시간 통계 (NFR-001): 에러 여부와 무관하게 유효한 소요 시간이 계측된 모든 측정 대상 케이스를 포함합니다.
     latencies = sorted(
-        r.elapsed_sec for r in rows
-        if r.elapsed_sec is not None
+        r.elapsed_sec for r in results
+        if r.measurable and r.elapsed_sec is not None
     )
     if latencies:
         summary["latency"] = {
@@ -582,7 +582,7 @@ def write_markdown_report(
 
     # ── 최악 지연 시간 진단 (상위 5건) ──
     slowest = sorted(
-        [r for r in results if r.measurable and r.error is None and r.elapsed_sec is not None],
+        [r for r in results if r.measurable and r.elapsed_sec is not None],
         key=lambda x: x.elapsed_sec or 0.0,
         reverse=True,
     )[:5]
@@ -590,11 +590,15 @@ def write_markdown_report(
         lines.append(f"## 최악 지연 시간 진단 (상위 {len(slowest)}건)")
         lines.append("")
         for r in slowest:
-            lines.append(
-                f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): "
-                f"전략={r.diag.get('strategy')}, CRAG={r.diag.get('rewrite_count')}, "
-                f"인용={r.diag.get('n_citations')}건, 검색={r.diag.get('n_retrieved')}건"
-            )
+            if r.error:
+                clean_err = r.error.replace("\n", " ").strip()
+                lines.append(f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): 에러={clean_err}")
+            else:
+                lines.append(
+                    f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): "
+                    f"전략={r.diag.get('strategy')}, CRAG={r.diag.get('rewrite_count')}, "
+                    f"인용={r.diag.get('n_citations')}건, 검색={r.diag.get('n_retrieved')}건"
+                )
         lines.append("")
 
     # ── 케이스별 회계사 검토 대조표 ──
