@@ -45,6 +45,50 @@ class TestEmbeddingClientRequestShape:
         assert tokens == 3
         assert mock_post.call_args[0][0] == "http://tei:80/tokenize"
 
+    def test_embed_texts_empty_returns_empty_without_request(self):
+        """빈 텍스트 리스트는 HTTP 요청 없이 즉시 빈 리스트를 반환한다"""
+        with patch.object(config, "EMBEDDING_SERVER_URL", "http://tei:80"), \
+             patch("src.clients.embedding_remote.httpx.post") as mock_post:
+            from src.clients import embedding_remote as embedding_client
+
+            vectors = embedding_client.embed_texts([])
+
+        # 임베딩서버에 빈 리스트를 보내는 것은 의미가 없으므로 요청하지 않고 빈 리스트를 반환한다.
+        assert vectors == []
+        mock_post.assert_not_called()
+
+    def test_embed_texts_chunks_by_batch_size(self):
+        """EMBEDDING_ENCODE_BATCH_SIZE 단위로 분할하여 순차 요청 후 결과를 순서대로 병합한다"""
+        mock_response = MagicMock()
+        # 입력 텍스트 하나당 1차원 벡터 [len(text)] 반환
+        mock_response.json.side_effect = lambda: [[0.1] * 4 for _ in mock_response.call_inputs]
+
+        def fake_post(url, json=None, timeout=None):
+            resp = MagicMock()
+            inputs = json["inputs"]
+            resp.json.return_value = [[float(val)] for val in inputs]
+            return resp
+
+        # 19개 텍스트, 배치 크기 8 -> 8, 8, 3으로 3회 분할 호출되어야 함
+        texts = [str(i) for i in range(19)]
+        with patch.object(config, "EMBEDDING_SERVER_URL", "http://tei:80"), \
+             patch.object(config, "EMBEDDING_ENCODE_BATCH_SIZE", 8), \
+             patch("src.clients.embedding_remote.httpx.post", side_effect=fake_post) as mock_post:
+            from src.clients import embedding_remote as embedding_client
+
+            vectors = embedding_client.embed_texts(texts)
+
+        # 입력 19개 모두 벡터로 변환되어 결과로 반환됨
+        assert len(vectors) == 19
+        assert vectors == [[float(i)] for i in range(19)]
+        assert mock_post.call_count == 3
+
+        # 각 분할 호출의 입력 크기 검증 (8, 8, 3)
+        calls = mock_post.call_args_list
+        assert len(calls[0].kwargs["json"]["inputs"]) == 8
+        assert len(calls[1].kwargs["json"]["inputs"]) == 8
+        assert len(calls[2].kwargs["json"]["inputs"]) == 3
+
 
 @pytest.mark.unit
 class TestEmbeddingDispatch:
