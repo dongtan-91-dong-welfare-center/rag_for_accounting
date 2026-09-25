@@ -65,6 +65,7 @@ data/ontology
 data/md_data
 
 data/raw_data/*.pdf
+data/raw_data/*.md
 docs/decisions/
 
 # 데모 자산: 인라인 GIF만 커밋하고, 원본(.mov)·고화질(.mp4)은 GitHub 첨부로 올린다.
