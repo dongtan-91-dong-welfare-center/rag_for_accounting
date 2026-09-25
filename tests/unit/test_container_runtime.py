@@ -42,9 +42,16 @@ fi
 exit 0
 """
 
-# `docker compose`가 깨지는 가짜 docker — podman-docker 래퍼가 깔린 Podman 환경을 흉내 낸다.
-# 실제 증상과 같은 메시지와 종료 코드를 낸다.
-_DOCKER_PODMAN_WRAPPER = """#!/bin/sh
+# `docker compose`가 깨지는 가짜 docker — podman-docker 래퍼가 깔린 Podman 4.4.x 환경을 흉내 냅니다.
+# Podman 4.4.x의 podman-docker 래퍼는 `compose version` 호출 시 에러 메시지를 stderr로 출력하면서
+# stdout은 비어 있고 종료 코드 0(성공)을 반환합니다.
+# 반면 `docker compose up` 등 실제 명령 호출 시 -d를 최상위 플래그로 오인하여 exit 125로 실패합니다.
+_DOCKER_PODMAN_WRAPPER = r"""#!/bin/sh
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  echo "Emulate Docker CLI using podman. Create /etc/containers/nodocker to quiet msg." >&2
+  echo "Error: unrecognized command \`podman compose\`" >&2
+  exit 0
+fi
 if [ "$1" = "compose" ]; then
   echo "Error: unknown shorthand flag: 'd' in -d" >&2
   exit 125
@@ -171,6 +178,48 @@ class TestDetectContainerRuntime:
         assert rc == 0  # 성공
         assert compose == "docker compose"  # docker compose를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+
+    def test_podman_wrapper_exiting_zero_on_version_falls_back_to_podman_compose(
+        self, tmp_path
+    ):
+        """
+        Podman 4.4.1 래퍼처럼 `docker compose version`이 에러를 stderr에만 남기고 exit code 0을 반환할 때,
+        `podman-compose`를 정상적으로 선택하는지 검증합니다.
+
+        근거: Podman 4.4.x는 compose 서브커맨드가 없지만 종료 코드 0을 반환할 수 있으므로,
+        단순 종료 코드 0만 보지 않고 출력 검증을 통해 podman-compose로 분기해야 합니다.
+        """
+        bin_dir = _make_bin(
+            tmp_path,
+            {"docker": _DOCKER_PODMAN_WRAPPER, "podman-compose": _STUB, "podman": _STUB},
+        )
+
+        rc, compose, container, up_flags = _detect(bin_dir)
+
+        assert rc == 0  # 성공
+        assert compose == "podman-compose"  # podman-compose를 선택
+        assert container == "podman"  # podman을 선택
+        assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+
+    def test_podman_wrapper_exiting_zero_without_podman_compose_fails(
+        self, tmp_path
+    ):
+        """
+        Podman 4.4.1 래퍼만 있고 `podman-compose`가 설치되어 있지 않은 경우 판정 실패를 보고하는지 검증합니다.
+
+        근거: `docker compose version`의 종료 코드 0을 성공으로 오판하면
+        사용자에게 런타임 미설치 오류 대신 후속 실행 시 파싱 오류를 유발하므로 즉시 실패해야 합니다.
+        """
+        bin_dir = _make_bin(
+            tmp_path,
+            {"docker": _DOCKER_PODMAN_WRAPPER, "podman": _STUB},
+        )
+
+        rc, compose, container, up_flags = _detect(bin_dir)
+
+        assert rc != 0  # 실패를 보고
+        assert compose == "docker compose"  # 안전한 기본값을 유지
+        assert container == "docker"  # 안전한 기본값을 유지
 
     def test_reports_failure_when_no_runtime_found(self, tmp_path):
         """compose 계열이 하나도 없으면 실패를 알린다."""
