@@ -51,7 +51,7 @@ class TestDockerComposeConfig:
 
         assert "--max-batch-tokens" in command
         batch_idx = command.index("--max-batch-tokens")
-        assert command[batch_idx + 1] == "${TEI_MAX_BATCH_TOKENS:-8192}"
+        assert command[batch_idx + 1] == "${TEI_MAX_BATCH_TOKENS:-4096}"
 
         assert "--max-input-length" in command
         input_idx = command.index("--max-input-length")
@@ -76,7 +76,7 @@ class TestDockerComposeConfig:
         assert raw_data_mounts[0] == "./data/raw_data:/app/data/raw_data:ro,z"
 
     def test_parameter_interpolation_resolution(self):
-        """정규식을 활용해 .env 미지정 시 기본값 및 지정 시 오버라이드 값 치환을 검증합니다."""
+        """정규식을 활용해 .env 미지정 시 기본값(4096) 및 지정 시 오버라이드(8192) 치환을 검증합니다."""
         raw_content = _COMPOSE_FILE.read_text(encoding="utf-8")
 
         # 기본값 치환 헬퍼 (예: ${VAR:-DEFAULT})
@@ -88,20 +88,20 @@ class TestDockerComposeConfig:
                 return env.get(var_name, default_val)
             return re.sub(r"\$\{([A-Za-z0-9_]+):-([^}]+)\}", _repl, text)
 
-        # 1. 환경변수 없을 때 기본값 치환 결과
+        # 1. 환경변수 없을 때 안전 기본값 치환 결과 (4096 / 4096 / 8)
         resolved_default = yaml.safe_load(resolve_defaults(raw_content))
         default_cmd = resolved_default["services"]["embedding"]["command"]
-        assert default_cmd[default_cmd.index("--max-batch-tokens") + 1] == "8192"
+        assert default_cmd[default_cmd.index("--max-batch-tokens") + 1] == "4096"
         assert default_cmd[default_cmd.index("--max-input-length") + 1] == "4096"
         assert default_cmd[default_cmd.index("--max-client-batch-size") + 1] == "8"
 
-        # 2. 저사양 호스트 권장값 오버라이드 결과
-        low_spec_env = {
-            "TEI_MAX_BATCH_TOKENS": "4096",
-            "TEI_MAX_CLIENT_BATCH_SIZE": "8",
+        # 2. 고사양 호스트 오버라이드 결과 (8192 / 4096 / 16)
+        high_spec_env = {
+            "TEI_MAX_BATCH_TOKENS": "8192",
+            "TEI_MAX_CLIENT_BATCH_SIZE": "16",
         }
-        resolved_low_spec = yaml.safe_load(resolve_defaults(raw_content, low_spec_env))
-        low_spec_cmd = resolved_low_spec["services"]["embedding"]["command"]
-        assert low_spec_cmd[low_spec_cmd.index("--max-batch-tokens") + 1] == "4096"
-        assert low_spec_cmd[low_spec_cmd.index("--max-input-length") + 1] == "4096"
-        assert low_spec_cmd[low_spec_cmd.index("--max-client-batch-size") + 1] == "8"
+        resolved_high_spec = yaml.safe_load(resolve_defaults(raw_content, high_spec_env))
+        high_spec_cmd = resolved_high_spec["services"]["embedding"]["command"]
+        assert high_spec_cmd[high_spec_cmd.index("--max-batch-tokens") + 1] == "8192"   # ${TEI_MAX_BATCH_TOKENS:-8192}
+        assert high_spec_cmd[high_spec_cmd.index("--max-input-length") + 1] == "4096"   # ${TEI_MAX_INPUT_LENGTH:-4096}
+        assert high_spec_cmd[high_spec_cmd.index("--max-client-batch-size") + 1] == "16"   # ${TEI_MAX_CLIENT_BATCH_SIZE:-16}

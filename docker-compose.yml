@@ -33,10 +33,10 @@ services:
     container_name: accounting_embedding
     # TEI 기동 파라미터는 .env를 통해 호스트 사양에 맞게 조정할 수 있습니다.
     # - --max-batch-tokens: 웜업 및 배치 추론의 최대 토큰 상한입니다. 기본값 16384는 기동 웜업 시
-    #   단일 대용량 버퍼 할당으로 CPU 환경에서 메모리 부족(OOM, exit 137)을 유발하므로 8192로 제한합니다.
-    #   저사양 호스트(RAM 16GB 이하 VM)에서는 4096으로 추가 축소를 권장합니다.
+    #   단일 대용량 버퍼 할당으로 CPU 환경에서 메모리 부족(OOM, exit 137)을 유발하므로 4096으로 제한합니다.
+    #   고사양 호스트에서 대량 배치 적재 처리량을 높이려는 경우 8192 이상으로 상향할 수 있습니다.
     # - --max-input-length: 단일 입력 텍스트의 최대 토큰 수입니다. TEI는 batch-tokens >= input-length
-    #   규칙을 검증하므로, 4096으로 명시하여 batch-tokens를 4096으로 낮추어도 기동 검증을 통과합니다.
+    #   규칙을 검증하므로, 4096으로 명시하여 batch-tokens 4096과 일치시켜 기동 검증을 통과합니다.
     #   실제 데이터 최장 청크는 2,047토큰(CHUNK_MAX_TOKENS=2048)이므로 절단 없이 2배 여유를 확보합니다.
     # - --auto-truncate 미채택: 입력을 조용히 절단하는 옵션은 적재 토큰 규약(IX-201)과 어긋나고
     #   검색 품질 저하를 숨기므로 사용하지 않습니다.
@@ -45,7 +45,7 @@ services:
       - --model-id
       - nlpai-lab/KURE-v1
       - --max-batch-tokens
-      - "${TEI_MAX_BATCH_TOKENS:-8192}"
+      - "${TEI_MAX_BATCH_TOKENS:-4096}"
       - --max-input-length
       - "${TEI_MAX_INPUT_LENGTH:-4096}"
       - --max-client-batch-size

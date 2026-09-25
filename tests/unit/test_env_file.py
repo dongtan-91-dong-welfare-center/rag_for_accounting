@@ -238,8 +238,8 @@ class TestEnvExampleCompleteness:
         assert env_example_path.exists()
         content = env_example_path.read_text(encoding="utf-8")
 
-        assert "TEI_MAX_BATCH_TOKENS=8192" in content
-        assert "TEI_MAX_INPUT_LENGTH=4096" in content
-        assert "TEI_MAX_CLIENT_BATCH_SIZE=8" in content
-        assert "저사양 권장: 4096" in content
+        assert "TEI_MAX_BATCH_TOKENS=4096" in content   # ${TEI_MAX_BATCH_TOKENS:-4096}
+        assert "TEI_MAX_INPUT_LENGTH=4096" in content   # ${TEI_MAX_INPUT_LENGTH:-4096}
+        assert "TEI_MAX_CLIENT_BATCH_SIZE=8" in content   # ${TEI_MAX_CLIENT_BATCH_SIZE:-8}
+        assert "기본값: 4096" in content
 
