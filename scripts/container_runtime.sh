@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 컨테이너 런타임 판정 — install.sh·check.sh·db_dump.sh·db_restore.sh가 source로 함께 읽는다.
+# 컨테이너 런타임 판정: install.sh·check.sh·db_dump.sh·db_restore.sh가 source로 함께 읽습니다.
 #
 # [배경]
 # 이 저장소의 스택은 compose 파일 하나로 뜨지만, compose를 실행하는 명령은 환경마다 다르다.
@@ -81,12 +81,22 @@ detect_container_runtime() {
 
   # 3. Podman 4.7+ 외부 compose 위임 환경 (podman-compose가 PATH에 직접 노출되지 않은 특수 환경)
   # Podman 4.7부터 생긴 compose 하위 명령이 동작하여 버전 출력에 podman이 남는 경우입니다.
-  # 근거: Podman이 외부 compose 공급자를 통해 동작할 때는 컨테이너 재생성 문제를 동일하게 가지므로
-  # --force-recreate 플래그를 포함한 옵션을 지정합니다.
+  # 근거 1 (COMPOSE 배정 사유): `docker compose version`이 성공하고 출력에 podman이 포함된 것은,
+  # 시스템의 Podman이 docker compose 명령을 가로채서 외부 compose 공급자로 정상 위임하고 있음을 의미합니다.
+  # 따라서 compose 실행 명령은 동작이 이미 검증된 `docker compose`를 그대로 채택합니다.
+  # 단, 외부 공급자를 거치더라도 컨테이너 재생성 문제는 동일하게 발생하므로 --force-recreate 플래그를 지정합니다.
+  # 근거 2 (CONTAINER 배정 사유 및 폴백): case 조건이 podman임에도 CONTAINER 기본값을 docker로 고정하면,
+  # 컨테이너 조작 시 podman-docker 래퍼를 거치며 매번 stderr 안내 문구(Emulate Docker CLI...)가 출력되어 파싱 오류를 유발합니다.
+  # 따라서 시스템에 네이티브 `podman` 명령어가 존재하면 `CONTAINER=(podman)`을 우선 배정합니다.
+  # 만약 podman 바이너리가 PATH에 없고 docker 래퍼만 노출된 특수 환경이라면 불가피하게 `CONTAINER=(docker)`로 폴백합니다.
   case "$version_output" in
     *podman*|*Podman*)
       COMPOSE=(docker compose)
-      CONTAINER=(docker)
+      if command -v podman >/dev/null 2>&1; then
+        CONTAINER=(podman)
+      else
+        CONTAINER=(docker)
+      fi
       COMPOSE_UP_FLAGS=("${_COMPOSE_UP_FLAGS_PODMAN[@]}")
       return 0
       ;;

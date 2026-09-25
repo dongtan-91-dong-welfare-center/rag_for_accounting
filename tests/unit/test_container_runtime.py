@@ -1,5 +1,5 @@
 """
-scripts/container_runtime.sh — 컨테이너 런타임 판정 로직 테스트.
+scripts/container_runtime.sh: 컨테이너 런타임 판정 로직 테스트.
 
 [배경]
 install.sh·check.sh·db_dump.sh·db_restore.sh 네 스크립트는 컨테이너를 띄우고 들여다보기 위해 compose 명령을 부른다. 
@@ -33,7 +33,7 @@ from tests.utils.shell_test_helpers import BASH_PATH as _BASH, make_bin as _make
 _ROOT = Path(__file__).resolve().parents[2]
 _LIB = _ROOT / "scripts" / "container_runtime.sh"
 
-# `docker compose version`이 성공하는 가짜 docker — Docker Compose v2가 깔린 환경을 흉내 낸다.
+# `docker compose version`이 성공하는 가짜 docker: Docker Compose v2가 설치된 환경을 흉내 냅니다.
 _DOCKER_WITH_COMPOSE = """#!/bin/sh
 if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   echo "Docker Compose version v2.39.0"
@@ -42,28 +42,37 @@ fi
 exit 0
 """
 
-# `docker compose`가 깨지는 가짜 docker — podman-docker 래퍼가 깔린 Podman 4.4.x 환경을 흉내 냅니다.
-# Podman 4.4.x의 podman-docker 래퍼는 `compose version` 호출 시 에러 메시지를 stderr로 출력하면서
-# stdout은 비어 있고 종료 코드 0(성공)을 반환합니다.
-# 반면 `docker compose up` 등 실제 명령 호출 시 -d를 최상위 플래그로 오인하여 exit 125로 실패합니다.
-_DOCKER_PODMAN_WRAPPER = r"""#!/bin/sh
-if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
-  echo "Emulate Docker CLI using podman. Create /etc/containers/nodocker to quiet msg." >&2
-  echo "Error: unrecognized command \`podman compose\`" >&2
-  exit 0
-fi
+# `docker compose` 실행 시 비정상 종료(exit 125)하는 가짜 docker: compose 플러그인이 없거나 오류를 내는 환경을 흉내 냅니다.
+_DOCKER_BROKEN_COMPOSE = """#!/bin/sh
 if [ "$1" = "compose" ]; then
-  echo "Error: unknown shorthand flag: 'd' in -d" >&2
+  echo "오류: 알 수 없는 단축 플래그: 'd' (-d)" >&2
   exit 125
 fi
 exit 0
 """
 
-# `docker compose`가 성공하지만 실제로는 podman이 podman-compose에 넘겨서 처리하는 가짜 docker.
-# Podman 4.7부터 생긴 compose 하위 명령이 이렇게 동작한다. 겉모습만 Docker다.
+# `docker compose`가 깨지는 가짜 docker: podman-docker 래퍼가 깔린 Podman 4.4.x 환경을 흉내 냅니다.
+# Podman 4.4.x의 podman-docker 래퍼는 `compose version` 호출 시 에러 메시지를 stderr로 출력하면서
+# stdout은 비어 있고 종료 코드 0(성공)을 반환합니다.
+# 반면 `docker compose up` 등 실제 명령 호출 시 -d를 최상위 플래그로 오인하여 exit 125로 실패합니다.
+_DOCKER_PODMAN_WRAPPER = r"""#!/bin/sh
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  echo "podman을 사용하여 Docker CLI를 에뮬레이트합니다. 이 메시지를 숨기려면 /etc/containers/nodocker 파일을 생성하세요." >&2
+  echo "오류: 인식할 수 없는 명령 \`podman compose\`" >&2
+  exit 0
+fi
+if [ "$1" = "compose" ]; then
+  echo "오류: 알 수 없는 단축 플래그: 'd' (-d)" >&2
+  exit 125
+fi
+exit 0
+"""
+
+# `docker compose`가 성공하지만 실제로는 podman이 podman-compose에 넘겨서 처리하는 가짜 docker:
+# Podman 4.7부터 생긴 compose 하위 명령이 이렇게 동작합니다.
 _DOCKER_DELEGATING_TO_PODMAN = """#!/bin/sh
 if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
-  echo '>>>> Executing external compose provider "/usr/bin/podman-compose"' >&2
+  echo '>>>> 외부 compose 제공자 "/usr/bin/podman-compose" 실행 중' >&2
   echo "podman-compose version 1.0.6"
   exit 0
 fi
@@ -110,7 +119,7 @@ def _detect(bin_dir: Path) -> tuple[int, str, str, str]:
 @pytest.mark.unit
 class TestDetectContainerRuntime:
     def test_docker_compose_wins_when_available(self, tmp_path):
-        """Docker Compose v2가 있으면 그것을 고른다 — 기존 Docker 사용자에게 회귀가 없어야 한다."""
+        """Docker Compose v2가 있으면 그것을 고릅니다: 기존 Docker 사용자에게 회귀가 없어야 합니다."""
         bin_dir = _make_bin(tmp_path, {"docker": _DOCKER_WITH_COMPOSE})
 
         rc, compose, container, up_flags = _detect(bin_dir)
@@ -133,12 +142,12 @@ class TestDetectContainerRuntime:
 
     def test_falls_back_when_docker_wrapper_cannot_run_compose(self, tmp_path):
         """
-        podman-docker 래퍼 때문에 docker 명령은 있지만 `docker compose`가 깨지는 환경.
-        실제로 `docker compose version`을 돌려 보고 판정해야 한다.
+        docker 명령은 있지만 `docker compose version`이 비정상 종료(exit 125)하는 환경.
+        실제로 `docker compose version` 실패 시 podman-compose로 폴백해야 합니다.
         """
         bin_dir = _make_bin(
             tmp_path,
-            {"docker": _DOCKER_PODMAN_WRAPPER, "podman-compose": _STUB, "podman": _STUB},
+            {"docker": _DOCKER_BROKEN_COMPOSE, "podman-compose": _STUB, "podman": _STUB},
         )
 
         rc, compose, container, up_flags = _detect(bin_dir)
@@ -177,6 +186,22 @@ class TestDetectContainerRuntime:
 
         assert rc == 0  # 성공
         assert compose == "docker compose"  # docker compose를 선택
+        assert container == "podman"  # podman이 설치되어 있으면 podman CLI를 선택
+        assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+
+    def test_delegating_docker_compose_falls_back_to_docker_when_podman_cli_absent(
+        self, tmp_path
+    ):
+        """Podman 위임 환경이지만 podman CLI가 없으면 docker 래퍼를 컨테이너 조작 CLI로 선택합니다."""
+        bin_dir = _make_bin(
+            tmp_path, {"docker": _DOCKER_DELEGATING_TO_PODMAN}
+        )
+
+        rc, compose, container, up_flags = _detect(bin_dir)
+
+        assert rc == 0  # 성공
+        assert compose == "docker compose"  # docker compose를 선택
+        assert container == "docker"  # podman이 없으므로 docker를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
 
     def test_podman_wrapper_exiting_zero_on_version_falls_back_to_podman_compose(
