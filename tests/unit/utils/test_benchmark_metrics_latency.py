@@ -148,6 +148,30 @@ class TestAggregateLatency:
         summary = aggregate(results, k=10)
         assert "latency" not in summary
 
+    def test_aggregate_includes_latency_from_error_cases(self):
+        """에러가 발생한 케이스라도 유효한 소요 시간이 계측되었다면 지연 시간 통계에 포함합니다."""
+        results = [
+            CaseResult(case_id="C-1", chapter="2", measurable=True, gold_paras=["2.1"], elapsed_sec=10.0),
+            CaseResult(case_id="C-2", chapter="2", measurable=True, gold_paras=["2.1"], elapsed_sec=20.0),
+            CaseResult(
+                case_id="C-ERR",
+                chapter="2",
+                measurable=True,
+                gold_paras=["2.1"],
+                elapsed_sec=120.0,
+                error="TimeoutError: 120초 제한 초과",
+            ),
+        ]
+        summary = aggregate(results, k=10)
+
+        assert "latency" in summary
+        lat = summary["latency"]
+        assert lat["max"] == 120.0
+        assert lat["min"] == 10.0
+        assert lat["p50"] == 20.0
+        # n_measured는 채점 가능한 정상 케이스 수(2건)여야 함
+        assert summary["n_measured"] == 2
+
 
 @pytest.mark.unit
 class TestWriteMarkdownReportLatency:
@@ -204,6 +228,45 @@ class TestWriteMarkdownReportLatency:
         assert "## 최악 지연 시간 진단 (상위 1건)" in content
         assert "TEST-001" in content
         assert "소요 12.34s" in content
+
+    def test_write_markdown_report_includes_slowest_with_error(self, tmp_path):
+        """최악 지연 시간 진단 표에 에러 발생 케이스가 에러 메시지와 함께 정상 렌더링되는지 검증합니다."""
+        results = [
+            CaseResult(
+                case_id="TEST-SLOW-ERR",
+                chapter="2",
+                measurable=True,
+                gold_paras=["2.10"],
+                elapsed_sec=95.5,
+                error="Database timeout occurred\nConnection reset by peer",
+            ),
+            CaseResult(
+                case_id="TEST-FAST-OK",
+                chapter="2",
+                measurable=True,
+                gold_paras=["2.20"],
+                elapsed_sec=5.0,
+                metrics={"retrieval_exact_hit@10": True, "generation_exact_hit@1": True},
+                diag={"rewrite_count": 0, "strategy": "direct", "n_citations": 1, "n_retrieved": 5},
+            ),
+        ]
+        summary = aggregate(results, k=10)
+        report_path = write_markdown_report(
+            results,
+            summary,
+            k=10,
+            indexed_chapters=["2"],
+            n_chunks=500,
+            use_reranker=False,
+            out_dir=tmp_path,
+        )
+        content = report_path.read_text(encoding="utf-8")
+
+        assert "## 최악 지연 시간 진단 (상위 2건)" in content
+        assert "TEST-SLOW-ERR" in content
+        assert "소요 95.50s" in content
+        # 줄바꿈이 공백으로 치환되어 마크다운 리스트 문법이 유지되는지 검증
+        assert "에러=Database timeout occurred Connection reset by peer" in content
 
 
 @pytest.mark.unit
