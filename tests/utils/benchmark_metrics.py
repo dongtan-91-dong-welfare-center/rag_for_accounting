@@ -341,7 +341,7 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
     retrieved = state.get("retrieved_chunks") or []
     citations = list(fr.citations) if fr else []
 
-    # (본문, chunk_id) 쌍으로 채점한다 — 단일 조항 청크(번호가 id에만 있음) 인정
+    # (본문, chunk_id) 쌍으로 채점합니다: 단일 조항 청크의 경우 번호가 chunk_id에만 존재하는 케이스를 인정합니다.
     search_items = [(r.chunk.content, r.chunk.chunk_id) for r in reranked]
     cite_items = [(c.content, c.chunk_id) for c in citations]
     cite_contents = [c.content for c in citations]  # 전문 영속화(diag)용
@@ -386,7 +386,7 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         "elapsed_sec": res.elapsed_sec,
     }
 
-    # content_pass(내용 통과) 판정 — 옵트인(CONTENT_JUDGE). 검색축과 분리된 별도 LLM 판정 축.
+    # content_pass(내용 통과) 판정: 옵트인(CONTENT_JUDGE) 방식으로 동작하며, 검색축과 분리된 별도의 LLM 판정 축입니다.
     # expected_answer 신뢰성 전제
     if os.getenv("CONTENT_JUDGE"):
         try:
@@ -646,7 +646,7 @@ def write_markdown_report(
             lines.append(f"**④ 판정 근거(LLM eval)**: {d['eval_reasoning']}")
             lines.append("")
         lines.append(
-            "**⑤ 회계사 검토** — 답변 정확성: ☐정확 ☐부분 ☐오류  /  "
+            "**⑤ 회계사 검토**: 답변 정확성: ☐정확 ☐부분 ☐오류  /  "
             "근거(조항) 적절성: ☐적절 ☐부족 ☐오인용  /  메모: "
         )
         lines.append("")

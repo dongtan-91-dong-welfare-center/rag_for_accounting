@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[중단] 인프라 점검 실패: {infra_error}")
         return 2
     if not os.getenv("OPENAI_API_KEY"):
-        print("[중단] OPENAI_API_KEY 미설정 — 라이브 측정 불가")
+        print("[중단] OPENAI_API_KEY 환경변수가 설정되지 않아 라이브 측정을 진행할 수 없습니다.")
         return 2
 
     init_pool()
@@ -200,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             clauses = parse_gold_clauses(case.references)
             chapter = clauses[0].chapter if clauses else "?"
             if chapter not in indexed and not args.all_cases:
-                print(f"[{i}/{len(cases)}] {case.id} (제{chapter}장) — 미적재 → SKIP")
+                print(f"[{i}/{len(cases)}] {case.id} (제{chapter}장): 미적재 상태이므로 측정을 건너뜁니다 (SKIP).")
                 skip_res = CaseResult(
                     case_id=case.id,
                     chapter=chapter,
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
 
             print(f"[{i}/{len(cases)}] {case.id} (제{chapter}장) 측정 중…", flush=True)
             res = measure_case(case, args.k)
-            sec_str = f"{res.elapsed_sec:.2f}s" if res.elapsed_sec is not None else "—"
+            sec_str = f"{res.elapsed_sec:.2f}s" if res.elapsed_sec is not None else "-"
             if res.error:
                 print(f"    ✗ 에러: {res.error} ({sec_str})")
             else:

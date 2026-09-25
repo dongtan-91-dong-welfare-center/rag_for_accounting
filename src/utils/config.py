@@ -72,7 +72,7 @@ LLM_MAX_RETRIES: int = int(_env_float("LLM_MAX_RETRIES", 1.0))
 # LangGraph 노드 실행 타임아웃 (초)
 GRAPH_STEP_TIMEOUT_SECONDS: int = int(_env_float("GRAPH_STEP_TIMEOUT_SECONDS", 60.0))
 
-# NFR-001 성능 테스트 목표 지연 시간 (초) — 리포트 갭 표기 및 참고 수치용 (하드게이트 아님)
+# NFR-001 성능 테스트 목표 지연 시간 (초): 리포트 갭 표기 및 참고 수치용이며, 강제 차단 기준(하드게이트)은 아닙니다.
 TARGET_LATENCY_TOTAL_SEC: float = _env_float("TARGET_LATENCY_TOTAL_SEC", 120.0)
 # 리랭킹 단계 지연 시간 목표(15.0초)는 향후 USE_RERANKER 기본 활성화 시 추가하여 계측합니다.
 
