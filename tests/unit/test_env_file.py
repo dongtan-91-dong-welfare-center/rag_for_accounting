@@ -175,6 +175,9 @@ class TestEntryScriptsSurviveHostileEnv:
             'if [ "$1" = "compose" ] && [ "$2" = "version" ]; then\n'
             '  echo "Docker Compose version v2.39.0"; exit 0\n'
             'fi\n'
+            'if [ "$1" = "inspect" ]; then\n'
+            '  echo "running"; exit 0\n'
+            'fi\n'
             'exit 0\n'
         )
         # curl이 성공을 돌려주면 install.sh의 대기 루프가 곧바로 통과한다.
@@ -190,8 +193,8 @@ class TestEntryScriptsSurviveHostileEnv:
         work = tmp_path / "repo"
         # shutil.copytree: 프로젝트 루트(_ROOT)의 scripts/ 폴더 전체를 통째로 복사
         shutil.copytree(_ROOT / "scripts", work / "scripts")
-        # install.sh, check.sh, .env.example 복사
-        for name in ("install.sh", "check.sh", ".env.example"):
+        # install.sh, deploy.sh, check.sh, .env.example 복사
+        for name in ("install.sh", "deploy.sh", "check.sh", ".env.example"):
             shutil.copy(_ROOT / name, work / name)
         # 위험한 특수문자가 포함된 self.HOSTILE_ENV 문자열을 .env 파일로 직접 생성
         (work / ".env").write_text(self.HOSTILE_ENV)
@@ -218,6 +221,19 @@ class TestEntryScriptsSurviveHostileEnv:
         proc = self._run("install.sh", tmp_path)
 
         assert "http://localhost:3000" in proc.stdout   # curl 포트 반영 확인
+
+    def test_deploy_reaches_the_container_build_step(self, tmp_path):
+        """deploy.sh가 특별한 글자가 든 .env를 만나도 죽지 않고 빌드 단계까지 진행해야 한다."""
+        proc = self._run("deploy.sh", tmp_path)
+
+        assert "unbound variable" not in proc.stderr
+        assert "Building app container" in proc.stdout
+
+    def test_deploy_uses_the_port_from_env(self, tmp_path):
+        """.env의 APP_HOST_PORT가 deploy.sh 안내 문구에 반영되어야 한다."""
+        proc = self._run("deploy.sh", tmp_path)
+
+        assert "http://localhost:3000" in proc.stdout
 
     def test_check_still_prints_its_report(self, tmp_path):
         """check.sh도 특별한 글자가 든 .env를 만나도 죽지 않고 평소처럼 점검 결과를 출력해야 한다."""

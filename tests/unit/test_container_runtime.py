@@ -2,14 +2,14 @@
 scripts/container_runtime.sh: 컨테이너 런타임 판정 로직 테스트.
 
 [배경]
-install.sh·check.sh·db_dump.sh·db_restore.sh 네 스크립트는 컨테이너를 띄우고 들여다보기 위해 compose 명령을 부른다. 
+install.sh·deploy.sh·check.sh·db_dump.sh·db_restore.sh 스크립트는 컨테이너를 띄우고 들여다보기 위해 compose 명령을 부른다. 
 그런데 Rocky·RHEL 계열 서버의 기본 런타임은 Docker가 아니라 Podman이고,
 Podman에는 `docker compose`에 해당하는 하위 명령이 없다. 
 `podman-docker`가 깔려 있어도 `docker compose up -d`는
 `podman compose up -d`로 넘어가면서 `-d`를 최상위 플래그로 오인해 즉시 죽는다.
 
 [목적]
-그래서 네 스크립트가 공유하는 판정 함수를 한 곳에 두었다. 
+그래서 스크립트들이 공유하는 판정 함수를 한 곳에 두었다. 
 이 테스트는 그 함수가 어떤 환경에서 무엇을 고르는지를 고정한다.
 
 [판정 규칙]
@@ -84,12 +84,12 @@ exit 0
 """
 
 
-def _detect(bin_dir: Path) -> tuple[int, str, str, str]:
+def _detect(bin_dir: Path) -> tuple[int, str, str, str, str, str, str]:
     """
     param:
       bin_dir (Path): 가짜 실행 파일들을 담은 디렉터리 경로.
     return: 
-      tuple[int, str, str, str]: (반환코드, COMPOSE, CONTAINER, COMPOSE_UP_FLAGS)
+      tuple[int, str, str, str, str, str, str]: (반환코드, COMPOSE, CONTAINER, COMPOSE_UP_FLAGS, COMPOSE_DEPLOY_FLAGS, BUILDKIT, CLI_BUILD)
 
     PATH를 가짜 디렉터리 하나로 좁혀서, 호스트에 실제로 깔린 Docker가 결과에 섞이지 않게 한다.
     """
@@ -101,6 +101,9 @@ def _detect(bin_dir: Path) -> tuple[int, str, str, str]:
         'echo "compose=${COMPOSE[*]}"\n'
         'echo "container=${CONTAINER[*]}"\n'
         'echo "upflags=${COMPOSE_UP_FLAGS[*]}"\n'
+        'echo "deployflags=${COMPOSE_DEPLOY_FLAGS[*]}"\n'
+        'echo "buildkit=${DOCKER_BUILDKIT:-}"\n'
+        'echo "cli_build=${COMPOSE_DOCKER_CLI_BUILD:-}"\n'
     )
     proc = subprocess.run(
         [_BASH, "-c", script],
@@ -113,7 +116,15 @@ def _detect(bin_dir: Path) -> tuple[int, str, str, str]:
         for line in proc.stdout.splitlines()
         if "=" in line
     )
-    return int(values["rc"]), values["compose"], values["container"], values["upflags"]
+    return (
+        int(values["rc"]),
+        values.get("compose", ""),
+        values.get("container", ""),
+        values.get("upflags", ""),
+        values.get("deployflags", ""),
+        values.get("buildkit", ""),
+        values.get("cli_build", ""),
+    )
 
 
 @pytest.mark.unit
@@ -122,23 +133,27 @@ class TestDetectContainerRuntime:
         """Docker Compose v2가 있으면 그것을 고릅니다: 기존 Docker 사용자에게 회귀가 없어야 합니다."""
         bin_dir = _make_bin(tmp_path, {"docker": _DOCKER_WITH_COMPOSE})
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, buildkit, cli_build = _detect(bin_dir)
 
         assert rc == 0  # 성공
         assert compose == "docker compose"  # docker compose를 선택
         assert container == "docker"  # docker를 선택
         assert up_flags == "-d --build"  # -d --build 플래그를 선택
+        assert deploy_flags == "-d --no-deps"  # -d --no-deps 플래그 선택
+        assert buildkit == "1"  # DOCKER_BUILDKIT 활성화
+        assert cli_build == "1"  # COMPOSE_DOCKER_CLI_BUILD 활성화
 
     def test_falls_back_to_podman_compose_when_docker_absent(self, tmp_path):
         """docker 명령 자체가 없는 서버에서는 podman-compose를 고른다."""
         bin_dir = _make_bin(tmp_path, {"podman-compose": _STUB, "podman": _STUB})
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, _, _ = _detect(bin_dir)
 
         assert rc == 0  # 성공
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+        assert deploy_flags == "-d --force-recreate --no-deps"  # Podman 전용 증분 배포 플래그 선택
 
     def test_falls_back_when_docker_wrapper_cannot_run_compose(self, tmp_path):
         """
@@ -150,12 +165,13 @@ class TestDetectContainerRuntime:
             {"docker": _DOCKER_BROKEN_COMPOSE, "podman-compose": _STUB, "podman": _STUB},
         )
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, _, _ = _detect(bin_dir)
 
         assert rc == 0  # 성공
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+        assert deploy_flags == "-d --force-recreate --no-deps"
 
     def test_prefers_podman_cli_but_accepts_docker_wrapper(self, tmp_path):
         """podman-compose는 있는데 podman 실행 파일이 없으면 래퍼(docker)로 컨테이너를 다룬다."""
@@ -163,12 +179,13 @@ class TestDetectContainerRuntime:
             tmp_path, {"docker": _DOCKER_PODMAN_WRAPPER, "podman-compose": _STUB}
         )
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, _, _ = _detect(bin_dir)
 
         assert rc == 0  # 성공
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "docker"  # docker를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+        assert deploy_flags == "-d --force-recreate --no-deps"
 
     def test_delegating_docker_compose_is_treated_as_podman(self, tmp_path):
         """
@@ -182,12 +199,13 @@ class TestDetectContainerRuntime:
             tmp_path, {"docker": _DOCKER_DELEGATING_TO_PODMAN, "podman": _STUB}
         )
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, _, _ = _detect(bin_dir)
 
         assert rc == 0  # 성공
         assert compose == "docker compose"  # docker compose를 선택
         assert container == "podman"  # podman이 설치되어 있으면 podman CLI를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+        assert deploy_flags == "-d --force-recreate --no-deps"
 
     def test_delegating_docker_compose_falls_back_to_docker_when_podman_cli_absent(
         self, tmp_path
@@ -197,12 +215,13 @@ class TestDetectContainerRuntime:
             tmp_path, {"docker": _DOCKER_DELEGATING_TO_PODMAN}
         )
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, _, _ = _detect(bin_dir)
 
         assert rc == 0  # 성공
         assert compose == "docker compose"  # docker compose를 선택
         assert container == "docker"  # podman이 없으므로 docker를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+        assert deploy_flags == "-d --force-recreate --no-deps"
 
     def test_podman_wrapper_exiting_zero_on_version_falls_back_to_podman_compose(
         self, tmp_path
@@ -219,12 +238,13 @@ class TestDetectContainerRuntime:
             {"docker": _DOCKER_PODMAN_WRAPPER, "podman-compose": _STUB, "podman": _STUB},
         )
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, _, _ = _detect(bin_dir)
 
         assert rc == 0  # 성공
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
+        assert deploy_flags == "-d --force-recreate --no-deps"
 
     def test_podman_wrapper_exiting_zero_without_podman_compose_fails(
         self, tmp_path
@@ -240,17 +260,18 @@ class TestDetectContainerRuntime:
             {"docker": _DOCKER_PODMAN_WRAPPER, "podman": _STUB},
         )
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, _, _ = _detect(bin_dir)
 
         assert rc != 0  # 실패를 보고
         assert compose == "docker compose"  # 안전한 기본값을 유지
         assert container == "docker"  # 안전한 기본값을 유지
+        assert deploy_flags == "-d --no-deps"
 
     def test_reports_failure_when_no_runtime_found(self, tmp_path):
         """compose 계열이 하나도 없으면 실패를 알린다."""
         bin_dir = _make_bin(tmp_path, {})
 
-        rc, compose, container, up_flags = _detect(bin_dir)
+        rc, compose, container, up_flags, deploy_flags, _, _ = _detect(bin_dir)
 
         assert rc != 0  # 실패
         # 판정에 실패해도 두 배열은 비우지 않는다. 빈 배열을 `set -u`가 켜진 bash에서
@@ -258,6 +279,7 @@ class TestDetectContainerRuntime:
         # 호출한 스크립트가 실패를 보고하고 나머지 점검을 이어 갈 수 있도록 안전한 기본값을 남긴다.
         assert compose == "docker compose"  # 안전한 기본값을 남긴다
         assert container == "docker"  # 안전한 기본값을 남긴다
+        assert deploy_flags == "-d --no-deps"
 
 
 @pytest.mark.unit
