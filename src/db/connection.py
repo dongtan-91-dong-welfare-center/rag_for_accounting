@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from psycopg.conninfo import make_conninfo
 from psycopg_pool import ConnectionPool
 
+from src.utils.config import DB_POOL_TIMEOUT_SECONDS
 from src.utils.exception import ConfigNotFoundError
 from src.utils.logger import get_logger
 
@@ -31,6 +32,7 @@ def init_pool() -> None:
       `\\` 등)를 자동 이스케이프한다.
     - _lock으로 보호해 멀티스레드 환경에서 풀이 두 번 생성되지 않도록 하며,
       이중 호출 시에는 아무 동작도 하지 않는다(idempotent).
+    - timeout=DB_POOL_TIMEOUT_SECONDS 가드로 풀 고갈 시 무한 대기를 막고 Fast-Fail한다.
     """
     global _pool
     with _lock:
@@ -51,7 +53,13 @@ def init_pool() -> None:
             user=os.getenv("POSTGRES_USER", "accounting_user"),
             password=password,
         )
-        _pool = ConnectionPool(conninfo, min_size=2, max_size=10, open=True)
+        _pool = ConnectionPool(
+            conninfo,
+            min_size=2,
+            max_size=10,
+            timeout=DB_POOL_TIMEOUT_SECONDS,
+            open=True,
+        )
         logger.info("PostgreSQL 커넥션 풀 초기화 완료")
 
 

@@ -8,8 +8,16 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-accounting_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounting_password}
       POSTGRES_DB: ${POSTGRES_DB:-accounting_db}
+    # 호스트에 포트를 여는 범위를 .env로 조정한다. 
+    # 형식은 "바인딩주소:호스트포트:컨테이너포트"다.
+    # 기본값 127.0.0.1(루프백: 같은 컴퓨터 안에서만 닿는 주소)로 두는 이유는, 
+    # 세 서비스 중 어느 것도 바깥에서 직접 접속할 필요가 없기 때문이다. 
+    # 컨테이너끼리는 compose 가상 네트워크로 통신하고,
+    # 호스트에서 돌리는 적재 스크립트는 localhost로 붙는다. 
+    # 0.0.0.0으로 열면 방화벽이 막아 주기 전까지 사설망의 다른 서버에서도 DB가 그대로 보인다. 
+    # 값 설명은 .env.example의 같은 이름 항목에 있다.
     ports:
-      - "5432:5432"
+      - "${DB_BIND_ADDR:-127.0.0.1}:${DB_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,11 +31,38 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
     platform: linux/amd64
     container_name: accounting_embedding
-    command: ["--model-id", "nlpai-lab/KURE-v1"]
+    # TEI 기동 파라미터는 .env를 통해 호스트 사양에 맞게 조정할 수 있습니다.
+    # - --max-batch-tokens: 웜업 및 배치 추론의 최대 토큰 상한입니다. 기본값 16384는 기동 웜업 시
+    #   단일 대용량 버퍼 할당으로 CPU 환경에서 메모리 부족(OOM, exit 137)을 유발하므로 4096으로 제한합니다.
+    #   고사양 호스트에서 대량 배치 적재 처리량을 높이려는 경우 8192 이상으로 상향할 수 있습니다.
+    # - --max-input-length: 단일 입력 텍스트의 최대 토큰 수입니다. TEI는 batch-tokens >= input-length
+    #   규칙을 검증하므로, 4096으로 명시하여 batch-tokens 4096과 일치시켜 기동 검증을 통과합니다.
+    #   실제 데이터 최장 청크는 2,047토큰(CHUNK_MAX_TOKENS=2048)이므로 절단 없이 2배 여유를 확보합니다.
+    # - --auto-truncate 미채택: 입력을 조용히 절단하는 옵션은 적재 토큰 규약(IX-201)과 어긋나고
+    #   검색 품질 저하를 숨기므로 사용하지 않습니다.
+    # - --max-client-batch-size: 1회 요청당 최대 배치 크기를 제한하여 저사양 환경의 메모리 급증을 방지합니다.
+    command:
+      # TODO: 모델 ID 환경변수화(EMBEDDING_MODEL) 시 pgvector 차원(EMBEDDING_DIM: 1024), DDL 마이그레이션 및 토크나이저 정합성 영향도를 함께 검토하여 연계 분리 필요
+      - --model-id
+      - nlpai-lab/KURE-v1
+      - --max-batch-tokens
+      - "${TEI_MAX_BATCH_TOKENS:-4096}"
+      - --max-input-length
+      - "${TEI_MAX_INPUT_LENGTH:-4096}"
+      - --max-client-batch-size
+      - "${TEI_MAX_CLIENT_BATCH_SIZE:-8}"
     ports:
-      - "8080:80"
+      - "${EMBEDDING_BIND_ADDR:-127.0.0.1}:${EMBEDDING_HOST_PORT:-8080}:80"
     volumes:
       - tei_cache:/data
+    # 웜업(CPU에서 약 2분)이 끝나야 /health가 열린다. 
+    # 이 체크가 없으면 app이 먼저 떠서 웜업 동안 들어온 질의가 임베딩 실패(Connection refused)로 "근거 부족" 응답을 만든다.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
     restart: unless-stopped
 
   app:
@@ -49,15 +84,17 @@ services:
       # 아래 hf_cache 볼륨과 짝을 이뤄 컨테이너 재생성마다 2.2GB를 다시 받지 않게 한다.
       HF_HOME: /app/hf_cache
     ports:
-      - "8000:8000"
+      - "${APP_BIND_ADDR:-127.0.0.1}:${APP_HOST_PORT:-8000}:8000"
     volumes:
-      - ./data/raw:/app/data/raw:ro
+      - ./data/raw_data:/app/data/raw_data:ro,z
       - hf_cache:/app/hf_cache   # 리랭커 모델 재생성 시 재다운로드 방지
     depends_on:
       database:
         condition: service_healthy
+      # service_healthy: TEI 웜업 완료 후에 app을 띄운다
+      # 웜업 중 질의가 임베딩 실패로 흐르는 순서 문제를 compose 수준에서 차단한다.
       embedding:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

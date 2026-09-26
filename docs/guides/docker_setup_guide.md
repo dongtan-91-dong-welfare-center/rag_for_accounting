@@ -1,6 +1,6 @@
 # 프로젝트 Docker 환경 구성 및 검증 가이드
 
-> **한 줄 요약(BLUF):** Docker Compose는 `database`(pgvector), `embedding`(KURE-v1 TEI), `app`(FastAPI + React)을 한 번에 띄운다. 일반 사용자는 `./install.sh`로 설치·기동하고 `./check.sh`로 상태를 확인하면 된다.
+> Docker Compose는 `database`(pgvector), `embedding`(KURE-v1 TEI), `app`(FastAPI + React)을 한 번에 띄운다. 일반 사용자는 `./install.sh`로 설치·기동하고 `./check.sh`로 상태를 확인하면 된다.
 
 ## 1. 개요 및 목적
 
@@ -28,11 +28,24 @@ docker compose up --build -d
 
 서비스 구성은 다음과 같다.
 
-| 서비스 | 컨테이너 | 역할 | 포트 |
+| 서비스 | 컨테이너 | 역할 | 기본 공개 주소 |
 |---|---|---|---|
-| `database` | `accounting_db` | PostgreSQL + pgvector | `5432` |
-| `embedding` | `accounting_embedding` | KURE-v1 TEI 임베딩 서버 | `8080` |
-| `app` | `accounting_app` | FastAPI API + React 정적 파일 | `8000` |
+| `database` | `accounting_db` | PostgreSQL + pgvector | `127.0.0.1:5432` |
+| `embedding` | `accounting_embedding` | KURE-v1 TEI 임베딩 서버 | `127.0.0.1:8080` |
+| `app` | `accounting_app` | FastAPI API + React 정적 파일 | `127.0.0.1:8000` |
+
+세 서비스 모두 기본값이 루프백이다. 
+사설망의 다른 서버나 인터넷에서는 보이지 않는다.
+
+공개 범위를 바꿔야 하면 `docker-compose.yml`을 고치지 말고 `.env`에 값을 넣는다. 
+
+| 변수 | 기본값 | 언제 바꾸는가 |
+|---|---|---|
+| `APP_BIND_ADDR` · `DB_BIND_ADDR` · `EMBEDDING_BIND_ADDR` | `127.0.0.1` | 다른 장비에서 직접 접속해야 할 때 `0.0.0.0`으로 연다. 방화벽 규칙을 함께 확인한다. |
+| `APP_HOST_PORT` · `DB_HOST_PORT` · `EMBEDDING_HOST_PORT` | `8000` · `5432` · `8080` | 그 번호를 이미 다른 프로그램이 쓰거나, 클라우드 방화벽이 특정 번호만 허용할 때 바꾼다. |
+| `TEI_MAX_BATCH_TOKENS` | `4096` | 기본값(4096)으로 저사양 웜업 OOM을 방지하며, 고사양 호스트에서 대량 배치 적재 속도를 높이려면 `8192` 이상으로 올린다. |
+| `TEI_MAX_INPUT_LENGTH` | `4096` | TEI 유효성 검증(배치 상한 ≥ 입력 상한)을 통과하기 위한 입력 한도이다. 실제 최장 청크(2,047토큰) 대비 2배 여유를 제공하므로 기본값을 유지한다. |
+| `TEI_MAX_CLIENT_BATCH_SIZE` | `8` | 저사양 CPU 환경에서 순간적인 동시 요청으로 인한 메모리 급증을 방지한다. |
 
 ### 2단계: 자동화된 인프라 환경 검증 테스트
 인프라 검증은 `tests/utils/infra_check.py`의 `check_docker_infrastructure()`에 위임되어 있습니다. `tests/integration/conftest.py`의 세션 픽스처가 **통합 테스트 진입 전 자동으로 실행**하여 Docker 데몬·컨테이너 구동·`pgvector` 확장 로드를 점검하고, 문제가 있으면 통합 테스트를 건너뜁니다.
@@ -58,7 +71,7 @@ docker exec -it accounting_app bash
 # 1. 컨테이너에 최종적으로 설치된 패키지 확인
 uv pip list
 # 2. 내부에서 별도로 파이썬 단위 테스트 직접 통과 여부 수행
-pytest src/ingest/ontology/models.py
+pytest tests/unit/ingest/ontology/test_models.py
 ```
 
 #### DB 컨테이너 (`accounting_db`) 조회
@@ -85,7 +98,7 @@ docker exec -it accounting_db psql -U accounting_user -d accounting_db
 
 Compose에서 PDF volume을 다른 위치로 마운트하면 `PDF_DIR`도 같은 위치로 맞춘다. 경로가 맞지 않으면 질의와 조항 표시는 되지만 PDF 보기 버튼은 404가 난다.
 
-## 5. 트러블슈팅 — 의존성을 바꿨는데 컨테이너가 옛 버전을 쓸 때
+## 5. 트러블슈팅: 의존성 변경 후 컨테이너가 이전 버전을 참조할 때
 
 **증상**: `pyproject.toml`에 패키지를 추가했거나 원격에서 받은 `uv.lock`이 바뀌었는데, 컨테이너 안에서는 여전히 이전 패키지 상태로 동작한다.
 
@@ -101,3 +114,8 @@ Compose에서 PDF volume을 다른 위치로 마운트하면 `PDF_DIR`도 같은
    ```bash
    docker compose up --build -d
    ```
+
+## 6. 서버 간 데이터베이스 이관 및 백업/복원
+
+다른 서버에 이미 적재된 데이터를 신속하게 이관하거나 복원하려면 `db_dump.sh` 및 `db_restore.sh` 도구를 사용합니다.
+자세한 절차, 필수 제약사항 및 Podman 호환 안내는 [서버 간 DB 이관 가이드](db_migration_guide.md)를 참고하세요.

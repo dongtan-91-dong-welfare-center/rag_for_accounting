@@ -45,6 +45,57 @@ class TestEmbeddingClientRequestShape:
         assert tokens == 3
         assert mock_post.call_args[0][0] == "http://tei:80/tokenize"
 
+    def test_embed_texts_empty_returns_empty_without_request(self):
+        """빈 텍스트 리스트는 HTTP 요청 없이 즉시 빈 리스트를 반환한다"""
+        with patch.object(config, "EMBEDDING_SERVER_URL", "http://tei:80"), \
+             patch("src.clients.embedding_remote.httpx.post") as mock_post:
+            from src.clients import embedding_remote as embedding_client
+
+            vectors = embedding_client.embed_texts([])
+
+        # 임베딩서버에 빈 리스트를 보내는 것은 의미가 없으므로 요청하지 않고 빈 리스트를 반환한다.
+        assert vectors == []
+        mock_post.assert_not_called()
+
+    @pytest.mark.parametrize("total_items, batch_size", [
+        (1, 8),    # 단건 요청
+        (7, 8),    # 배치 미만
+        (8, 8),    # 배치 정확 일치
+        (9, 8),    # 배치 초과 1건 추가 (2회 분할)
+        (19, 8),   # 3회 분할 (8, 8, 3)
+        (24, 8),   # 3회 분할 정확 일치 (8, 8, 8)
+        (25, 8),   # 4회 분할 (8, 8, 8, 1)
+        (42, 8),   # 대량 요청 6회 분할 (8*5, 2)
+    ])
+    def test_embed_texts_chunks_by_batch_size(self, total_items: int, batch_size: int):
+        """EMBEDDING_ENCODE_BATCH_SIZE 단위로 분할하여 순차 요청 후 결과를 순서대로 병합한다"""
+        def fake_post(url, json=None, timeout=None):
+            resp = MagicMock()
+            inputs = json["inputs"]
+            resp.json.return_value = [[float(val)] for val in inputs]
+            return resp
+
+        texts = [str(i) for i in range(total_items)]
+        with patch.object(config, "EMBEDDING_SERVER_URL", "http://tei:80"), \
+             patch.object(config, "EMBEDDING_ENCODE_BATCH_SIZE", batch_size), \
+             patch("src.clients.embedding_remote.httpx.post", side_effect=fake_post) as mock_post:
+            from src.clients import embedding_remote as embedding_client
+
+            vectors = embedding_client.embed_texts(texts)
+
+        # 전체 벡터 변환 결과 정합성 검증
+        assert len(vectors) == total_items
+        assert vectors == [[float(i)] for i in range(total_items)]
+
+        # 분할 호출 횟수 검증: ceil(total_items / batch_size)
+        expected_call_count = (total_items + batch_size - 1) // batch_size if total_items > 0 else 0
+        assert mock_post.call_count == expected_call_count
+
+        # 각 분할 호출의 입력 슬라이스 크기 동적 검증
+        for idx, call in enumerate(mock_post.call_args_list):
+            expected_chunk_len = min(batch_size, total_items - idx * batch_size)
+            assert len(call.kwargs["json"]["inputs"]) == expected_chunk_len
+
 
 @pytest.mark.unit
 class TestEmbeddingDispatch:

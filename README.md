@@ -10,6 +10,28 @@
 > 본 프로젝트는 비영리·공익 목적으로 개발되었으며, 상업적 용도로 사용할 수 없습니다.  
 > 또한, 데이터셋을 제공하지 않아 관련해서 가이드라인 문서를 참고해서 문서 파싱 및 온톨로지는 사용자가 직접 구성해야합니다.
 
+## 🎬 데모
+
+아래는 실제 화면 녹화입니다. 세 가지 상황 — 기본 질의, 사람 확인, 근거가 없을 때의 처리 — 을 보여줍니다.
+
+**① 기본 질의** — 질의를 입력하면 관련 기준서 조항을 먼저 찾아 보여주고, 그 조항을 근거로 답변과 인용을 제시합니다.
+
+![기본 질의 데모](docs/assets/demo-basic.gif)
+
+**② 사람 확인(HIL)** — 질의가 여러 주제로 쪼개질 만큼 복잡하면, 검색에 들어가기 전에 재작성 전략을 사람이 직접 확인하고 승인합니다.
+
+![HIL 데모](docs/assets/demo-hil.gif)
+
+**③ 정직한 거절** — 기준서에서 충분한 근거를 찾지 못하면, 답을 지어내지 않고 확정적으로 답할 수 없음을 알립니다.
+
+![정직한 거절 데모](docs/assets/demo-guard.gif)
+
+<!--
+고화질 MP4: GitHub 웹 편집기(또는 이슈 코멘트)에 docs/assets/demo-*.mp4 를 드래그 업로드하면
+발급되는 첨부 URL로 아래처럼 넣을 수 있습니다.
+<video src="https://github.com/user-attachments/assets/…" controls width="720"></video>
+-->
+
 ## 🚀 주요 기능
 
 - **워크플로**: LangGraph 기반으로 `질문 재작성(rewrite) → 검색(search) → 리랭킹(rerank, 기본 비활성) → 품질 평가(evaluate) → 답변 생성(generate)`의 메인 경로 5단계 파이프라인
@@ -20,17 +42,28 @@
 - **웹 화면 제공**: FastAPI와 React 정적 파일을 하나의 앱 컨테이너에서 제공하며, 원문 PDF(Portable Document Format) 조회 엔드포인트도 함께 제공합니다.
 
 ## 시스템 아키텍처
-<!-- Mermaid 기반으로 정리 -->
+
+본 시스템은 자연어로 입력된 회계 질의를 LangGraph 기반 5단계 파이프라인(`질의 재작성 → 하이브리드 검색 → 선택적 리랭킹 → 품질 평가 → 인용 답변 생성`)으로 처리합니다. PostgreSQL pgvector를 활용한 Dense 검색과 전문검색(Full-text) 기반 Sparse 검색을 결합하여 조항 검색의 정확도를 극대화합니다.
+
+전체 워크플로 다이어그램, 계층별 타임아웃 구조, 런타임 구성 등 상세한 설계는 [전체 아키텍처 문서](docs/ARCHITECTURE.md)를 참고하세요.
 
 ## 성능 지표
-<!-- 실제 답변 비교 및 RAGAS에 대한 평가 지표 제공. -->
+
+회계 실무에서 가장 중요한 기준은 질의에 부합하는 **핵심 조항이 검색 상위(Top-5)에 정확히 포함되는가**입니다. 본 프로젝트는 정량화된 벤치마크 데이터셋을 기반으로 검색 통과(`retrieval_pass`) 및 답변 정확도를 지속적으로 측정하고 검증합니다.
+
+구체적인 평가 통과 기준과 측정 방법론은 [평가 통과 규칙](docs/benchmark/eval_pass_rules.md)을 참고하고, 형태소 토큰화 및 가중치 최적화 결과는 [실측 리포트 색인](docs/README.md#3-평가-및-벤치마크-리포트)에서 확인할 수 있습니다.
 
 ## 활용법
-<!-- 사용자 UI 및 기본 질문에 대한 화면 필요-->
+
+시스템은 개발 및 실무 환경에 맞춰 다양한 인터페이스로 활용할 수 있습니다.
+
+1. **웹 브라우저 화면**: 앱 컨테이너 기동 후 `http://localhost:8000`에 접속하여 대화형 화면에서 조항 검색, 답변 생성 및 원문 PDF 조회를 원스톱으로 이용합니다.
+2. **터미널 CLI**: `uv run python -m src.main query "금융자산 최초 인식 시점"` 명령으로 신속하게 터미널에서 기준서 질의를 수행합니다.
+3. **MCP 및 Codex 플러그인**: Claude Desktop 또는 Codex 개발 환경에 MCP 도구로 연결하여 코딩 및 감사 업무 중 즉시 기준서 조항을 인용합니다.
 
 ## 🛠️ 빠른 시작
 
-기본 구성은 PostgreSQL + pgvector 데이터베이스, TEI(Text Embeddings Inference) 임베딩 서버, FastAPI + React 앱 서버로 나뉩니다. 임베딩 모델은 `nlpai-lab/KURE-v1`이며, 리랭커는 기본적으로 비활성 처리.
+기본 구성은 PostgreSQL + pgvector 데이터베이스, TEI(Text Embeddings Inference) 임베딩 서버, FastAPI + React 앱 서버로 나뉩니다. 임베딩 모델은 `nlpai-lab/KURE-v1`이며, 리랭커는 기본적으로 비활성화되어 있습니다.
 
 ```bash
 cp .env.example .env   # 최초 1회, OPENAI_API_KEY 등 입력
@@ -78,7 +111,12 @@ uv run python -m src.main ingest --reset
 uv run python -m src.main ingest --pdf data/raw_data/제6장.pdf --standard-id gaap-ch6 --standard-type GAAP
 ```
 
-원본 회계기준 PDF는 저작권 문제로 저장소에 포함하지 않습니다. `data/raw_data/README.md` BYO(Bring Your Own) 방식을 따릅니다.
+원본 회계기준 PDF는 한국회계기준원(KASB) 이용 규약에 따라 저장소에 포함하지 않으며, 사용자가 직접 다운로드하여 배치하는 BYO(Bring Your Own) 방식을 따릅니다. 상세 배치 절차는 [data/raw_data/README.md](data/raw_data/README.md)를 참고하세요.
+
+### DB 이관 및 복원 (권장 배포 경로)
+
+이미 임베딩 적재가 완료된 데이터베이스를 다른 서버로 이관할 때는 `db_dump.sh`와 `db_restore.sh`를 사용합니다. 새 서버에서 무거운 파싱이나 임베딩 재연산 없이 즉시 데이터를 복원할 수 있습니다.
+자세한 절차는 [서버 간 DB 이관 가이드](docs/guides/db_migration_guide.md)를 참고하세요.
 
 ### 질의
 
