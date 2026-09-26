@@ -138,7 +138,7 @@ git clone https://github.com/dongtan-91-dong-welfare-center/rag_for_accounting.g
 cd rag_for_accounting
 
 # 2. 실행 권한 부여 및 최초 실행 (초기 .env 파일 생성)
-chmod +x install.sh check.sh db_dump.sh db_restore.sh
+chmod +x install.sh deploy.sh check.sh db_dump.sh db_restore.sh
 ./install.sh
 ```
 
@@ -233,22 +233,54 @@ sudo firewall-cmd --reload
 ```
 
 ### 8-2. 배포본 최신화 및 롤백 절차
-운영 환경에서 신규 릴리즈를 반영하거나 롤백할 때는 다음 절차를 따릅니다:
+운영 환경에서 신규 릴리즈를 반영하거나 롤백할 때는 변경 범위에 따라 다음 절차를 따릅니다:
+
+#### 1) 일반 배포: 소스 코드 및 프론트엔드 변경 시 (약 10초 내외)
+파이썬 백엔드(`src/`) 또는 프론트엔드(`frontend/`) 코드만 수정된 경우, `database` 및 `embedding` 컨테이너를 가동 상태로 유지한 채 `app` 컨테이너만 증분 재배포합니다. TEI 임베딩 모델 웜업(2~3분) 대기가 생략되어 무중단에 가까운 빠른 배포가 가능합니다:
 
 ```bash
 # 1. 최신 코드 갱신
 git pull origin main
 
-# 2. 컨테이너 갱신 빌드 및 기동
+# 2. app 컨테이너 단독 증분 빌드 및 교체 배포
+./deploy.sh
+
+# 3. 헬스체크 및 무결성 검증
+./check.sh
+```
+
+패키지 캐시 오염 등으로 클린 재빌드가 필요한 경우에는 `--no-cache` 옵션을 사용할 수 있습니다:
+
+```bash
+./deploy.sh --no-cache
+```
+
+#### 2) 인프라 변경 배포: DB 스키마·인프라 설정 변경 시
+`docker-compose.yml`, TEI 파라미터, PostgreSQL 설정 또는 DDL 마이그레이션이 포함된 경우 전체 스택을 재기동합니다:
+
+```bash
+# 1. 최신 코드 갱신
+git pull origin main
+
+# 2. 전체 스택 재빌드 및 기동
 ./install.sh
 
 # 3. 헬스체크 및 무결성 검증
 ./check.sh
+```
 
-# [장애 발생 시 롤백 절차]
-# 직전 안정 커밋 또는 릴리즈 태그로 체크아웃 후 재기동
+#### 3) 장애 발생 시 롤백 절차
+```bash
+# 직전 안정 커밋 또는 릴리즈 태그로 체크아웃
 git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
+
+# 소스 코드 변경에 대한 롤백 시
+./deploy.sh
+
+# 인프라 변경이 포함된 롤백 시
 ./install.sh
+
+# 롤백 후 상태 검증
 ./check.sh
 ```
 
@@ -260,6 +292,7 @@ git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
 |---|---|---|
 | 브라우저에서 사이트 연결 거부 또는 타임아웃 | 호스트 `firewalld` 또는 클라우드 ACG 방화벽 차단 | `sudo firewall-cmd --list-ports`와 클라우드 콘솔의 인바운드 보안 규칙에서 포트(3000 또는 80)를 개방합니다. |
 | `embedding` 컨테이너가 exit 137로 계속 재시작함 | TEI 기동 웜업 중 메모리 부족(OOM) | `.env` 파일의 `TEI_MAX_BATCH_TOKENS=4096` 설정을 확인하고 재기동합니다. |
+| 소스 코드 수정 후 재배포 시 3~5분의 긴 웜업 대기 발생 | 전체 스택을 재기동하는 `./install.sh` 실행 | `embedding` 컨테이너를 재시작하지 않고 `app`만 증분 교체하는 `./deploy.sh`를 사용합니다. |
 | 검색 및 답변은 정상이나 PDF 보기 클릭 시 404 오류 | 원문 PDF 미배치 또는 SELinux 마운트 차단 | `data/raw_data/` 디렉터리에 해당 PDF 파일이 존재하는지 확인하고, 볼륨 마운트 옵션의 `:ro,z` 설정을 확인합니다. |
 | Nginx 연결 시 `502 Bad Gateway` 오류 | SELinux가 Nginx의 내부 포트 접근 차단 | `sudo setsebool -P httpd_can_network_connect 1` 명령을 실행합니다. |
 | 컨테이너 기동 직후 앱에서 `Connection refused` 발생 | TEI 웜업 완료 전 app 조기 기동 | `./install.sh`를 통해 기동하거나 `curl http://localhost:8080/health`가 200 OK를 반환할 때까지 대기합니다. |
@@ -270,10 +303,15 @@ git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
 ## 10. 부록: Docker 환경에서의 배포
 
 호스트 서버가 이미 Docker Engine 및 Docker Compose v2를 운용 중인 경우, 본 가이드의 Podman 명령어는 동일하게 Docker로 대체할 수 있습니다.
-저장소의 `./install.sh` 및 `./check.sh` 스크립트는 `docker compose`를 우선적으로 자동 판별하므로 수동 명령어 변경 없이 동일한 배포 인터페이스를 제공합니다:
+저장소의 `./install.sh`, `./deploy.sh` 및 `./check.sh` 스크립트는 `docker compose`를 우선적으로 자동 판별하므로 수동 명령어 변경 없이 동일한 배포 인터페이스를 제공합니다:
 
 ```bash
-# Docker 환경에서의 기동
+# Docker 환경에서의 전체 스택 초기 기동
 ./install.sh
+
+# Docker 환경에서의 앱 코드 증분 재배포
+./deploy.sh
+
+# 상태 점검
 ./check.sh
 ```
