@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 컨테이너 런타임 판정: install.sh·check.sh·db_dump.sh·db_restore.sh가 source로 함께 읽습니다.
+# 컨테이너 런타임 판정: install.sh·deploy.sh·check.sh·db_dump.sh·db_restore.sh가 source로 함께 읽습니다.
 #
 # [배경]
 # 이 저장소의 스택은 compose 파일 하나로 뜨지만, compose를 실행하는 명령은 환경마다 다르다.
@@ -10,7 +10,7 @@
 #
 # [목적]
 # 어느 명령으로 compose를 부를지, 어느 명령으로 컨테이너를 들여다볼지를 한 곳에서 정한다.
-# 네 스크립트가 각자 판정하면 한 곳만 고치는 실수가 생기기 때문이다.
+# 스크립트들이 각자 판정하면 한 곳만 고치는 실수가 생기기 때문이다.
 #
 # [쓰는 법]
 #   source "$ROOT/scripts/container_runtime.sh"
@@ -23,16 +23,17 @@
 # COMPOSE="docker compose"처럼 문자열에 담고 "$COMPOSE" up으로 부르면 셸이 "docker compose"라는 이름의 실행 파일 하나를 찾다가 실패한다. 
 # 따옴표를 빼면 이번에는 값에 공백이 들어간 다른 상황에서 예기치 않게 쪼개진다. 배열로 두면 두 경우가 모두 없다.
 
-# podman-compose로 스택을 올릴 때 붙이는 인자다.
+# podman-compose로 스택을 올리거나 서비스를 재배포할 때 붙이는 인자다.
 # `--force-recreate`가 왜 필요한지는 이렇다.
 # podman-compose는 이미지를 새로 구워도, compose 파일 자체가 그대로면 이미 있는 컨테이너를 지우지 않고 그냥 다시 시작한다.
 # 그래서 코드를 고치고 다시 올려도 옛 이미지가 계속 돈다.
 # 배포한 사람은 성공했다고 보는데 바뀐 코드는 실행되지 않는, 알아차리기 쉬운 실패다.
 # 이 동작은 podman-compose 1.0.6(Rocky 8의 EPEL 패키지)에서 확인했고
 # 상위 저장소의 수정 커밋이 아직 어느 배포판에도 실리지 않아 최신 버전에서도 같다.
-# Docker Compose v2에는 없는 문제이므로 그쪽에는 붙이지 않는다.
+# Docker Compose v2에는 없는 문제이므로 그쪽에는 전체 기동 시 붙이지 않는다.
 # 붙이면 멀쩡한 컨테이너를 매번 지웠다 만들어 불필요한 중단이 생긴다.
 _COMPOSE_UP_FLAGS_PODMAN=(-d --build --force-recreate)
+_COMPOSE_DEPLOY_FLAGS_PODMAN=(-d --force-recreate --no-deps)
 
 # compose 실행 방식과 컨테이너 조작 명령을 정한다.
 # 찾았으면 0, 아무것도 못 찾았으면 1을 돌려준다.
@@ -51,9 +52,12 @@ detect_container_runtime() {
         case "$version_output" in
           *podman*|*Podman*) ;;
           *)
+            export DOCKER_BUILDKIT=1
+            export COMPOSE_DOCKER_CLI_BUILD=1
             COMPOSE=(docker compose)
             CONTAINER=(docker)
             COMPOSE_UP_FLAGS=(-d --build)
+            COMPOSE_DEPLOY_FLAGS=(-d --no-deps)
             return 0
             ;;
         esac
@@ -68,6 +72,7 @@ detect_container_runtime() {
   if command -v podman-compose >/dev/null 2>&1; then
     COMPOSE=(podman-compose)
     COMPOSE_UP_FLAGS=("${_COMPOSE_UP_FLAGS_PODMAN[@]}")
+    COMPOSE_DEPLOY_FLAGS=("${_COMPOSE_DEPLOY_FLAGS_PODMAN[@]}")
     # ps·exec·inspect는 podman을 직접 부릅니다.
     # 래퍼를 거치면 환경에 따라 안내 문구가 함께 나와서 출력을 파싱하는 자리에서 걸릴 수 있습니다.
     # podman 명령이 없는 환경이라면 래퍼라도 씁니다.
@@ -98,6 +103,7 @@ detect_container_runtime() {
         CONTAINER=(docker)
       fi
       COMPOSE_UP_FLAGS=("${_COMPOSE_UP_FLAGS_PODMAN[@]}")
+      COMPOSE_DEPLOY_FLAGS=("${_COMPOSE_DEPLOY_FLAGS_PODMAN[@]}")
       return 0
       ;;
   esac
@@ -109,6 +115,7 @@ detect_container_runtime() {
   COMPOSE=(docker compose)
   CONTAINER=(docker)
   COMPOSE_UP_FLAGS=(-d --build)
+  COMPOSE_DEPLOY_FLAGS=(-d --no-deps)
   return 1
 }
 
