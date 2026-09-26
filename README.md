@@ -67,7 +67,8 @@
 
 ```bash
 cp .env.example .env   # 최초 1회, OPENAI_API_KEY 등 입력
-./install.sh           # Docker(database·embedding·app) 빌드 및 기동
+./install.sh           # Docker(database·embedding·app) 전체 스택 빌드 및 기동
+./deploy.sh            # 앱 코드 변경 시 증분 재배포 (TEI 웜업 대기 생략)
 ```
 
 브라우저 진입점은 `http://localhost:8000`이고, API 문서는 `http://localhost:8000/docs`입니다.

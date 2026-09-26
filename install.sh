@@ -70,6 +70,7 @@ echo "  Embedding : $EMBEDDING_URL"
 echo "  DB        : localhost:${DB_HOST_PORT:-5432}"
 echo
 echo "Useful commands:"
-echo "  ./check.sh"
+echo "  ./check.sh           # 스택 상태 헬스체크"
+echo "  ./deploy.sh          # 앱 코드 변경 시 증분 재배포"
 echo "  ${COMPOSE[*]} logs -f app"
 echo "  ${COMPOSE[*]} down"
