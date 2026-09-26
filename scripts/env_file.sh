@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# .env에서 값 하나를 꺼내 온다 — install.sh·check.sh·db_dump.sh·db_restore.sh가 source로 함께 읽는다.
+# .env에서 값 하나를 꺼내 온다 — install.sh·deploy.sh·check.sh·db_dump.sh·db_restore.sh가 source로 함께 읽는다.
 # source: 외부 파일에 작성된 셸 스크립트를 현재 실행 중인 셸 환경으로 직접 읽어와 실행하는 명령어
 # 
 # [배경]
