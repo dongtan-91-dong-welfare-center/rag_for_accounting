@@ -61,8 +61,11 @@ class TestDockerComposeConfig:
         )
 
         compose_text = _COMPOSE_FILE.read_text(encoding="utf-8")
-        assert "TEI_MAX_INPUT_LENGTH" not in compose_text, (
+        assert "tei_max_input_length" not in compose_text.lower(), (
             "TEI_MAX_INPUT_LENGTH 환경변수는 더 이상 지원되지 않으므로 docker-compose.yml에서 배제되어야 합니다."
+        )
+        assert "--max-input-length" not in compose_text.lower(), (
+            "--max-input-length 플래그는 docker-compose.yml 전체(주석 및 설정 포함)에서 배제되어야 합니다."
         )
 
         assert "--max-client-batch-size" in command
@@ -125,3 +128,14 @@ class TestDockerComposeConfig:
         assert not any("--max-input-length" in str(arg) for arg in legacy_cmd)
         assert legacy_cmd[legacy_cmd.index("--max-batch-tokens") + 1] == "4096"
         assert legacy_cmd[legacy_cmd.index("--max-client-batch-size") + 1] == "8"
+
+        # 4. 레거시 변수만 단독 주입되고 신규 변수가 미지정된 경우에도 안전 기본값(4096 / 8)으로 정상 해석
+        legacy_only_env = {
+            "TEI_MAX_INPUT_LENGTH": "9999",
+        }
+        resolved_legacy_only = yaml.safe_load(resolve_defaults(raw_content, legacy_only_env))
+        legacy_only_cmd = resolved_legacy_only["services"]["embedding"]["command"]
+        assert not any("--max-input-length" in str(arg) for arg in legacy_only_cmd)
+        assert legacy_only_cmd[legacy_only_cmd.index("--max-batch-tokens") + 1] == "4096"
+        assert legacy_only_cmd[legacy_only_cmd.index("--max-client-batch-size") + 1] == "8"
+

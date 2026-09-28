@@ -54,7 +54,6 @@ def _read_env(tmp_path: Path, env_body: str, key: str) -> tuple[int, str, str]:
         cwd=tmp_path,   # 프로세스의 현재 작업 디렉터리를 방금 만든 임시 폴더로 지정한다.
         capture_output=True,    # 프로세스가 터미널에 찍는 표준 출력과 표준 에러를 화면에 띄우지 않고 메모리에 캡처
         text=True,  # 캡처한 출력을 바이트가 아닌 문자열로 변환
-        encoding="utf-8",
     )
     return proc.returncode, proc.stdout.rstrip("\n"), proc.stderr
 
@@ -205,7 +204,6 @@ class TestEntryScriptsSurviveHostileEnv:
             env={"PATH": f"{bin_dir}:/usr/bin:/bin"},   # 프로세스에 전달할 환경 변수 딕셔너리
             capture_output=True,    # 표준 출력과 표준 에러를 캡처
             text=True,  # 캡처한 출력을 문자열로 디코딩
-            encoding="utf-8",
         )
 
     def test_install_reaches_the_container_build_step(self, tmp_path):
@@ -235,27 +233,36 @@ class TestEnvExampleCompleteness:
     """프로젝트 .env.example 파일의 필수 환경 변수 및 TEI 기동 설정 무결성 검증."""
 
     def test_env_example_contains_tei_parameters(self):
-        """.env.example에 TEI 기동 파라미터 2종 및 권장값이 올바르게 선언되어 있고, 미지원 파라미터는 배제되어야 한다."""
+        """.env.example에 TEI 기동 파라미터 2종 및 권장값이 올바르게 선언되어 있고, 미지원 파라미터는 배제되어야 합니다."""
         env_example_path = _ROOT / ".env.example"
-        assert env_example_path.exists()
+        assert env_example_path.exists(), f".env.example 파일이 존재하지 않습니다: {env_example_path}"
         content = env_example_path.read_text(encoding="utf-8")
 
         assert "TEI_MAX_BATCH_TOKENS=4096" in content   # ${TEI_MAX_BATCH_TOKENS:-4096}
         assert "TEI_MAX_CLIENT_BATCH_SIZE=8" in content   # ${TEI_MAX_CLIENT_BATCH_SIZE:-8}
-        assert "TEI_MAX_INPUT_LENGTH" not in content, (
+        assert "tei_max_input_length" not in content.lower(), (
             "TEI_MAX_INPUT_LENGTH 환경변수는 지원되지 않는 TEI 인자이므로 .env.example에서 배제되어야 합니다."
+        )
+        assert "--max-input-length" not in content.lower(), (
+            "--max-input-length 플래그는 지원되지 않으므로 .env.example에서 배제되어야 합니다."
         )
         assert "기본값: 4096" in content
 
-        # 배포 가이드 문서에서도 미지원 파라미터가 배제되었는지 검증
-        for doc_name in ("docker_setup_guide.md", "server_deploy_guide.md"):
+    def test_deployment_guides_exclude_unsupported_tei_parameters(self):
+        """배포 가이드 문서(docker_setup_guide, server_deploy_guide)에서 미지원 파라미터가 배제되었는지 검증합니다."""
+        guide_names = ("docker_setup_guide.md", "server_deploy_guide.md")
+        for doc_name in guide_names:
             doc_path = _ROOT / "docs" / "guides" / doc_name
-            assert doc_path.exists(), f"가이드 문서가 존재하지 않습니다: {doc_path}"
+            assert doc_path.is_file(), f"가이드 문서가 존재하지 않습니다: {doc_path}"
             doc_content = doc_path.read_text(encoding="utf-8")
-            assert "TEI_MAX_INPUT_LENGTH" not in doc_content, (
+            assert "tei_max_input_length" not in doc_content.lower(), (
                 f"{doc_name} 문서에 미지원 환경변수 TEI_MAX_INPUT_LENGTH가 포함되어 있습니다."
             )
-            assert "--max-input-length" not in doc_content, (
+            assert "--max-input-length" not in doc_content.lower(), (
                 f"{doc_name} 문서에 미지원 플래그 --max-input-length가 포함되어 있습니다."
             )
+            assert "--max_input_length" not in doc_content.lower(), (
+                f"{doc_name} 문서에 미지원 플래그 변형 --max_input_length가 포함되어 있습니다."
+            )
+
 
