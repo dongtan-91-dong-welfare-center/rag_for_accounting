@@ -5,8 +5,8 @@ tests/unit/test_docker_compose_config.py: docker-compose.yml 구문 및 TEI 기�
 저사양 CPU 호스트(vCPU 2 / RAM 16GB 이하)에서 TEI 임베딩 컨테이너 기동 웜업 시
 대용량 메모리 할당(OOM, exit 137)으로 인한 재시작 루프를 방지하기 위해,
 배치 및 입력 길이 파라미터가 .env를 통해 올바르게 주입되어야 합니다.
-또한 실제 데이터가 2,048토큰 이하임에 따라 조용한 절단(--auto-truncate) 옵션이 배제되고,
---max-input-length 4096이 명시적으로 유지되는지 정적으로 검증합니다.
+또한 실제 데이터가 2,048토큰 이하임에 따라 조용한 절단(--auto-truncate) 옵션 및
+TEI 1.8에서 지원되지 않는 --max-input-length 플래그가 배제되었는지 정적으로 검증합니다.
 """
 from __future__ import annotations
 
@@ -56,9 +56,9 @@ class TestDockerComposeConfig:
         batch_idx = command.index("--max-batch-tokens")
         assert command[batch_idx + 1] == "${TEI_MAX_BATCH_TOKENS:-4096}"
 
-        assert "--max-input-length" in command
-        input_idx = command.index("--max-input-length")
-        assert command[input_idx + 1] == "${TEI_MAX_INPUT_LENGTH:-4096}"
+        assert "--max-input-length" not in command, (
+            "--max-input-length 플래그는 TEI 1.8에서 지원되지 않아 크래시(exit 2)를 유발하므로 배제되어야 합니다."
+        )
 
         assert "--max-client-batch-size" in command
         client_idx = command.index("--max-client-batch-size")
@@ -91,14 +91,13 @@ class TestDockerComposeConfig:
                 return env.get(var_name, default_val)
             return re.sub(r"\$\{([A-Za-z0-9_]+):-([^}]+)\}", _repl, text)
 
-        # 1. 환경변수 없을 때 안전 기본값 치환 결과 (4096 / 4096 / 8)
+        # 1. 환경변수 없을 때 안전 기본값 치환 결과 (4096 / 8)
         resolved_default = yaml.safe_load(resolve_defaults(raw_content))
         default_cmd = resolved_default["services"]["embedding"]["command"]
         assert default_cmd[default_cmd.index("--max-batch-tokens") + 1] == "4096"
-        assert default_cmd[default_cmd.index("--max-input-length") + 1] == "4096"
         assert default_cmd[default_cmd.index("--max-client-batch-size") + 1] == "8"
 
-        # 2. 고사양 호스트 오버라이드 결과 (8192 / 4096 / 16)
+        # 2. 고사양 호스트 오버라이드 결과 (8192 / 16)
         high_spec_env = {
             "TEI_MAX_BATCH_TOKENS": "8192",
             "TEI_MAX_CLIENT_BATCH_SIZE": "16",
@@ -106,5 +105,4 @@ class TestDockerComposeConfig:
         resolved_high_spec = yaml.safe_load(resolve_defaults(raw_content, high_spec_env))
         high_spec_cmd = resolved_high_spec["services"]["embedding"]["command"]
         assert high_spec_cmd[high_spec_cmd.index("--max-batch-tokens") + 1] == "8192"   # ${TEI_MAX_BATCH_TOKENS:-8192}
-        assert high_spec_cmd[high_spec_cmd.index("--max-input-length") + 1] == "4096"   # ${TEI_MAX_INPUT_LENGTH:-4096}
         assert high_spec_cmd[high_spec_cmd.index("--max-client-batch-size") + 1] == "16"   # ${TEI_MAX_CLIENT_BATCH_SIZE:-16}

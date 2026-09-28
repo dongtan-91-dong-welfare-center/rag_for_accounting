@@ -118,7 +118,6 @@ sudo setsebool -P httpd_can_network_connect 1
 
 본 프로젝트는 안전 우선 기본값으로 `TEI_MAX_BATCH_TOKENS=4096`을 기본 적용하였습니다:
 - `TEI_MAX_BATCH_TOKENS=4096`: 웜업 메모리 피크를 억제하여 16GB RAM 환경에서도 재시작 루프 없이 즉시 기동을 보장합니다.
-- `TEI_MAX_INPUT_LENGTH=4096`: TEI 기동 검증 규칙(`max_batch_tokens >= max_input_length`)을 통과하도록 명시하였습니다.
 - `TEI_MAX_CLIENT_BATCH_SIZE=8`: 동시 요청 폭주 시의 메모리 급증을 방지합니다.
 
 ### 5-2. `podman-compose` 1.0.6 헬스체크 의존성 한계 및 대기 가드
