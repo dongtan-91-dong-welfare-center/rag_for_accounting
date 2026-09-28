@@ -238,7 +238,7 @@ class TestEnvExampleCompleteness:
         assert env_example_path.exists(), f".env.example 파일이 존재하지 않습니다: {env_example_path}"
         content = env_example_path.read_text(encoding="utf-8")
 
-        assert "TEI_MAX_BATCH_TOKENS=4096" in content   # ${TEI_MAX_BATCH_TOKENS:-4096}
+        assert "TEI_MAX_BATCH_TOKENS=8192" in content   # ${TEI_MAX_BATCH_TOKENS:-8192}
         assert "TEI_MAX_CLIENT_BATCH_SIZE=8" in content   # ${TEI_MAX_CLIENT_BATCH_SIZE:-8}
         assert "max_input_length" not in content.lower(), (
             "max_input_length 관련 환경변수 및 플래그는 지원되지 않으므로 .env.example에서 배제되어야 합니다."
@@ -246,7 +246,7 @@ class TestEnvExampleCompleteness:
         assert "max-input-length" not in content.lower(), (
             "max-input-length 플래그는 지원되지 않으므로 .env.example에서 배제되어야 합니다."
         )
-        assert "기본값: 4096" in content
+        assert "기본값: 8192" in content
         assert "기본값: 8" in content
 
     def test_deployment_guides_exclude_unsupported_tei_parameters(self):
