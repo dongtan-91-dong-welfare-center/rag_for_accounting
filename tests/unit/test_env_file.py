@@ -240,29 +240,28 @@ class TestEnvExampleCompleteness:
 
         assert "TEI_MAX_BATCH_TOKENS=4096" in content   # ${TEI_MAX_BATCH_TOKENS:-4096}
         assert "TEI_MAX_CLIENT_BATCH_SIZE=8" in content   # ${TEI_MAX_CLIENT_BATCH_SIZE:-8}
-        assert "tei_max_input_length" not in content.lower(), (
-            "TEI_MAX_INPUT_LENGTH 환경변수는 지원되지 않는 TEI 인자이므로 .env.example에서 배제되어야 합니다."
+        assert "max_input_length" not in content.lower(), (
+            "max_input_length 관련 환경변수 및 플래그는 지원되지 않으므로 .env.example에서 배제되어야 합니다."
         )
-        assert "--max-input-length" not in content.lower(), (
-            "--max-input-length 플래그는 지원되지 않으므로 .env.example에서 배제되어야 합니다."
+        assert "max-input-length" not in content.lower(), (
+            "max-input-length 플래그는 지원되지 않으므로 .env.example에서 배제되어야 합니다."
         )
         assert "기본값: 4096" in content
+        assert "기본값: 8" in content
 
     def test_deployment_guides_exclude_unsupported_tei_parameters(self):
-        """배포 가이드 문서(docker_setup_guide, server_deploy_guide)에서 미지원 파라미터가 배제되었는지 검증합니다."""
-        guide_names = ("docker_setup_guide.md", "server_deploy_guide.md")
-        for doc_name in guide_names:
-            doc_path = _ROOT / "docs" / "guides" / doc_name
-            assert doc_path.is_file(), f"가이드 문서가 존재하지 않습니다: {doc_path}"
+        """배포 가이드 문서 등 docs/guides 내 모든 가이드에서 미지원 파라미터가 배제되었는지 검증합니다."""
+        guide_dir = _ROOT / "docs" / "guides"
+        guide_paths = sorted(guide_dir.glob("*.md"))
+        assert len(guide_paths) >= 2, f"가이드 문서가 충분하지 않습니다: {guide_paths}"
+        for doc_path in guide_paths:
             doc_content = doc_path.read_text(encoding="utf-8")
-            assert "tei_max_input_length" not in doc_content.lower(), (
-                f"{doc_name} 문서에 미지원 환경변수 TEI_MAX_INPUT_LENGTH가 포함되어 있습니다."
+            assert "max_input_length" not in doc_content.lower(), (
+                f"{doc_path.name} 문서에 미지원 파라미터 max_input_length가 포함되어 있습니다."
             )
-            assert "--max-input-length" not in doc_content.lower(), (
-                f"{doc_name} 문서에 미지원 플래그 --max-input-length가 포함되어 있습니다."
+            assert "max-input-length" not in doc_content.lower(), (
+                f"{doc_path.name} 문서에 미지원 플래그 max-input-length가 포함되어 있습니다."
             )
-            assert "--max_input_length" not in doc_content.lower(), (
-                f"{doc_name} 문서에 미지원 플래그 변형 --max_input_length가 포함되어 있습니다."
-            )
+
 
 
