@@ -247,3 +247,15 @@ class TestEnvExampleCompleteness:
         )
         assert "기본값: 4096" in content
 
+        # 배포 가이드 문서에서도 미지원 파라미터가 배제되었는지 검증
+        for doc_name in ("docker_setup_guide.md", "server_deploy_guide.md"):
+            doc_path = _ROOT / "docs" / "guides" / doc_name
+            assert doc_path.exists(), f"가이드 문서가 존재하지 않습니다: {doc_path}"
+            doc_content = doc_path.read_text(encoding="utf-8")
+            assert "TEI_MAX_INPUT_LENGTH" not in doc_content, (
+                f"{doc_name} 문서에 미지원 환경변수 TEI_MAX_INPUT_LENGTH가 포함되어 있습니다."
+            )
+            assert "--max-input-length" not in doc_content, (
+                f"{doc_name} 문서에 미지원 플래그 --max-input-length가 포함되어 있습니다."
+            )
+

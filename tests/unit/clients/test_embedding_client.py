@@ -156,3 +156,40 @@ class TestEmbeddingDispatch:
         assert tokens == 42
         mock_remote.assert_called_once_with("본문")
         mock_local.assert_not_called()
+
+    def test_tei_http_422_embed_raises_llm_api_connection_error(self):
+        """TEI 서버가 토큰 초과 등으로 HTTP 422를 반환할 때 LLMAPIConnectionError(CM-002)로 올바르게 변환되는지 검증합니다."""
+        import httpx
+        from src.clients import embedding
+
+        mock_resp = httpx.Response(
+            422,
+            request=httpx.Request("POST", "http://tei:80/embed"),
+            json={"error": "Input validation error: text exceeds max_batch_tokens"},
+        )
+        with patch.object(config, "EMBEDDING_SERVER_URL", "http://tei:80"), \
+             patch("src.clients.embedding_remote.httpx.post", return_value=mock_resp):
+            with pytest.raises(LLMAPIConnectionError) as exc_info:
+                embedding.embed_texts(["초대형 텍스트"], node="search")
+
+            assert exc_info.value.node == "search"
+            assert exc_info.value.error_type == "CM-002"
+            assert "422" in str(exc_info.value.message)
+
+    def test_tei_http_422_tokenize_raises_llm_api_connection_error(self):
+        """TEI /tokenize 호출 시 HTTP 422 오류 발생 시 LLMAPIConnectionError(CM-002)로 변환되는지 검증합니다."""
+        import httpx
+        from src.clients import embedding
+
+        mock_resp = httpx.Response(
+            422,
+            request=httpx.Request("POST", "http://tei:80/tokenize"),
+            json={"error": "Input validation error"},
+        )
+        with patch.object(config, "EMBEDDING_SERVER_URL", "http://tei:80"), \
+             patch("src.clients.embedding_remote.httpx.post", return_value=mock_resp):
+            with pytest.raises(LLMAPIConnectionError) as exc_info:
+                embedding.count_tokens("초대형 텍스트", node="index")
+
+            assert exc_info.value.node == "index"
+            assert exc_info.value.error_type == "CM-002"
