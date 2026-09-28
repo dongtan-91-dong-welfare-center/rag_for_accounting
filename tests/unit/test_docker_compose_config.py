@@ -4,7 +4,7 @@ tests/unit/test_docker_compose_config.py: docker-compose.yml 구문 및 TEI 기�
 [배경 및 목적]
 저사양 CPU 호스트(vCPU 2 / RAM 16GB 이하)에서 TEI 임베딩 컨테이너 기동 웜업 시
 대용량 메모리 할당(OOM, exit 137)으로 인한 재시작 루프를 방지하기 위해,
-배치 및 입력 길이 파라미터가 .env를 통해 올바르게 주입되어야 합니다.
+배치 파라미터가 .env를 통해 올바르게 주입되어야 합니다.
 또한 실제 데이터가 2,048토큰 이하임에 따라 조용한 절단(--auto-truncate) 옵션 및
 TEI 1.8에서 지원되지 않는 --max-input-length 플래그가 배제되었는지 정적으로 검증합니다.
 """
@@ -61,11 +61,11 @@ class TestDockerComposeConfig:
         )
 
         compose_text = _COMPOSE_FILE.read_text(encoding="utf-8")
-        assert "tei_max_input_length" not in compose_text.lower(), (
-            "TEI_MAX_INPUT_LENGTH 환경변수는 더 이상 지원되지 않으므로 docker-compose.yml에서 배제되어야 합니다."
+        assert "max_input_length" not in compose_text.lower(), (
+            "max_input_length 관련 환경변수 및 플래그는 더 이상 지원되지 않으므로 docker-compose.yml에서 배제되어야 합니다."
         )
-        assert "--max-input-length" not in compose_text.lower(), (
-            "--max-input-length 플래그는 docker-compose.yml 전체(주석 및 설정 포함)에서 배제되어야 합니다."
+        assert "max-input-length" not in compose_text.lower(), (
+            "max-input-length 플래그는 docker-compose.yml 전체(주석 및 설정 포함)에서 배제되어야 합니다."
         )
 
         assert "--max-client-batch-size" in command
@@ -96,13 +96,15 @@ class TestDockerComposeConfig:
             def _repl(match: re.Match) -> str:
                 var_name = match.group(1)
                 default_val = match.group(2)
-                return env.get(var_name, default_val)
+                val = env.get(var_name)
+                # :- 구문은 변수가 미설정되었거나 빈 문자열("")일 때 기본값으로 치환합니다.
+                return val if val else default_val
             return re.sub(r"\$\{([A-Za-z0-9_]+):-([^}]+)\}", _repl, text)
 
         # 1. 환경변수 없을 때 안전 기본값 치환 결과 (4096 / 8)
         resolved_default = yaml.safe_load(resolve_defaults(raw_content))
         default_cmd = resolved_default["services"]["embedding"]["command"]
-        assert not any("--max-input-length" in str(arg) for arg in default_cmd)
+        assert not any("max-input-length" in str(arg).lower() or "max_input_length" in str(arg).lower() for arg in default_cmd)
         assert default_cmd[default_cmd.index("--max-batch-tokens") + 1] == "4096"
         assert default_cmd[default_cmd.index("--max-client-batch-size") + 1] == "8"
 
@@ -113,7 +115,7 @@ class TestDockerComposeConfig:
         }
         resolved_high_spec = yaml.safe_load(resolve_defaults(raw_content, high_spec_env))
         high_spec_cmd = resolved_high_spec["services"]["embedding"]["command"]
-        assert not any("--max-input-length" in str(arg) for arg in high_spec_cmd)
+        assert not any("max-input-length" in str(arg).lower() or "max_input_length" in str(arg).lower() for arg in high_spec_cmd)
         assert high_spec_cmd[high_spec_cmd.index("--max-batch-tokens") + 1] == "8192"   # ${TEI_MAX_BATCH_TOKENS:-8192}
         assert high_spec_cmd[high_spec_cmd.index("--max-client-batch-size") + 1] == "16"   # ${TEI_MAX_CLIENT_BATCH_SIZE:-16}
 
@@ -125,7 +127,7 @@ class TestDockerComposeConfig:
         }
         resolved_legacy = yaml.safe_load(resolve_defaults(raw_content, legacy_env))
         legacy_cmd = resolved_legacy["services"]["embedding"]["command"]
-        assert not any("--max-input-length" in str(arg) for arg in legacy_cmd)
+        assert not any("max-input-length" in str(arg).lower() or "max_input_length" in str(arg).lower() for arg in legacy_cmd)
         assert legacy_cmd[legacy_cmd.index("--max-batch-tokens") + 1] == "4096"
         assert legacy_cmd[legacy_cmd.index("--max-client-batch-size") + 1] == "8"
 
@@ -135,7 +137,19 @@ class TestDockerComposeConfig:
         }
         resolved_legacy_only = yaml.safe_load(resolve_defaults(raw_content, legacy_only_env))
         legacy_only_cmd = resolved_legacy_only["services"]["embedding"]["command"]
-        assert not any("--max-input-length" in str(arg) for arg in legacy_only_cmd)
+        assert not any("max-input-length" in str(arg).lower() or "max_input_length" in str(arg).lower() for arg in legacy_only_cmd)
         assert legacy_only_cmd[legacy_only_cmd.index("--max-batch-tokens") + 1] == "4096"
         assert legacy_only_cmd[legacy_only_cmd.index("--max-client-batch-size") + 1] == "8"
+
+        # 5. 환경변수가 빈 문자열("")로 전달되어도 Compose :- 구문에 따라 안전 기본값(4096 / 8)으로 정상 치환
+        empty_env = {
+            "TEI_MAX_BATCH_TOKENS": "",
+            "TEI_MAX_CLIENT_BATCH_SIZE": "",
+        }
+        resolved_empty = yaml.safe_load(resolve_defaults(raw_content, empty_env))
+        empty_cmd = resolved_empty["services"]["embedding"]["command"]
+        assert not any("max-input-length" in str(arg).lower() or "max_input_length" in str(arg).lower() for arg in empty_cmd)
+        assert empty_cmd[empty_cmd.index("--max-batch-tokens") + 1] == "4096"
+        assert empty_cmd[empty_cmd.index("--max-client-batch-size") + 1] == "8"
+
 
