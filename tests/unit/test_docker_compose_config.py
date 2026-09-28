@@ -56,8 +56,13 @@ class TestDockerComposeConfig:
         batch_idx = command.index("--max-batch-tokens")
         assert command[batch_idx + 1] == "${TEI_MAX_BATCH_TOKENS:-4096}"
 
-        assert "--max-input-length" not in command, (
+        assert not any("--max-input-length" in str(arg) for arg in command), (
             "--max-input-length 플래그는 TEI 1.8에서 지원되지 않아 크래시(exit 2)를 유발하므로 배제되어야 합니다."
+        )
+
+        compose_text = _COMPOSE_FILE.read_text(encoding="utf-8")
+        assert "TEI_MAX_INPUT_LENGTH" not in compose_text, (
+            "TEI_MAX_INPUT_LENGTH 환경변수는 더 이상 지원되지 않으므로 docker-compose.yml에서 배제되어야 합니다."
         )
 
         assert "--max-client-batch-size" in command
@@ -67,7 +72,7 @@ class TestDockerComposeConfig:
     def test_embedding_command_excludes_auto_truncate(self, compose_data):
         """--auto-truncate 옵션은 적재 토큰 상한 규약(IX-201) 위반 및 품질 저하 은폐 방지를 위해 배제되어야 합니다."""
         command = compose_data["services"]["embedding"]["command"]
-        assert "--auto-truncate" not in command, (
+        assert not any("--auto-truncate" in str(arg) for arg in command), (
             "--auto-truncate 플래그가 포함되어 있습니다. 실데이터(2,047토큰) 보존을 위해 배제해야 합니다."
         )
 
@@ -94,6 +99,7 @@ class TestDockerComposeConfig:
         # 1. 환경변수 없을 때 안전 기본값 치환 결과 (4096 / 8)
         resolved_default = yaml.safe_load(resolve_defaults(raw_content))
         default_cmd = resolved_default["services"]["embedding"]["command"]
+        assert not any("--max-input-length" in str(arg) for arg in default_cmd)
         assert default_cmd[default_cmd.index("--max-batch-tokens") + 1] == "4096"
         assert default_cmd[default_cmd.index("--max-client-batch-size") + 1] == "8"
 
@@ -104,5 +110,18 @@ class TestDockerComposeConfig:
         }
         resolved_high_spec = yaml.safe_load(resolve_defaults(raw_content, high_spec_env))
         high_spec_cmd = resolved_high_spec["services"]["embedding"]["command"]
+        assert not any("--max-input-length" in str(arg) for arg in high_spec_cmd)
         assert high_spec_cmd[high_spec_cmd.index("--max-batch-tokens") + 1] == "8192"   # ${TEI_MAX_BATCH_TOKENS:-8192}
         assert high_spec_cmd[high_spec_cmd.index("--max-client-batch-size") + 1] == "16"   # ${TEI_MAX_CLIENT_BATCH_SIZE:-16}
+
+        # 3. 기존 서버 .env 잔존 레거시 변수(TEI_MAX_INPUT_LENGTH) 주입 시 하위 호환성 검증
+        legacy_env = {
+            "TEI_MAX_INPUT_LENGTH": "4096",
+            "TEI_MAX_BATCH_TOKENS": "4096",
+            "TEI_MAX_CLIENT_BATCH_SIZE": "8",
+        }
+        resolved_legacy = yaml.safe_load(resolve_defaults(raw_content, legacy_env))
+        legacy_cmd = resolved_legacy["services"]["embedding"]["command"]
+        assert not any("--max-input-length" in str(arg) for arg in legacy_cmd)
+        assert legacy_cmd[legacy_cmd.index("--max-batch-tokens") + 1] == "4096"
+        assert legacy_cmd[legacy_cmd.index("--max-client-batch-size") + 1] == "8"
