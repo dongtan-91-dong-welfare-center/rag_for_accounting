@@ -193,3 +193,5 @@ class TestEmbeddingDispatch:
 
             assert exc_info.value.node == "index"
             assert exc_info.value.error_type == "CM-002"
+            assert "422" in str(exc_info.value.message)
+
