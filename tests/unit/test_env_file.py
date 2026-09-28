@@ -54,6 +54,7 @@ def _read_env(tmp_path: Path, env_body: str, key: str) -> tuple[int, str, str]:
         cwd=tmp_path,   # 프로세스의 현재 작업 디렉터리를 방금 만든 임시 폴더로 지정한다.
         capture_output=True,    # 프로세스가 터미널에 찍는 표준 출력과 표준 에러를 화면에 띄우지 않고 메모리에 캡처
         text=True,  # 캡처한 출력을 바이트가 아닌 문자열로 변환
+        encoding="utf-8",
     )
     return proc.returncode, proc.stdout.rstrip("\n"), proc.stderr
 
@@ -204,6 +205,7 @@ class TestEntryScriptsSurviveHostileEnv:
             env={"PATH": f"{bin_dir}:/usr/bin:/bin"},   # 프로세스에 전달할 환경 변수 딕셔너리
             capture_output=True,    # 표준 출력과 표준 에러를 캡처
             text=True,  # 캡처한 출력을 문자열로 디코딩
+            encoding="utf-8",
         )
 
     def test_install_reaches_the_container_build_step(self, tmp_path):
@@ -233,13 +235,15 @@ class TestEnvExampleCompleteness:
     """프로젝트 .env.example 파일의 필수 환경 변수 및 TEI 기동 설정 무결성 검증."""
 
     def test_env_example_contains_tei_parameters(self):
-        """.env.example에 TEI 기동 파라미터 3종 및 권장값이 올바르게 선언되어 있어야 한다."""
+        """.env.example에 TEI 기동 파라미터 2종 및 권장값이 올바르게 선언되어 있고, 미지원 파라미터는 배제되어야 한다."""
         env_example_path = _ROOT / ".env.example"
         assert env_example_path.exists()
         content = env_example_path.read_text(encoding="utf-8")
 
         assert "TEI_MAX_BATCH_TOKENS=4096" in content   # ${TEI_MAX_BATCH_TOKENS:-4096}
-        assert "TEI_MAX_INPUT_LENGTH=4096" in content   # ${TEI_MAX_INPUT_LENGTH:-4096}
         assert "TEI_MAX_CLIENT_BATCH_SIZE=8" in content   # ${TEI_MAX_CLIENT_BATCH_SIZE:-8}
+        assert "TEI_MAX_INPUT_LENGTH" not in content, (
+            "TEI_MAX_INPUT_LENGTH 환경변수는 지원되지 않는 TEI 인자이므로 .env.example에서 배제되어야 합니다."
+        )
         assert "기본값: 4096" in content
 
