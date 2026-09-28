@@ -116,8 +116,8 @@ sudo setsebool -P httpd_can_network_connect 1
 ### 5-1. 저사양 CPU 호스트 웜업 OOM 방지
 `nlpai-lab/KURE-v1` 모델을 구동하는 TEI 컨테이너는 기동 시 배치 상한 크기의 더미 텐서를 연속 메모리로 할당하여 웜업을 수행합니다. RAM 16GB 이하의 저사양 가상 머신에서는 기본값(16384 또는 8192) 적용 시 OOM Killer(exit 137)에 의해 프로세스가 강제 종료되는 현상이 발생합니다.
 
-본 프로젝트는 안전 우선 기본값으로 `TEI_MAX_BATCH_TOKENS=4096`을 기본 적용하였습니다:
-- `TEI_MAX_BATCH_TOKENS=4096`: 웜업 메모리 피크를 억제하여 16GB RAM 환경에서도 재시작 루프 없이 즉시 기동을 보장합니다.
+본 프로젝트는 안전 우선 기본값으로 `TEI_MAX_BATCH_TOKENS=8192`를 적용하였습니다:
+- `TEI_MAX_BATCH_TOKENS=8192`: TEI 기동 검증(배치 상한 >= 모델 토크나이저 최대 입력 8192)을 통과하는 기본값이며, 기본값 16384 대비 웜업 메모리 피크를 절반으로 억제하여 16GB RAM 환경에서도 재시작 루프 없이 안정적으로 기동합니다.
 - `TEI_MAX_CLIENT_BATCH_SIZE=8`: 동시 요청 폭주 시의 메모리 급증을 방지합니다.
 
 ### 5-2. `podman-compose` 1.0.6 헬스체크 의존성 한계 및 대기 가드
