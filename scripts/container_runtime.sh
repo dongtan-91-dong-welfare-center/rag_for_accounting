@@ -52,6 +52,16 @@ detect_container_runtime() {
         case "$version_output" in
           *podman*|*Podman*) ;;
           *)
+            # export 키워드는 현재 셸에서 선언된 환경 변수를 이후 fork/exec되어 생성되는
+            # 모든 하위 자식 프로세스(예: docker compose build 등)의 환경 변수 테이블로 상속합니다.
+            # 단순 셸 변수 할당(VAR=1)은 현재 셸 메모리 범위에만 머무르므로, 외부 CLI 도구가
+            # 설정을 온전히 전달받아 동작하도록 export 명령어를 사용하여 환경 변수로 등록합니다.
+            #
+            # DOCKER_BUILDKIT=1: Docker CLI 빌드 엔진으로 최신 BuildKit을 강제 활성화합니다.
+            # Dockerfile 최상단의 syntax 선언 및 RUN 명령어의 패키지 캐시 마운트(--mount=type=cache) 기능을 정상 구동하기 위해 필수적입니다.
+            #
+            # COMPOSE_DOCKER_CLI_BUILD=1: Docker Compose가 자체 파이썬 기반 레거시 빌드 로직 대신
+            # 표준 Docker CLI(docker build)를 호출하도록 강제하여 BuildKit 파이프라인과 완벽히 연동되도록 보장합니다.
             export DOCKER_BUILDKIT=1
             export COMPOSE_DOCKER_CLI_BUILD=1
             COMPOSE=(docker compose)

@@ -14,8 +14,33 @@ import shutil
 import subprocess
 from pathlib import Path
 
+def _find_bash() -> str:
+    """시스템 환경에 적합한 bash 실행 파일의 절대 경로를 탐색합니다."""
+    if os.name == "nt":
+        # Windows 환경에서는 WSL bash(C:\Windows\System32\bash.exe) 대신
+        # Windows 파일 경로와 호환되는 Git for Windows의 bash를 최우선으로 탐색합니다.
+        candidates = [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ]
+        for candidate in candidates:
+            if Path(candidate).is_file():
+                return candidate
+    return shutil.which("bash") or "/bin/bash"
+
+
 # 시스템 bash 절대 경로 (PATH를 가짜 디렉터리로 좁혀도 bash를 안전하게 실행 가능)
-BASH_PATH: str = shutil.which("bash") or "/bin/bash"
+BASH_PATH: str = _find_bash()
+
+
+def to_posix_path(path: Path | str) -> str:
+    """Windows 환경의 절대 경로(C:\\...)를 Git Bash 호환 POSIX 경로(/c/...)로 변환합니다."""
+    p = Path(path).resolve()
+    if os.name == "nt" and p.drive:
+        drive = p.drive.rstrip(":").lower()
+        return f"/{drive}{p.as_posix()[2:]}"
+    return p.as_posix()
 
 
 def make_bin(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -52,16 +77,18 @@ def make_mock_env(
     :return: 갱신된 환경 변수 dict
     """
     env = dict(base_env if base_env is not None else os.environ)
+    posix_bin = to_posix_path(bin_dir)
     if isolate:
         # 테스트 환경을 깨끗하게 격리하면서도 스크립트 실행에 필요한 필수 쉘 명령어만 최소한으로 제공
         if include_system_paths:
-            env["PATH"] = f"{bin_dir}:/bin:/usr/bin"
+            env["PATH"] = f"{posix_bin}:/bin:/usr/bin"
         else:
-            env["PATH"] = str(bin_dir)
+            env["PATH"] = posix_bin
     else:
         existing_path = env.get("PATH", "")
         # 기존 PATH를 유지하면서 bin_dir을 앞에 추가
-        env["PATH"] = f"{bin_dir}:{existing_path}" if existing_path else str(bin_dir)
+        system_extra = ":/usr/bin:/bin" if os.name == "nt" else ""
+        env["PATH"] = f"{posix_bin}{system_extra}:{existing_path}" if existing_path else f"{posix_bin}{system_extra}"
     return env
 
 
@@ -81,12 +108,20 @@ def run_shell(
     :param input_text: 표준 입력으로 주입할 문자열
     :return: subprocess.CompletedProcess[str]
     """
+    path_export = ""
+    if env and "PATH" in env:
+        # Git Bash 등 서브프로세스 기동 시 시스템 PATH가 우선되는 현상을 방지하기 위해 셸 내부에서 PATH를 최우선으로 재정의합니다.
+        path_export = f'export PATH="{env["PATH"]}"; '
+
     if isinstance(cmd, str):
-        # -c 옵션: 문자열 형태의 셸 커맨드를 실행
-        args = [BASH_PATH, "-c", cmd]
+        full_cmd = f"{path_export}{cmd}" if path_export else cmd
+        args = [BASH_PATH, "--noprofile", "--norc", "-c", full_cmd]
     else:
-        # 문자열이 아니면 리스트로 전달받은 인자로 취급
-        args = [BASH_PATH] + list(cmd)
+        # 리스트 인자의 Windows 역슬래시(\)가 bash -c 파싱 시 이스케이프 문자로 소실되지 않도록 변환
+        sanitized_args = [to_posix_path(arg) if ("\\" in str(arg) or (os.name == "nt" and ":" in str(arg))) else str(arg) for arg in cmd]
+        cmd_str = " ".join(f'"{arg}"' if " " in arg else arg for arg in sanitized_args)
+        full_cmd = f"{path_export}{cmd_str}" if path_export else cmd_str
+        args = [BASH_PATH, "--noprofile", "--norc", "-c", full_cmd]
 
     return subprocess.run(
         args,
@@ -95,4 +130,6 @@ def run_shell(
         input=input_text,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
