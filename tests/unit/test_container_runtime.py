@@ -296,6 +296,8 @@ class TestInstallHint:
             env={"PATH": str(bin_dir)},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
         # 안내는 표준 출력이 아니라 표준 오류로 나가야 한다.

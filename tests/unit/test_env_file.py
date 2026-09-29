@@ -25,7 +25,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.shell_test_helpers import BASH_PATH as _BASH
+from tests.utils.shell_test_helpers import (
+    BASH_PATH as _BASH,
+    run_shell as _run_shell,
+    to_posix_path as _to_posix_path,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _LIB = _ROOT / "scripts" / "env_file.sh"
@@ -197,16 +201,16 @@ class TestEntryScriptsSurviveHostileEnv:
         for name in ("install.sh", "deploy.sh", "check.sh", ".env.example"):
             shutil.copy(_ROOT / name, work / name)
         # 위험한 특수문자가 포함된 self.HOSTILE_ENV 문자열을 .env 파일로 직접 생성
-        (work / ".env").write_text(self.HOSTILE_ENV)
+        (work / ".env").write_text(self.HOSTILE_ENV, encoding="utf-8")
         # stub bin
         bin_dir = self._stub_bin(tmp_path)
-        # 스크립트 실행
-        return subprocess.run(
-            [_BASH, f"./{script}"], # 실행할 명령어 배열
-            cwd=work,   # 현재 작업 디렉터리
-            env={"PATH": f"{bin_dir}:/usr/bin:/bin"},   # 프로세스에 전달할 환경 변수 딕셔너리
-            capture_output=True,    # 표준 출력과 표준 에러를 캡처
-            text=True,  # 캡처한 출력을 문자열로 디코딩
+        posix_bin = _to_posix_path(bin_dir)
+
+        # 스크립트 실행: _run_shell을 사용하여 격리된 PATH와 mock curl이 최우선으로 호출되도록 보장합니다.
+        return _run_shell(
+            f"./{script}",
+            cwd=work,
+            env={"PATH": f"{posix_bin}:/usr/bin:/bin"},
         )
 
     def test_install_reaches_the_container_build_step(self, tmp_path):
@@ -223,11 +227,21 @@ class TestEntryScriptsSurviveHostileEnv:
         assert "http://localhost:3000" in proc.stdout   # curl 포트 반영 확인
 
     def test_deploy_reaches_the_container_build_step(self, tmp_path):
-        """deploy.sh가 특별한 글자가 든 .env를 만나도 죽지 않고 빌드 단계까지 진행해야 한다."""
+        """
+        deploy.sh가 특별한 글자가 든 .env를 만나도 죽지 않고 빌드 단계까지 진행해야 한다.
+
+        [커버리지 범위 안내]
+        본 테스트는 특수문자 및 공백이 포함된 적대적 .env 환경에서 환경변수 파싱(`read_env`)이
+        셸 크래시(unbound variable, command not found) 없이 빌드 진입 단계까지 생존하는지를 집중 검증합니다.
+        CLI 옵션 파싱, 컨테이너 런타임/DB/임베딩 부재, 헬스체크 타임아웃 등 deploy.sh의 세부 분기 및
+        장애 시나리오는 tests/unit/test_deploy_script.py에서 15종 이상의 전용 단위 테스트로 포괄 검증합니다.
+        """
         proc = self._run("deploy.sh", tmp_path)
 
         assert "unbound variable" not in proc.stderr
+        assert "command not found" not in proc.stderr
         assert "Building app container" in proc.stdout
+        assert proc.returncode == 0
 
     def test_deploy_uses_the_port_from_env(self, tmp_path):
         """.env의 APP_HOST_PORT가 deploy.sh 안내 문구에 반영되어야 한다."""

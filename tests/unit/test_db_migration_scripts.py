@@ -21,6 +21,7 @@ from tests.utils.shell_test_helpers import (
     BASH_PATH as _BASH,
     make_bin as _make_bin,
     make_mock_env as _make_mock_env,
+    run_shell as _run_shell,
 )
 
 _ROOT = Path(__file__).resolve().parents[2] # tests/unit/test_db_migration_scripts.py
@@ -28,6 +29,12 @@ _DUMP_SH = _ROOT / "db_dump.sh"
 _RESTORE_SH = _ROOT / "db_restore.sh"
 _LIB_RUNTIME = _ROOT / "scripts" / "container_runtime.sh"
 _LIB_ENV = _ROOT / "scripts" / "env_file.sh"
+
+
+def _exec(cmd: list[str] | str, *, cwd: Path | None = None, env: dict[str, str] | None = None, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    """BASH_PATH 및 UTF-8 인코딩을 적용하여 셸 명령을 실행합니다."""
+    return _run_shell(cmd, cwd=cwd or _ROOT, env=env, input_text=input_text)
+
 
 
 @pytest.mark.unit
@@ -45,7 +52,7 @@ type detect_container_runtime >/dev/null
 type read_env >/dev/null
 echo "OK"
 """
-    proc = subprocess.run([_BASH, "-c", cmd], capture_output=True, text=True)
+    proc = _exec(cmd)
     assert proc.returncode == 0 # 0은 성공을 의미하는 종료코드
     assert "OK" in proc.stdout  # OK 문자열이 출력됐는지 확인
 
@@ -53,7 +60,7 @@ echo "OK"
 @pytest.mark.unit
 def test_dump_help():
     """db_dump.sh --help 실행 시 사용법을 출력하고 정상 종료(0)해야 한다."""
-    proc = subprocess.run([_BASH, str(_DUMP_SH), "--help"], cwd=_ROOT, capture_output=True, text=True)
+    proc = _exec([str(_DUMP_SH), "--help"])
     assert proc.returncode == 0 # 0은 성공을 의미하는 종료코드
     assert "사용법: " in proc.stdout  # 사용법: 문자열이 출력됐는지 확인
     assert "accounting_db" in proc.stdout  # accounting_db 문자열이 출력됐는지 확인
@@ -63,11 +70,11 @@ def test_dump_help():
 def test_restore_help_and_missing_arg():
     """db_restore.sh --help 및 인자 누락 검증."""
     # --help 플래그는 0으로 종료
-    proc_help = subprocess.run([_BASH, str(_RESTORE_SH), "--help"], cwd=_ROOT, capture_output=True, text=True)
+    proc_help = _exec([str(_RESTORE_SH), "--help"])
     assert proc_help.returncode == 0  # 0은 성공을 의미하는 종료코드
     assert "사용법: " in proc_help.stdout # 사용법: 문자열이 출력됐는지 확인
 
-    proc_no_arg = subprocess.run([_BASH, str(_RESTORE_SH)], cwd=_ROOT, capture_output=True, text=True)
+    proc_no_arg = _exec([str(_RESTORE_SH)])
     assert proc_no_arg.returncode == 1  # 1은 실패를 의미하는 종료코드
     assert "사용법: " in proc_no_arg.stdout # 사용법: 문자열이 출력됐는지 확인
 
@@ -76,7 +83,7 @@ def test_restore_help_and_missing_arg():
 def test_restore_file_not_found(tmp_path: Path):
     """존재하지 않는 덤프 파일 전달 시 에러 메시지와 함께 종료 코드 1 반환."""
     fake_dump = tmp_path / "non_existent.dump"
-    proc = subprocess.run([_BASH, str(_RESTORE_SH), str(fake_dump)], cwd=_ROOT, capture_output=True, text=True)
+    proc = _exec([str(_RESTORE_SH), str(fake_dump)])
     assert proc.returncode == 1 # 1은 실패를 의미하는 종료코드
     assert "[FAIL] 파일 없음" in proc.stderr  # [FAIL] 파일 없음 문자열이 출력됐는지 확인
 
@@ -86,7 +93,7 @@ def test_restore_empty_file(tmp_path: Path):
     """0바이트의 빈 덤프 파일 전달 시 에러 메시지와 함께 종료 코드 1 반환."""
     empty_dump = tmp_path / "empty.dump"
     empty_dump.write_bytes(b"")
-    proc = subprocess.run([_BASH, str(_RESTORE_SH), str(empty_dump)], cwd=_ROOT, capture_output=True, text=True)
+    proc = _exec([str(_RESTORE_SH), str(empty_dump)])
     assert proc.returncode == 1 # 1은 실패를 의미하는 종료코드
     assert "[FAIL] 덤프 파일이 비어 있습니다" in proc.stderr # [FAIL] 덤프 파일이 비어 있습니다 문자열이 출력됐는지 확인
 
@@ -110,7 +117,7 @@ exit 0
     env = _make_mock_env(bin_dir)
 
     out_file = tmp_path / "test.dump"
-    proc = subprocess.run([_BASH, str(_DUMP_SH), str(out_file)], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_DUMP_SH), str(out_file)], env=env)
     assert proc.returncode == 1 # 1은 실패를 의미하는 종료코드
     assert "accounting_db 컨테이너가 실행 중이 아닙니다" in proc.stderr # accounting_db 컨테이너가 실행 중이 아닙니다 문자열이 출력됐는지 확인
     assert "docker compose up -d" in proc.stderr # docker compose up -d 문자열이 출력됐는지 확인
@@ -136,7 +143,7 @@ exit 0
     dump_file = tmp_path / "valid.dump"
     dump_file.write_bytes(b"dummy pg_dump content")
 
-    proc = subprocess.run([_BASH, str(_RESTORE_SH), str(dump_file)], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_RESTORE_SH), str(dump_file)], env=env)
     assert proc.returncode == 1 # 1은 실패를 의미하는 종료코드
     assert "accounting_db 컨테이너가 실행 중이 아닙니다" in proc.stderr # accounting_db 컨테이너가 실행 중이 아닙니다 문자열이 출력됐는지 확인
     assert "podman-compose up -d" in proc.stderr # podman-compose up -d 문자열이 출력됐는지 확인
@@ -166,7 +173,7 @@ def test_toc_filter_logic():
     # -i: 대소문자 구분 없음
     # -E: 확장 정규표현식(| OR 연산 등) 활성화
     filter_cmd = 'grep -viE "EXTENSION - age|COMMENT - EXTENSION age|ag_catalog|interaction_log|bench_indexing|chunks_2048|chunks_fine|chunks_smoke|chunks_test_"'
-    proc = subprocess.run(filter_cmd, shell=True, input=sample_toc, capture_output=True, text=True)
+    proc = _exec(filter_cmd, input_text=sample_toc)
     filtered = proc.stdout
 
     # AGE 관련 항목 제외 확인
@@ -233,7 +240,7 @@ exit 0
 
     # pytest는 tmp_path를 통해 생성한 디렉터리와 전여 파일에 대해 주기적으로 청소를 진행하므로 명시적으로 삭제하지 않아도 된다
     out_file = tmp_path / "backups" / "test_dump.dump"
-    proc = subprocess.run([_BASH, str(_DUMP_SH), str(out_file)], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_DUMP_SH), str(out_file)], env=env)
     assert proc.returncode == 0, f"dump failed: stderr={proc.stderr}, stdout={proc.stdout}" # 0은 성공을 의미하는 종료코드
     assert out_file.exists() # test_dump.dump 파일이 존재하는지 확인
     assert "MOCK_PG_DUMP_BINARY_DATA" in out_file.read_text() # MOCK_PG_DUMP_BINARY_DATA 문자열이 출력됐는지 확인
@@ -281,7 +288,7 @@ exit 0
     dump_file = tmp_path / "valid.dump"
     dump_file.write_text("pg_dump data")
 
-    proc = subprocess.run([_BASH, str(_RESTORE_SH), str(dump_file)], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_RESTORE_SH), str(dump_file)], env=env)
     assert proc.returncode == 1 # 1은 실패를 의미하는 종료코드
     assert "[FAIL] 복원 검증 실패: chunks 테이블이 비어 있습니다 (0건)" in proc.stderr  # [FAIL] 복원 검증 실패: chunks 테이블이 비어 있습니다 (0건) 문자열이 출력됐는지 확인
 
@@ -322,7 +329,7 @@ exit 0
     dump_file.write_text("pg_dump data")
 
     # 기대 청크 수로 1507 전달
-    proc = subprocess.run([_BASH, str(_RESTORE_SH), str(dump_file), "1507"], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_RESTORE_SH), str(dump_file), "1507"], env=env)
     assert proc.returncode == 1 # 1은 실패를 의미하는 종료코드
     assert "청크 수 불일치 (기대: 1507건, 실제 복원: 1000건)" in proc.stderr  # 청크 수 불일치 (기대: 1507건, 실제 복원: 1000건) 문자열이 출력됐는지 확인
 
@@ -369,7 +376,7 @@ exit 0
     meta_file.write_text("CHUNKS_COUNT=1507\nDATABASE=accounting_db\n")
 
     # 인자로 기대 청크 수를 명시하지 않아도 .meta 파일에서 읽어서 1507과 일치 검증
-    proc = subprocess.run([_BASH, str(_RESTORE_SH), str(dump_file)], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_RESTORE_SH), str(dump_file)], env=env)
     assert proc.returncode == 0, f"restore failed: stderr={proc.stderr}, stdout={proc.stdout}"  # 0은 성공을 의미하는 종료코드
     assert "valid.dump.meta 파일에서 기대 청크 수(1507건)를 읽었습니다" in proc.stdout  # valid.dump.meta 파일에서 기대 청크 수(1507건)를 읽었습니다 문자열이 출력됐는지 확인
     assert "청크 수 일치 검증 통과: 1507건" in proc.stdout  # 청크 수 일치 검증 통과: 1507건 문자열이 출력됐는지 확인
@@ -398,7 +405,7 @@ exit 0
     env = _make_mock_env(bin_dir)
 
     out_file = tmp_path / "test.dump"
-    proc = subprocess.run([_BASH, str(_DUMP_SH), str(out_file)], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_DUMP_SH), str(out_file)], env=env)
     assert proc.returncode == 1 # 1은 실패를 의미하는 종료코드
     assert "운영 테이블(chunks)을 DB에서 찾을 수 없습니다" in proc.stderr  # 운영 테이블(chunks)을 DB에서 찾을 수 없습니다 문자열이 출력됐는지 확인
 
@@ -433,7 +440,7 @@ exit 0
     env = _make_mock_env(bin_dir)
 
     out_file = tmp_path / "test_empty.dump"
-    proc = subprocess.run([_BASH, str(_DUMP_SH), str(out_file)], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_DUMP_SH), str(out_file)], env=env)
     assert proc.returncode == 1 # 1은 실패를 의미하는 종료코드
     assert "pg_dump 실행에 실패했습니다" in proc.stderr or "덤프 파일이 비어있거나 생성되지 않았습니다" in proc.stderr  # pg_dump 실행에 실패했습니다 또는 덤프 파일이 비어있거나 생성되지 않았습니다 문자열이 출력됐는지 확인
     assert not out_file.exists() # test_empty.dump 파일이 존재하지 않는지 확인
@@ -478,6 +485,6 @@ exit 0
     dump_file = tmp_path / "valid.dump"
     dump_file.write_text("pg_dump data")
 
-    proc = subprocess.run([_BASH, str(_RESTORE_SH), str(dump_file), "1507"], cwd=_ROOT, env=env, capture_output=True, text=True)
+    proc = _exec([str(_RESTORE_SH), str(dump_file), "1507"], env=env)
     assert proc.returncode == 0 # 0은 성공을 의미하는 종료코드
     assert "[WARN] chunks 테이블에 생성된 인덱스가 없습니다." in proc.stderr  # [WARN] chunks 테이블에 생성된 인덱스가 없습니다. 문자열이 출력됐는지 확인

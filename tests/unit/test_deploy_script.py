@@ -35,7 +35,7 @@ _DOCKERFILE = _ROOT / "Dockerfile"
 @pytest.mark.unit
 def test_deploy_bash_syntax():
     """deploy.sh의 bash 문법 오류 여부를 정적으로 검증합니다."""
-    proc = subprocess.run([_BASH, "-n", str(_DEPLOY_SH)], capture_output=True, text=True)
+    proc = subprocess.run([_BASH, "-n", str(_DEPLOY_SH)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     assert proc.returncode == 0, f"deploy.sh 문법 오류: {proc.stderr}"
 
 
@@ -43,7 +43,7 @@ def test_deploy_bash_syntax():
 @pytest.mark.parametrize("flag", ["-h", "--help"])
 def test_deploy_help(flag: str):
     """deploy.sh -h 및 --help 실행 시 사용법을 출력하고 0으로 정상 종료해야 합니다."""
-    proc = subprocess.run([_BASH, str(_DEPLOY_SH), flag], cwd=_ROOT, capture_output=True, text=True)
+    proc = subprocess.run([_BASH, str(_DEPLOY_SH), flag], cwd=_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
     assert proc.returncode == 0
     assert "사용법: " in proc.stdout
     assert "--no-cache" in proc.stdout
@@ -59,10 +59,33 @@ def test_deploy_unknown_arg():
         cwd=_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     assert proc.returncode == 1
     assert "오류: 알 수 없는 인자" in proc.stderr
     assert "사용법: " in proc.stderr
+
+
+@pytest.mark.unit
+def test_deploy_missing_curl(tmp_path: Path):
+    """curl이 PATH에 없으면 에러 메시지를 출력하고 종료 코드 1로 실패해야 합니다."""
+    work = tmp_path / "repo"
+    shutil.copytree(_ROOT / "scripts", work / "scripts")
+    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
+
+    bin_dir = _make_bin(
+        tmp_path,
+        {
+            "docker": "#!/bin/sh\nexit 0\n",
+        },
+    )
+    env = _make_mock_env(bin_dir, isolate=True)
+
+    proc = _run_shell("./deploy.sh", cwd=work, env=env)
+    assert proc.returncode == 1
+    assert "curl이 존재하지 않습니다" in proc.stderr
+
 
 
 @pytest.mark.unit
@@ -159,7 +182,34 @@ exit 0
     assert proc.returncode == 1
     assert "필수 인프라 컨테이너(accounting_embedding)가 실행 중이지 않습니다" in proc.stderr
     assert "./install.sh" in proc.stderr
+@pytest.mark.unit
+def test_deploy_custom_embedding_container_name(tmp_path: Path):
+    """EMBEDDING_CONTAINER 환경 변수로 지정된 커스텀 컨테이너명을 검사해야 합니다."""
+    work = tmp_path / "repo"
+    shutil.copytree(_ROOT / "scripts", work / "scripts")
+    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
+    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
 
+    docker_stub = """#!/bin/sh
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  echo "Docker Compose version v2.39.0"; exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  case "$*" in
+    *custom_embedding*) echo "missing"; exit 1 ;;
+    *) echo "running"; exit 0 ;;
+  esac
+fi
+exit 0
+"""
+    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": "#!/bin/sh\nexit 0\n"})
+    env = _make_mock_env(bin_dir, isolate=True)
+    env["EMBEDDING_CONTAINER"] = "custom_embedding"
+
+    proc = _run_shell("./deploy.sh", cwd=work, env=env)
+    assert proc.returncode == 1
+    assert "필수 인프라 컨테이너(custom_embedding)가 실행 중이지 않습니다" in proc.stderr
+    assert "./install.sh" in proc.stderr
 
 @pytest.mark.unit
 def test_deploy_fails_if_embedding_health_fails(tmp_path: Path):
@@ -305,9 +355,9 @@ def test_deploy_healthcheck_timeout_outputs_tail_logs(tmp_path: Path):
     shutil.copytree(_ROOT / "scripts", work / "scripts")
     # 대기 루프를 빠르게 실패시키기 위해 seq 1 60을 seq 1 1로 임시 치환
     deploy_content = _DEPLOY_SH.read_text(encoding="utf-8").replace("seq 1 60", "seq 1 1").replace("sleep 2", "sleep 0.1")
-    (work / "deploy.sh").write_text(deploy_content)
+    (work / "deploy.sh").write_text(deploy_content, encoding="utf-8")
     (work / "deploy.sh").chmod(0o755)
-    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
+    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n", encoding="utf-8")
 
     docker_stub = """#!/bin/sh
 if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
