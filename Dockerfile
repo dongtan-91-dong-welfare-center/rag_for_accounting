@@ -12,10 +12,17 @@ FROM node:22-slim AS frontend-builder
 WORKDIR /frontend
 
 # 의존성 명세 파일만 먼저 복사하여 소스 코드 변경 시 npm 설치 단계의 레이어 캐시를 최대한 활용합니다.
+# [COPY 문법 및 동작 방식]
+# - 복사 원본: 호스트의 빌드 컨텍스트 기준 frontend/package.json 및 frontend/package-lock.json 파일
+# - 복사 대상: 컨테이너 내부의 현재 작업 디렉터리(WORKDIR /frontend)를 의미하는 './'
+# - 동작 특성: 소스의 상위 디렉터리명(frontend/)은 유지되지 않고, 두 파일만 /frontend/package.json 및 /frontend/package-lock.json으로 각각 복사됩니다.
 COPY frontend/package.json frontend/package-lock.json ./
 
 # --mount=type=cache 옵션을 지정하여 npm 다운로드 캐시 디렉터리(/root/.npm)를 호스트 레벨에서 재사용합니다.
-# npm ci 명령은 package-lock.json에 명시된 종속성을 정확하게 설치하여 재현 가능한 빌드를 보장합니다.
+# [npm ci 동작 원리]
+# - npm ci(Clean Install)는 명령어 인자에 파일명을 직접 명시하지 않아도, 현재 작업 디렉터리에 복사되어 있는
+#   package-lock.json을 자동으로 감지하여 그 안에 정의된 엄격한 버전과 무결성 해시에 맞춰 node_modules를 설치합니다.
+# - package-lock.json이 존재하지 않으면 명령어가 실패하므로, 앞선 COPY 단계에서 package-lock.json을 미리 복사해 둔 것입니다.
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
