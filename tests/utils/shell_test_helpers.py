@@ -16,9 +16,12 @@ from pathlib import Path
 
 def _find_bash() -> str:
     """시스템 환경에 적합한 bash 실행 파일의 절대 경로를 탐색합니다."""
+    # os.name == "nt": 'nt'는 'New Technology'의 약어로 파이썬 표준 os 모듈에서 Windows NT 커널 기반 운영체제를 식별하는 고유 문자열입니다 (Linux/macOS는 'posix').
     if os.name == "nt":
-        # Windows 환경에서는 WSL bash(C:\Windows\System32\bash.exe) 대신
-        # Windows 파일 경로와 호환되는 Git for Windows의 bash를 최우선으로 탐색합니다.
+        # [WSL bash 대신 Git for Windows의 bash를 선택하는 이유]
+        # Windows 환경에서 WSL bash(C:\Windows\System32\bash.exe)는 가상화된 리눅스 서브시스템 파일 경로를 바라보므로,
+        # 파이썬 테스트 러너가 Windows 호스트에 생성한 pytest 임시 디렉터리(C:\...)를 인식하지 못해 테스트가 깨집니다.
+        # 반면 Git for Windows의 bash는 호스트 파일 시스템 드라이브를 /c/... 형태로 직접 마운트하여 다룰 수 있으므로 최우선으로 탐색합니다.
         candidates = [
             r"C:\Program Files\Git\bin\bash.exe",
             r"C:\Program Files\Git\usr\bin\bash.exe",
@@ -36,6 +39,7 @@ BASH_PATH: str = _find_bash()
 
 def to_posix_path(path: Path | str) -> str:
     """Windows 환경의 절대 경로(C:\\...)를 Git Bash 호환 POSIX 경로(/c/...)로 변환합니다."""
+    # resolve(): 상대 경로를 절대 경로로 정규화하고 심볼릭 링크 및 '.'이나 '..' 경로 세그먼트를 모두 물리적 정규 절대 경로(canonical path)로 치환합니다.
     p = Path(path).resolve()
     if os.name == "nt" and p.drive:
         drive = p.drive.rstrip(":").lower()
@@ -119,6 +123,9 @@ def run_shell(
     else:
         # 리스트 인자의 Windows 역슬래시(\)가 bash -c 파싱 시 이스케이프 문자로 소실되지 않도록 변환
         sanitized_args = [to_posix_path(arg) if ("\\" in str(arg) or (os.name == "nt" and ":" in str(arg))) else str(arg) for arg in cmd]
+        # [인자 결합 시 큰따옴표를 감싸는 이유]
+        # 인자 내부에 공백(예: 경로명 'Program Files')이 포함되어 있는 경우, 큰따옴표 없이 공백으로 결합하면
+        # bash -c 전달 시 셸이 공백을 기준으로 인자를 쪼개어 각각 별개의 명령어나 플래그로 잘못 파싱하므로 단일 인자 보존을 위해 따옴표를 감쌉니다.
         cmd_str = " ".join(f'"{arg}"' if " " in arg else arg for arg in sanitized_args)
         full_cmd = f"{path_export}{cmd_str}" if path_export else cmd_str
         args = [BASH_PATH, "--noprofile", "--norc", "-c", full_cmd]
@@ -130,6 +137,8 @@ def run_shell(
         input=input_text,
         capture_output=True,
         text=True,
+        # encoding="utf-8": 서브프로세스의 stdout/stderr 바이트 스트림을 UTF-8 문자열로 디코딩합니다.
+        # errors="replace": 디코딩 불가능한 비정상 바이트가 포함되어 있어도 UnicodeDecodeError 예외로 중단되지 않고 대체 문자(\ufffd)로 안전하게 치환합니다.
         encoding="utf-8",
         errors="replace",
     )
