@@ -24,6 +24,7 @@ from tests.utils.shell_test_helpers import (
     make_bin as _make_bin,
     make_mock_env as _make_mock_env,
     run_shell as _run_shell,
+    to_posix_path,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -74,17 +75,30 @@ def test_deploy_missing_curl(tmp_path: Path):
     shutil.copytree(_ROOT / "scripts", work / "scripts")
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
 
+    dirname_stub = """#!/bin/sh
+case "$1" in
+  */*) echo "${1%/*}" ;;
+  *) echo "." ;;
+esac
+"""
+    bash_stub = f"""#!/bin/sh
+exec "{to_posix_path(_BASH)}" "$@"
+"""
     bin_dir = _make_bin(
         tmp_path,
         {
+            "bash": bash_stub,
+            "dirname": dirname_stub,
             "docker": "#!/bin/sh\nexit 0\n",
         },
     )
-    env = _make_mock_env(bin_dir, isolate=True)
+    env = _make_mock_env(bin_dir, isolate=True, include_system_paths=False)
 
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
     assert proc.returncode == 1
     assert "curl이 존재하지 않습니다" in proc.stderr
+
+
 
 
 
@@ -114,6 +128,8 @@ def test_deploy_missing_env(tmp_path: Path):
 def test_deploy_missing_runtime(tmp_path: Path):
     """컨테이너 런타임(Docker/Podman)이 설치되어 있지 않으면 힌트를 출력하고 실패해야 합니다."""
     work = tmp_path / "repo"
+    # shutil.copytree: 실제 저장소 루트의 scripts 폴더를 pytest 임시 격리 디렉터리(work/scripts)로 복사하여,
+    # 실제 프로젝트 파일의 오염 없이 안전하게 독립 가상 환경에서 셸 스크립트 실행을 검증합니다.
     shutil.copytree(_ROOT / "scripts", work / "scripts")
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
     (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
@@ -182,6 +198,8 @@ exit 0
     assert proc.returncode == 1
     assert "필수 인프라 컨테이너(accounting_embedding)가 실행 중이지 않습니다" in proc.stderr
     assert "./install.sh" in proc.stderr
+
+
 @pytest.mark.unit
 def test_deploy_custom_embedding_container_name(tmp_path: Path):
     """EMBEDDING_CONTAINER 환경 변수로 지정된 커스텀 컨테이너명을 검사해야 합니다."""
@@ -190,11 +208,13 @@ def test_deploy_custom_embedding_container_name(tmp_path: Path):
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
     (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
 
-    docker_stub = """#!/bin/sh
+    log_file = tmp_path / "docker_inspect.log"
+    docker_stub = f"""#!/bin/sh
 if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   echo "Docker Compose version v2.39.0"; exit 0
 fi
 if [ "$1" = "inspect" ]; then
+  echo "$@" >> "{log_file}"
   case "$*" in
     *custom_embedding*) echo "missing"; exit 1 ;;
     *) echo "running"; exit 0 ;;
@@ -210,6 +230,45 @@ exit 0
     assert proc.returncode == 1
     assert "필수 인프라 컨테이너(custom_embedding)가 실행 중이지 않습니다" in proc.stderr
     assert "./install.sh" in proc.stderr
+
+    # custom_embedding 컨테이너를 실제로 검사했고, 기본값인 accounting_embedding은 검사하지 않았는지 확인
+    calls = log_file.read_text().splitlines()
+    assert any("custom_embedding" in c for c in calls)
+    assert not any("accounting_embedding" in c for c in calls)
+
+
+@pytest.mark.unit
+def test_deploy_custom_embedding_container_name_success(tmp_path: Path):
+    """EMBEDDING_CONTAINER 환경 변수로 지정된 커스텀 컨테이너가 정상 실행 중일 때 배포가 정상 통과하는지 검증합니다."""
+    work = tmp_path / "repo"
+    shutil.copytree(_ROOT / "scripts", work / "scripts")
+    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
+    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
+
+    log_file = tmp_path / "docker_inspect.log"
+    docker_stub = f"""#!/bin/sh
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  echo "Docker Compose version v2.39.0"; exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  echo "$@" >> "{log_file}"
+  echo "running"; exit 0
+fi
+exit 0
+"""
+    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": "#!/bin/sh\nexit 0\n"})
+    env = _make_mock_env(bin_dir, isolate=True)
+    env["EMBEDDING_CONTAINER"] = "custom_embedding"
+
+    proc = _run_shell("./deploy.sh", cwd=work, env=env)
+    assert proc.returncode == 0
+    assert "배포 완료: app 컨테이너가 성공적으로 갱신되었습니다" in proc.stdout
+
+    # custom_embedding 컨테이너를 실제로 검사했고, 기본값인 accounting_embedding은 검사하지 않았는지 확인
+    calls = log_file.read_text().splitlines()
+    assert any("custom_embedding" in c for c in calls)
+    assert not any("accounting_embedding" in c for c in calls)
+
 
 @pytest.mark.unit
 def test_deploy_fails_if_embedding_health_fails(tmp_path: Path):
@@ -278,6 +337,12 @@ exit 0
     assert any("compose build app" in c for c in calls)
     # compose up -d --no-deps app 호출 검증
     assert any("compose up -d --no-deps app" in c for c in calls)
+
+    # compose build app이 compose up보다 먼저 실행되었는지 호출 순서 검증
+    build_idx = next(i for i, c in enumerate(calls) if "compose build app" in c)
+    up_idx = next(i for i, c in enumerate(calls) if "compose up -d --no-deps app" in c)
+    assert build_idx < up_idx, "compose build app이 compose up -d --no-deps app보다 먼저 실행되어야 합니다."
+
     # database나 embedding이 build나 up 대상에 포함되지 않았는지 검증
     assert not any("build database" in c or "build embedding" in c for c in calls)
 
@@ -317,6 +382,11 @@ exit 0
     calls = log_file.read_text().splitlines()
     assert any("build app" in c for c in calls)
     assert any("up -d --force-recreate --no-deps app" in c for c in calls)
+
+    # podman-compose build app이 podman-compose up보다 먼저 실행되었는지 호출 순서 검증
+    build_idx = next(i for i, c in enumerate(calls) if "build app" in c)
+    up_idx = next(i for i, c in enumerate(calls) if "up -d --force-recreate --no-deps app" in c)
+    assert build_idx < up_idx, "podman-compose build app이 podman-compose up보다 먼저 실행되어야 합니다."
 
 
 @pytest.mark.unit
