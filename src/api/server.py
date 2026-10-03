@@ -5,11 +5,14 @@ CLI와 동일한 워크플로(run_workflow → resume_workflow)를
 React 프론트엔드가 소비할 수 있게 노출한다. 응답 조립은 src/api/schemas.to_api_response가
 전담하므로 이 모듈은 HTTP 관심사(검증·상태코드·CORS·lifespan)만 다룬다.
 
-실행 (단일 워커 전제 — HIL 체크포인터가 프로세스-로컬 MemorySaver):
+실행:
     uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000
 
+HIL 체크포인터는 PostgreSQL 기반(PostgresSaver, #209)이라 서버 재시작이나 다중 워커에도
+진행 중인 HIL 세션이 유지된다.
+
 엔드포인트는 async def가 아닌 일반 def로 선언한다
-run_workflow는 동기·블로킹(매 호출 그래프 재컴파일 + LLM 수 초)이므로 Starlette 스레드풀에서 실행해 단일 워커의 이벤트 루프가 막히지 않게 한다.
+run_workflow는 동기·블로킹(매 호출 그래프 재컴파일 + LLM 수 초)이므로 Starlette 스레드풀에서 실행해 이벤트 루프가 막히지 않게 한다.
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
 from src.api.schemas import QueryDoneResponse, WorkflowResponse, to_api_response
-from src.db.connection import close_pool, get_pool, init_pool
+from src.db.connection import close_checkpointer_pool, close_pool, get_pool, init_pool
 from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.ingest.parse.page_map import resolve_pdf_path
 from src.utils.config import API_CORS_ORIGINS, EMBEDDING_SERVER_URL, PDF_DIR, READINESS_PROBE_TIMEOUT_SECONDS
@@ -68,6 +71,7 @@ async def lifespan(app: FastAPI):
     _warmup_embedding()
     yield
     close_pool()
+    close_checkpointer_pool()
 
 
 def _record_interaction(

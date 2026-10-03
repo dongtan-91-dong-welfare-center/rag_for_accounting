@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
+import src.agent.workflow as workflow_module
 from src.agent.workflow import (
     build_workflow,
     human_review,
@@ -23,6 +24,16 @@ def _mock_resp(content: dict) -> MagicMock:
     resp.choices[0].message.content = json.dumps(content)
     return resp
 
+
+@pytest.fixture(autouse=True)
+def mock_checkpointer(monkeypatch):
+    """PostgresSaver(#209)는 DB 풀이 필요하므로, 단위 테스트는 인메모리 MemorySaver로 대체한다.
+
+    run_workflow → resume_workflow로 이어지는 interrupt/resume 테스트도 동일 싱글턴 인스턴스를
+    공유해야 하므로, 매 호출마다 새로 만들지 않고 _get_checkpointer()의 지연 초기화 캐시 자리를
+    미리 하나의 MemorySaver로 채워 둔다.
+    """
+    monkeypatch.setattr(workflow_module, "_checkpointer", MemorySaver())
 
 @pytest.fixture(autouse=True)
 def mock_searcher():

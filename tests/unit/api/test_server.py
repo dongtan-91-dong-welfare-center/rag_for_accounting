@@ -211,10 +211,17 @@ class TestResume:
         assert r.status_code == 404
 
 
-def test_thread_exists_false_for_unknown_thread():
-    """404 가드의 근거 계약 — 체크포인터에 없는 thread_id는 False다(실제 MemorySaver 조회)."""
+def test_thread_exists_false_for_unknown_thread(monkeypatch):
+    """404 가드의 근거 계약 — 체크포인터에 없는 thread_id는 False다.
+
+    실제 운영 체크포인터(PostgresSaver)는 DB 풀이 필요해(#209) 단위 테스트에서는
+    인메모리 MemorySaver로 대체해 DB 의존성 없이 조회 계약만 검증한다.
+    """
+    from langgraph.checkpoint.memory import MemorySaver
+    import src.agent.workflow as workflow_module
     from src.agent.workflow import thread_exists
 
+    monkeypatch.setattr(workflow_module, "_get_checkpointer", lambda: MemorySaver())
     assert thread_exists(str(uuid.uuid4())) is False
 
 

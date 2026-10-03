@@ -30,6 +30,7 @@ dependencies = [
     "fastmcp>=3.4.0",
     # 형태소 토큰화 — sparse 검색이 질의를, 색인이 본문을 같은 함수로 쪼갠다. 검색이 운영 핵심 경로라 dev 그룹이 아닌 본 의존성이다.
     "kiwipiepy>=0.23.2",
+    "langgraph-checkpoint-postgres>=3.1.2",
 ]
 
 [project.scripts]
