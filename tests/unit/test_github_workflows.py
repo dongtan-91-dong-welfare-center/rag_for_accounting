@@ -156,4 +156,5 @@ class TestProjectVersionAndLinterConfig:
         tool_ruff = data.get("tool", {}).get("ruff", {})
         assert tool_ruff.get("line-length") == 120
         lint_select = tool_ruff.get("lint", {}).get("select", [])
-        assert set(lint_select) == {"E9", "F63", "F7", "F82"}
+        assert set(lint_select) == {"E9", "F63", "F7", "F82", "C901"}
+
