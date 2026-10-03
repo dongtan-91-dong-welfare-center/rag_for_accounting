@@ -91,3 +91,21 @@
   - 문장 간의 관계를 모호하게 만드는 엠대시(—) 사용을 자제하고 콜론이나 명확한 접속사를 사용합니다.
 - **단일 진실 공급원(SSoT) 준수**:
   - 임베딩 모델명, 임계값, 타임아웃 등 주요 상수는 반드시 `src/utils/config.py`를 정본으로 참조합니다.
+
+---
+
+## 4. 코드 네이밍 및 스타일 컨벤션
+
+프로젝트 전반의 일관된 코드 품질을 보장하기 위해 다음 명명 및 서식 표준을 준수합니다.
+
+1. **식별자 명명 규칙 (Python)**:
+   - **모듈 및 패키지**: 소문자 snake_case를 사용합니다 (예: `src/agent/nodes/evaluate.py`).
+   - **클래스 및 Pydantic 모델**: PascalCase를 사용합니다 (예: `EvaluationResult`, `GraphState`, `RetrievedChunk`).
+   - **함수 및 메서드**: snake_case를 사용합니다 (예: `evaluate_context`, `check_relevance`).
+   - **모듈 내부 비공개 함수 및 헬퍼**: 선두 밑줄(`_`)을 붙인 snake_case를 사용합니다 (예: `_filter_relevant_chunks`, `_upsert_batch`).
+   - **상수 및 환경설정**: 대문자 SNAKE_CASE를 사용하며 단일 진실 공급원(`src/utils/config.py`)에 정의합니다 (예: `OPENAI_MODEL`, `RERANK_THRESHOLD`).
+2. **타입 애너테이션**:
+   - Python 3.12+ 내장 제네릭 문법(`list[str]`, `dict[str, Any]`, `str | None`)을 사용하며 레거시 `typing.List`, `typing.Optional` 사용을 지양합니다.
+3. **코드 포매팅 및 정적 분석**:
+   - Ruff 린터의 `line-length = 120` 규격을 엄격히 준수합니다.
+   - McCabe 순환 복잡도(C901) 상한 10 이하를 유지합니다.
