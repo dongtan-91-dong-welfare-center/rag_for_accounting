@@ -137,6 +137,16 @@ class TestIssueAndPRTemplates:
         assert "가독성" in text
         assert "외부 의존" in text
 
+    def test_contributing_guide_contains_code_naming_conventions(self):
+        """CONTRIBUTING.md에 코드 네이밍 및 스타일 컨벤션 명세가 포함되어 있는지 검증합니다."""
+        contributing = REPO_ROOT / "CONTRIBUTING.md"
+        assert contributing.exists(), "CONTRIBUTING.md가 존재해야 합니다."
+        text = contributing.read_text(encoding="utf-8")
+        assert "코드 네이밍 및 스타일 컨벤션" in text
+        assert "snake_case" in text
+        assert "PascalCase" in text
+        assert "SNAKE_CASE" in text
+
 
 @pytest.mark.unit
 class TestProjectVersionAndLinterConfig:
