@@ -52,12 +52,18 @@ SPARSE_FUSION_WEIGHT: float = _env_float("SPARSE_FUSION_WEIGHT", 0.1)
 # 타임아웃 SSoT 및 계층 구조
 # 시스템 전체 타임아웃 계층 원칙:
 #   Layer 1 (개별 I/O Fast-Fail): SEARCH_TIMEOUT_SECONDS (10s), DB_POOL_TIMEOUT_SECONDS (10s), EMBEDDING_QUERY_TIMEOUT_SECONDS (10s) < LLM_TIMEOUT_SECONDS (45s)
-#   Layer 2 (노드 워크플로우): GRAPH_STEP_TIMEOUT_SECONDS (60s)
+#   Layer 2 (노드 워크플로우): GRAPH_STEP_TIMEOUT_SECONDS (120s)
 #   Layer 3 (서브시스템/오프라인 배치): EMBEDDING_BATCH_TIMEOUT_SECONDS (120s)
 # 안쪽(개별 I/O) 타임아웃이 바깥쪽(LangGraph step_timeout)보다 짧아야 개별 에러(SE-101, SE-102, CM-002)가 명확히 포착되며,
 # 바깥쪽 step_timeout이 먼저 터져 고아 HTTP/DB 요청이 백그라운드에서 자원을 누수하는 현상을 차단합니다.
 # LangSmith/운영 실측 데이터 수집 전 정상적인 긴 답변 생성이 타임아웃되는 오발동을 막기 위해 여유 마진을 부여합니다.
 # !TODO 실측 후 타임아웃 세부 수치 조정 필요합니다.
+#
+# 재시도 마진 불변식 (Inside-Out 원칙):
+#   LLM_TIMEOUT_SECONDS * (1 + LLM_MAX_RETRIES) + backoff_buffer < GRAPH_STEP_TIMEOUT_SECONDS
+#   45 * (1 + 1) + 5 = 95 < 120  ✓
+# backoff_buffer ≈ 5s 는 OpenAI SDK 지수 백오프(초기 0.5s, 최대 8s) 1회 발생 시의 여유 추정값입니다.
+# LLM_MAX_RETRIES=1 재시도 포함 최악 시나리오(95s)에 25s 마진을 부여해 step_timeout 오발동을 방지합니다.
 
 # 검색 타임아웃 (초) — pgvector 쿼리가 이 시간을 초과하면 SearchTimeoutError(SE-101) 발생
 SEARCH_TIMEOUT_SECONDS: int = int(_env_float("SEARCH_TIMEOUT_SECONDS", 10.0))
@@ -72,7 +78,10 @@ LLM_TIMEOUT_SECONDS: float = _env_float("LLM_TIMEOUT_SECONDS", 45.0)
 LLM_MAX_RETRIES: int = int(_env_float("LLM_MAX_RETRIES", 1.0))
 
 # LangGraph 노드 실행 타임아웃 (초)
-GRAPH_STEP_TIMEOUT_SECONDS: int = int(_env_float("GRAPH_STEP_TIMEOUT_SECONDS", 60.0))
+# 재시도 1회 포함 최악 시나리오가 step_timeout보다 짧아야 한다는 마진 불변식을 만족하도록
+# LLM_TIMEOUT_SECONDS * (1 + LLM_MAX_RETRIES) + backoff_buffer = 45 * 2 + 5 = 95s 를 기준으로
+# 25s 여유 마진을 더해 120s로 설정합니다.
+GRAPH_STEP_TIMEOUT_SECONDS: int = int(_env_float("GRAPH_STEP_TIMEOUT_SECONDS", 120.0))
 
 # NFR-001 성능 테스트 목표 지연 시간 (초)
 TARGET_LATENCY_TOTAL_SEC: float = _env_float("TARGET_LATENCY_TOTAL_SEC", 120.0)
