@@ -67,6 +67,29 @@ class IndexingResult(BaseModel):
         """부분 실패 중 재적재(재시도)가 가능한 dead-letter 청크 목록을 반환한다."""
         return [chunk for chunk in self.skipped_chunks if chunk.is_retryable]
 
+class ClassifyResult(BaseModel):
+    """질의 분류 및 전략 선정 결과 — rewrite 노드의 classify 단계 출력"""
+    is_accounting: bool = True
+    query_scope: QueryScopeCategory = "accounting"
+    strategy: Literal["hyde", "decompose", "stepback", "bypass"] = "hyde"
+    confidence: float = 0.0
+
+
+class HydeResult(BaseModel):
+    """HyDE 가상 답변 생성 결과"""
+    hypothetical_answer: str = ""
+
+
+class DecomposeResult(BaseModel):
+    """복합 질의 분해 결과"""
+    sub_queries: list[str] = Field(default_factory=list)
+
+
+class StepbackResult(BaseModel):
+    """구체적 질의의 일반 원칙 추상화 결과"""
+    abstract_query: str = ""
+
+
 class RewrittenQuery(BaseModel):
     """재작성 질의 — rewrite 노드 출력. search_queries를 search 노드에 전달한다."""
     original_query:       str       # 사용자 원문 쿼리
