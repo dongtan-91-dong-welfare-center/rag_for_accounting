@@ -65,7 +65,23 @@ line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E9", "F63", "F7", "F82", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# 기존 고복잡도 파일에 대한 한시적 베이스라인 예외 (순환 복잡도 > 10)
+# 점진적 리팩터링을 통해 본 예외 목록을 축소하고 침식도를 0.3 이하로 낮춘다.
+"src/agent/nodes/evaluate.py" = ["C901"]
+"src/agent/nodes/generate.py" = ["C901"]
+"src/db/vector_store.py" = ["C901"]
+"src/ingest/ontology/md_parser.py" = ["C901"]
+"src/ingest/ontology/resolver.py" = ["C901"]
+"src/ingest/ontology/review_auditor.py" = ["C901"]
+"src/ingest/parse/cluster_merge.py" = ["C901"]
+"src/ingest/parse/layout_config.py" = ["C901"]
+"tests/utils/benchmark_metrics.py" = ["C901"]
 
 [tool.pyright]
 include = ["src"]
