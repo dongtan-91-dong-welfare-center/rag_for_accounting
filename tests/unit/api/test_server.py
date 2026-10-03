@@ -148,8 +148,9 @@ class TestQuery:
         assert body["is_answerable"] is False
 
     def test_non_accounting_early_exit(self, client, monkeypatch):
-        """비회계 질의 조기종료도 정상 done 응답이다(error_code 없음, 안내 answer)."""
+        """비회계 질의 조기종료는 error_code="NON_ACCOUNTING"을 포함하는 done 응답이다."""
         early = _done_result(
+            is_accounting_query=False,
             final_response=FinalResponse(
                 answer="죄송합니다. 회계 관련 질문을 해 주세요.",
                 citations=[],
@@ -161,7 +162,7 @@ class TestQuery:
         body = client.post("/query", json={"query": "오늘 점심 메뉴 추천"}).json()
         assert body["status"] == "done"
         assert body["is_answerable"] is False
-        assert body["error_code"] is None
+        assert body["error_code"] == "NON_ACCOUNTING"
 
 
 class TestResume:
