@@ -512,6 +512,187 @@ def _summary_rows(k: int) -> list[tuple[str, str]]:
     ]
 
 
+def _report_header_lines(
+    ts: datetime, k: int, indexed_chapters: list[str], n_chunks: int | None, use_reranker: bool, n: int
+) -> list[str]:
+    """리포트 상단 메타 정보(생성 시각·적재 현황·측정 케이스 수) 줄을 만든다."""
+    return [
+        "# 벤치마크 평가 리포트 (NFR-001 성능 / NFR-002 정확도)",
+        "",
+        f"- 생성 시각: {ts.isoformat()}",
+        f"- Hit@k 의 k: {k}",
+        f"- 적재 장: {len(indexed_chapters)}개",
+        f"- 적재 청크 수: {n_chunks if n_chunks is not None else '미상'}",
+        f"- USE_RERANKER: {use_reranker}",
+        f"- 측정 케이스: {n}건",
+        "",
+    ]
+
+
+def _report_latency_lines(summary: dict) -> list[str]:
+    """NFR-001 지연 시간 요약(p50/p95/max/min/avg) 섹션을 만든다."""
+    target_sec = TARGET_LATENCY_TOTAL_SEC
+    lines = [f"## 지연 시간 요약 (NFR-001 목표 {target_sec:.1f}초)", ""]
+    lat = summary.get("latency")
+    if lat and isinstance(lat, dict):
+        lines += [
+            "| 지표 | 측정값(초) | 목표(초) | 여유 마진 |",
+            "|------|------------|----------|-----------|",
+            f"| 중위 지연 시간 (p50) | {lat['p50']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p50']:+.2f}s |",
+            f"| 95 백분위수 (p95) | {lat['p95']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p95']:+.2f}s |",
+            f"| 최대 지연 시간 (Max) | {lat['max']:.2f}s | {target_sec:.1f}s | {target_sec - lat['max']:+.2f}s |",
+            f"| 최소 지연 시간 (Min) | {lat['min']:.2f}s | — | — |",
+            f"| 평균 지연 시간 (Avg) | {lat['avg']:.2f}s | — | — |",
+        ]
+    else:
+        lines.append("- 지연 시간 측정 데이터 없음")
+    lines.append("")
+    return lines
+
+
+def _report_metrics_summary_lines(summary: dict, k: int, n: int) -> list[str]:
+    """NFR-002 지표 요약표(적중·비율·목표 갭)와 평균 MRR 줄을 만든다."""
+    lines = [f"## 지표 요약 (NFR-002 목표 {NFR_002_TARGET:.0%})", "", "| 지표 | 적중 | 비율 | 목표 갭 |", "|------|------|------|---------|"]
+    for label, key in _summary_rows(k):
+        v = summary.get(key)
+        if not isinstance(v, dict):
+            continue
+        rate = v["rate"]
+        gap = rate - NFR_002_TARGET
+        lines.append(f"| {label} | {v['hits']}/{n} | {rate:.1%} | {gap:+.1%}p |")
+    lines.append("")
+    lines.append(
+        f"- 평균 MRR(exact): 생성 {summary.get('generation_exact_mrr_avg', 0.0)} / "
+        f"검색 {summary.get('retrieval_exact_mrr_avg', 0.0)}"
+    )
+    lines.append("")
+    return lines
+
+
+def _mark(b: bool) -> str:
+    return "✅" if b else "❌"
+
+
+def _report_case_row(r: CaseResult, k: int) -> str:
+    """케이스별 결과 표의 행 하나를 만든다(미적재·에러·정상 세 경로)."""
+    elapsed_str = f"{r.elapsed_sec:.2f}s" if r.elapsed_sec is not None else "—"
+    if not r.measurable:
+        return f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | — | 미적재 SKIP |"
+    if r.error:
+        return f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | {elapsed_str} | ✗ {r.error[:40]} |"
+    m = r.metrics
+    return (
+        f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | "
+        f"{_mark(m.get(f'retrieval_exact_hit@{k}'))} | {_mark(m.get('generation_exact_hit@1'))} | "
+        f"{_mark(m.get('is_answerable'))} | {r.diag.get('rewrite_count')} | {elapsed_str} | OK |"
+    )
+
+
+def _report_case_results_lines(results: list[CaseResult], k: int) -> list[str]:
+    """케이스별 결과 표 섹션을 만든다."""
+    lines = [
+        "## 케이스별 결과",
+        "",
+        "| 케이스 | 장 | gold 문단 | 검색 exact@k | 생성 exact@1 | answerable | CRAG | 소요(초) | 상태 |",
+        "|--------|----|-----------|--------------|--------------|------------|------|----------|------|",
+    ]
+    lines += [_report_case_row(r, k) for r in results]
+    lines.append("")
+    return lines
+
+
+def _report_miss_diagnosis_lines(results: list[CaseResult], k: int) -> list[str]:
+    """검색 미적중 케이스 진단 섹션을 만든다(미적중 건이 없으면 빈 리스트)."""
+    misses = [
+        r for r in results
+        if r.measurable and r.error is None and not r.metrics.get(f"retrieval_exact_hit@{k}")
+    ]
+    if not misses:
+        return []
+    lines = [f"## 검색 미적중 진단 ({len(misses)}건)", ""]
+    for r in misses:
+        lines.append(
+            f"- **{r.case_id}** (제{r.chapter}장, gold={r.gold_paras}): "
+            f"검색 장={r.diag.get('retrieval_chapters')}, 인용 문단={r.diag.get('citation_paras')}, "
+            f"전략={r.diag.get('strategy')}, needs_external={r.diag.get('needs_external')}"
+        )
+    lines.append("")
+    return lines
+
+
+def _report_slowest_row(r: CaseResult) -> str:
+    """최악 지연 시간 진단 목록의 항목 하나를 만든다(에러·정상 두 경로)."""
+    if r.error:
+        clean_err = r.error.replace("\n", " ").strip()
+        return f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): 에러={clean_err}"
+    return (
+        f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): "
+        f"전략={r.diag.get('strategy')}, CRAG={r.diag.get('rewrite_count')}, "
+        f"인용={r.diag.get('n_citations')}건, 검색={r.diag.get('n_retrieved')}건"
+    )
+
+
+def _report_slowest_diagnosis_lines(results: list[CaseResult]) -> list[str]:
+    """최악 지연 시간 상위 5건 진단 섹션을 만든다(대상이 없으면 빈 리스트)."""
+    slowest = sorted(
+        [r for r in results if r.measurable and r.elapsed_sec is not None],
+        key=lambda x: x.elapsed_sec or 0.0,
+        reverse=True,
+    )[:5]
+    if not slowest:
+        return []
+    lines = [f"## 최악 지연 시간 진단 (상위 {len(slowest)}건)", ""]
+    lines += [_report_slowest_row(r) for r in slowest]
+    lines.append("")
+    return lines
+
+
+def _report_accountant_review_block(r: CaseResult, k: int) -> list[str]:
+    """회계사 검토 대조표의 케이스 하나(①②③ 블록)를 만든다."""
+    d, m = r.diag, r.metrics
+    return [
+        f"### {r.case_id} (제{r.chapter}장)",
+        "",
+        (
+            f"**판정:** 검색통과(핵심Top-5) {_mark(m.get('retrieval_pass'))} · "
+            f"검색 exact@{k} {_mark(m.get(f'retrieval_exact_hit@{k}'))} · "
+            f"생성 exact@1 {_mark(m.get('generation_exact_hit@1'))} · "
+            f"answerable {_mark(m.get('is_answerable'))} · CRAG {d.get('rewrite_count')}"
+        ),
+        "",
+        f"**① 예상 근거(gold)**: {', '.join(r.gold_paras) or '없음'}",
+        "",
+        (
+            f"**② 실제 근거(인용 문단)**: {', '.join(d.get('citation_paras') or []) or '없음'}  ·  "
+            f"검색된 장: {d.get('retrieval_chapters') or []}"
+        ),
+        "",
+        "**③ 회계사 검토**: 근거(조항) 적절성: ☐적절 ☐부족 ☐오인용  /  메모: ",
+        "",
+        "---",
+        "",
+    ]
+
+
+def _report_accountant_review_lines(results: list[CaseResult], k: int) -> list[str]:
+    """케이스별 회계사 검토 대조표 섹션을 만든다."""
+    lines = [
+        "## 케이스별 회계사 검토 대조표",
+        "",
+        (
+            "> 케이스별 [예상 근거 · 실제 근거 · 판정]을 대조합니다. "
+            "회계사 검토란을 직접 채워 근거 적절성을 판정합니다. "
+            "(질문 및 답변 전문은 평가 자산 보호를 위해 마크다운 보고서에 기록하지 않으며, 원시 측정 데이터에서 확인합니다.)"
+        ),
+        "",
+    ]
+    for r in results:
+        if not r.measurable or r.error:
+            continue
+        lines += _report_accountant_review_block(r, k)
+    return lines
+
+
 def write_markdown_report(
     results: list[CaseResult],
     summary: dict,
@@ -533,152 +714,13 @@ def write_markdown_report(
     n = summary.get("n_measured", 0)
 
     lines: list[str] = []
-    lines.append("# 벤치마크 평가 리포트 (NFR-001 성능 / NFR-002 정확도)")
-    lines.append("")
-    lines.append(f"- 생성 시각: {ts.isoformat()}")
-    lines.append(f"- Hit@k 의 k: {k}")
-    lines.append(f"- 적재 장: {len(indexed_chapters)}개")
-    lines.append(f"- 적재 청크 수: {n_chunks if n_chunks is not None else '미상'}")
-    lines.append(f"- USE_RERANKER: {use_reranker}")
-    lines.append(f"- 측정 케이스: {n}건")
-    lines.append("")
-
-    # ── 지연 시간 요약 (NFR-001) ──
-    target_sec = TARGET_LATENCY_TOTAL_SEC
-    lines.append(f"## 지연 시간 요약 (NFR-001 목표 {target_sec:.1f}초)")
-    lines.append("")
-    lat = summary.get("latency")
-    if lat and isinstance(lat, dict):
-        lines.append("| 지표 | 측정값(초) | 목표(초) | 여유 마진 |")
-        lines.append("|------|------------|----------|-----------|")
-        lines.append(f"| 중위 지연 시간 (p50) | {lat['p50']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p50']:+.2f}s |")
-        lines.append(f"| 95 백분위수 (p95) | {lat['p95']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p95']:+.2f}s |")
-        lines.append(f"| 최대 지연 시간 (Max) | {lat['max']:.2f}s | {target_sec:.1f}s | {target_sec - lat['max']:+.2f}s |")
-        lines.append(f"| 최소 지연 시간 (Min) | {lat['min']:.2f}s | — | — |")
-        lines.append(f"| 평균 지연 시간 (Avg) | {lat['avg']:.2f}s | — | — |")
-    else:
-        lines.append("- 지연 시간 측정 데이터 없음")
-    lines.append("")
-
-    # ── 지표 요약 (90% 목표 갭 포함) ──
-    lines.append(f"## 지표 요약 (NFR-002 목표 {NFR_002_TARGET:.0%})")
-    lines.append("")
-    lines.append("| 지표 | 적중 | 비율 | 목표 갭 |")
-    lines.append("|------|------|------|---------|")
-    for label, key in _summary_rows(k):
-        v = summary.get(key)
-        if not isinstance(v, dict):
-            continue
-        rate = v["rate"]
-        gap = rate - NFR_002_TARGET
-        lines.append(f"| {label} | {v['hits']}/{n} | {rate:.1%} | {gap:+.1%}p |")
-    lines.append("")
-    lines.append(
-        f"- 평균 MRR(exact): 생성 {summary.get('generation_exact_mrr_avg', 0.0)} / "
-        f"검색 {summary.get('retrieval_exact_mrr_avg', 0.0)}"
-    )
-    lines.append("")
-
-    # ── 케이스별 결과 ──
-    lines.append("## 케이스별 결과")
-    lines.append("")
-    lines.append("| 케이스 | 장 | gold 문단 | 검색 exact@k | 생성 exact@1 | answerable | CRAG | 소요(초) | 상태 |")
-    lines.append("|--------|----|-----------|--------------|--------------|------------|------|----------|------|")
-    for r in results:
-        elapsed_str = f"{r.elapsed_sec:.2f}s" if r.elapsed_sec is not None else "—"
-        if not r.measurable:
-            lines.append(f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | — | 미적재 SKIP |")
-            continue
-        if r.error:
-            lines.append(f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | {elapsed_str} | ✗ {r.error[:40]} |")
-            continue
-        m = r.metrics
-        def _mark(b: bool) -> str:
-            return "✅" if b else "❌"
-        lines.append(
-            f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | "
-            f"{_mark(m.get(f'retrieval_exact_hit@{k}'))} | {_mark(m.get('generation_exact_hit@1'))} | "
-            f"{_mark(m.get('is_answerable'))} | {r.diag.get('rewrite_count')} | {elapsed_str} | OK |"
-        )
-    lines.append("")
-
-    # ── miss 진단 (정답 미적중 케이스) ──
-    misses = [
-        r for r in results
-        if r.measurable and r.error is None and not r.metrics.get(f"retrieval_exact_hit@{k}")
-    ]
-    if misses:
-        lines.append(f"## 검색 미적중 진단 ({len(misses)}건)")
-        lines.append("")
-        for r in misses:
-            lines.append(
-                f"- **{r.case_id}** (제{r.chapter}장, gold={r.gold_paras}): "
-                f"검색 장={r.diag.get('retrieval_chapters')}, 인용 문단={r.diag.get('citation_paras')}, "
-                f"전략={r.diag.get('strategy')}, needs_external={r.diag.get('needs_external')}"
-            )
-        lines.append("")
-
-    # ── 최악 지연 시간 진단 (상위 5건) ──
-    slowest = sorted(
-        [r for r in results if r.measurable and r.elapsed_sec is not None],
-        key=lambda x: x.elapsed_sec or 0.0,
-        reverse=True,
-    )[:5]
-    if slowest:
-        lines.append(f"## 최악 지연 시간 진단 (상위 {len(slowest)}건)")
-        lines.append("")
-        for r in slowest:
-            if r.error:
-                clean_err = r.error.replace("\n", " ").strip()
-                lines.append(f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): 에러={clean_err}")
-            else:
-                lines.append(
-                    f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): "
-                    f"전략={r.diag.get('strategy')}, CRAG={r.diag.get('rewrite_count')}, "
-                    f"인용={r.diag.get('n_citations')}건, 검색={r.diag.get('n_retrieved')}건"
-                )
-        lines.append("")
-
-    # ── 케이스별 회계사 검토 대조표 ──
-    lines.append("## 케이스별 회계사 검토 대조표")
-    lines.append("")
-    lines.append(
-        "> 케이스별 [예상 근거 · 실제 근거 · 판정]을 대조합니다. "
-        "회계사 검토란을 직접 채워 근거 적절성을 판정합니다. "
-        "(질문 및 답변 전문은 평가 자산 보호를 위해 마크다운 보고서에 기록하지 않으며, 원시 측정 데이터에서 확인합니다.)"
-    )
-    lines.append("")
-
-    def _mk(b) -> str:
-        return "✅" if b else "❌"
-
-    for r in results:
-        if not r.measurable or r.error:
-            continue
-        d, m = r.diag, r.metrics
-        lines.append(f"### {r.case_id} (제{r.chapter}장)")
-        lines.append("")
-        lines.append(
-            f"**판정:** 검색통과(핵심Top-5) {_mk(m.get('retrieval_pass'))} · "
-            f"검색 exact@{k} {_mk(m.get(f'retrieval_exact_hit@{k}'))} · "
-            f"생성 exact@1 {_mk(m.get('generation_exact_hit@1'))} · "
-            f"answerable {_mk(m.get('is_answerable'))} · CRAG {d.get('rewrite_count')}"
-        )
-        lines.append("")
-        lines.append(f"**① 예상 근거(gold)**: {', '.join(r.gold_paras) or '없음'}")
-        lines.append("")
-        lines.append(
-            f"**② 실제 근거(인용 문단)**: {', '.join(d.get('citation_paras') or []) or '없음'}  ·  "
-            f"검색된 장: {d.get('retrieval_chapters') or []}"
-        )
-        lines.append("")
-        lines.append(
-            "**③ 회계사 검토**: "
-            "근거(조항) 적절성: ☐적절 ☐부족 ☐오인용  /  메모: "
-        )
-        lines.append("")
-        lines.append("---")
-        lines.append("")
+    lines += _report_header_lines(ts, k, indexed_chapters, n_chunks, use_reranker, n)
+    lines += _report_latency_lines(summary)
+    lines += _report_metrics_summary_lines(summary, k, n)
+    lines += _report_case_results_lines(results, k)
+    lines += _report_miss_diagnosis_lines(results, k)
+    lines += _report_slowest_diagnosis_lines(results)
+    lines += _report_accountant_review_lines(results, k)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
