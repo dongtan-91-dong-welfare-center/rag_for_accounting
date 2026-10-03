@@ -225,7 +225,7 @@ export default function App() {
 
           {stage.kind === "error" && (
             <div className="error-card" role="alert">
-              <p>실행 오류: {stage.message}</p>
+              <p>요청 처리 중 오류가 발생했습니다: {stage.message}</p>
               <button onClick={dismissError}>닫기</button>
             </div>
           )}
@@ -471,8 +471,8 @@ function CitationPanel({ citation, onClose }: { citation: CitationOut; onClose: 
         {available === false && (
           <>
             <p className="notice warning">
-              원본 PDF가 서버에 없어 인용된 본문으로 대신 보여드립니다.
-              운영 환경에 원본 문서를 배치하면 해당 페이지를 바로 볼 수 있습니다.
+              원본 PDF 문서를 불러올 수 없어 인용된 조항 본문으로 대신 표시합니다.
+              기준서 조항 전문을 아래에서 바로 확인하실 수 있습니다.
             </p>
             <div className="side-panel-source">
               <MarkdownContent>{citation.content}</MarkdownContent>
