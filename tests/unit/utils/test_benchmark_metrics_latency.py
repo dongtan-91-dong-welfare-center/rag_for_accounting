@@ -41,13 +41,17 @@ class TestPercentileInterpolation:
         assert _percentile(data, 100.0) == 20.0
         assert _percentile(data, 25.0) == 12.5
 
-    def test_multi_elements_p50_p95(self):
+    def test_multi_elements_p50_p90_p95_p99(self):
         # 1부터 100까지 균등 분포
         data = [float(i) for i in range(1, 101)]
         # p50은 50.5 (선형 보간)
         assert _percentile(data, 50.0) == 50.5
+        # p90은 90.1 (k = 99 * 0.90 = 89.1 -> 90 + 0.1 * 1 = 90.1)
+        assert round(_percentile(data, 90.0), 2) == 90.1
         # p95는 95.05 (k = 99 * 0.95 = 94.05 -> 95 + 0.05 * 1 = 95.05)
         assert round(_percentile(data, 95.0), 2) == 95.05
+        # p99는 99.01 (k = 99 * 0.99 = 98.01 -> 99 + 0.01 * 1 = 99.01)
+        assert round(_percentile(data, 99.0), 2) == 99.01
 
 
 @pytest.mark.unit
@@ -83,6 +87,40 @@ class TestMeasureCaseLatency:
         assert res.elapsed_sec >= 0.01
         assert res.diag.get("elapsed_sec") == res.elapsed_sec
         assert res.error is None
+
+    def test_measure_case_extracts_latency_breakdown(self):
+        case = BenchmarkCase(
+            id="TEST-LAT-BK",
+            category="일반회계",
+            standard="GAAP",
+            query="재무제표 작성 원칙은?",
+            references=["일반기업회계기준 제2장 2.10"],
+            expected_answer="테스트",
+            core_paras=["2.10"],
+        )
+
+        mock_state = {
+            "final_response": None,
+            "reranked_chunks": [],
+            "retrieved_chunks": [],
+            "rewrite_count": 0,
+            "metadata": {
+                "latency_breakdown": {
+                    "external_sec": 1.25,
+                    "internal_sec": 0.45,
+                }
+            },
+        }
+
+        with patch("tests.integration.helpers.run_workflow_to_completion", return_value=mock_state):
+            res = measure_case(case, k=10)
+
+        assert res.external_sec == 1.25
+        assert res.internal_sec == 0.45
+        assert res.diag.get("latency_breakdown") == {
+            "external_sec": 1.25,
+            "internal_sec": 0.45,
+        }
 
     def test_measure_case_records_elapsed_sec_on_exception(self):
         case = BenchmarkCase(
@@ -126,8 +164,43 @@ class TestAggregateLatency:
         assert lat["max"] == 50.0
         assert lat["avg"] == 30.0
         assert lat["target_sec"] == TARGET_LATENCY_TOTAL_SEC
-        # k = 4 * 0.95 = 3.8 -> 40 + 0.8 * 10 = 48.0
+        assert lat["p90"] == 46.0  # k = 4 * 0.90 = 3.6 -> 40 + 0.6 * 10 = 46.0
         assert lat["p95"] == 48.0
+        assert lat["p99"] == 49.6  # k = 4 * 0.99 = 3.96 -> 40 + 0.96 * 10 = 49.6
+
+    def test_aggregate_computes_breakdown_metrics(self):
+        results = [
+            CaseResult(
+                case_id="C-1",
+                chapter="2",
+                measurable=True,
+                gold_paras=["2.1"],
+                elapsed_sec=10.0,
+                external_sec=8.0,
+                internal_sec=2.0,
+            ),
+            CaseResult(
+                case_id="C-2",
+                chapter="2",
+                measurable=True,
+                gold_paras=["2.1"],
+                elapsed_sec=20.0,
+                external_sec=15.0,
+                internal_sec=5.0,
+            ),
+        ]
+        summary = aggregate(results, k=10)
+
+        assert "latency_breakdown" in summary
+        bk = summary["latency_breakdown"]
+        assert "total" in bk
+        assert "external" in bk
+        assert "internal" in bk
+
+        assert bk["external"]["p50"] == 11.5
+        assert bk["external"]["avg"] == 11.5
+        assert bk["internal"]["p50"] == 3.5
+        assert bk["internal"]["avg"] == 3.5
 
     def test_aggregate_ignores_none_elapsed_sec(self):
         results = [
@@ -217,7 +290,9 @@ class TestWriteMarkdownReportLatency:
         assert "# 벤치마크 평가 리포트 (NFR-001 성능 / NFR-002 정확도)" in content
         assert "## 지연 시간 요약 (NFR-001 목표 120.0초)" in content
         assert "중위 지연 시간 (p50)" in content
+        assert "90 백분위수 (p90)" in content
         assert "95 백분위수 (p95)" in content
+        assert "99 백분위수 (p99)" in content
         assert "최대 지연 시간 (Max)" in content
 
         # 케이스별 결과 표의 소요(초) 컬럼 및 결측치 방어
@@ -229,6 +304,39 @@ class TestWriteMarkdownReportLatency:
         assert "## 최악 지연 시간 진단 (상위 1건)" in content
         assert "TEST-001" in content
         assert "소요 12.34s" in content
+
+    def test_report_renders_breakdown_section_when_present(self, tmp_path):
+        results = [
+            CaseResult(
+                case_id="TEST-001",
+                chapter="2",
+                measurable=True,
+                gold_paras=["2.10"],
+                elapsed_sec=12.0,
+                external_sec=9.5,
+                internal_sec=2.5,
+                metrics={"retrieval_exact_hit@10": True, "generation_exact_hit@1": True},
+                diag={"rewrite_count": 0},
+            ),
+        ]
+        summary = aggregate(results, k=10)
+        report_path = write_markdown_report(
+            results,
+            summary,
+            k=10,
+            indexed_chapters=["2"],
+            n_chunks=500,
+            use_reranker=False,
+            out_dir=tmp_path,
+        )
+        content = report_path.read_text(encoding="utf-8")
+
+        assert "### 구간별 지연 시간 분리 (외부 API vs 내부 파이프라인)" in content
+        assert "| 외부 API (LLM/임베딩) |" in content
+        assert "9.50s" in content
+        assert "| 내부 파이프라인 (DB/RRF) |" in content
+        assert "2.50s" in content
+        assert "[외부=9.50s, 내부=2.50s]" in content
 
     def test_write_markdown_report_includes_slowest_with_error(self, tmp_path):
         """최악 지연 시간 진단 표에 에러 발생 케이스가 에러 메시지와 함께 정상 렌더링되는지 검증합니다."""

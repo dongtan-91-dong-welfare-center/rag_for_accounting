@@ -1,9 +1,17 @@
 """
-NFR-002 벤치마크 정확도 베이스라인 측정 하니스 (CLI)
+NFR-002 벤치마크 정확도 및 NFR-001 지연 시간 베이스라인 측정 하니스 (CLI)
 
 측정 로직은 `tests/utils/benchmark_metrics.py`로 공용화되어, 이 스크립트와 Phase 2 관리 테스트
 (`tests/integration/test_benchmark_accuracy.py`)가 동일한 채점·집계를 공유한다.
 이 파일은 인프라 점검·케이스 순회·콘솔 출력·raw JSON 저장만 담당하는 얇은 CLI다.
+
+벤치마크 환경 격리 및 재현성 가이드:
+  1. 버퍼 캐시 및 커넥션 풀 격리:
+     - 엄밀한 콜드/웜 레이턴시 측정을 위해 테스트 실행 전 PostgreSQL 세션 상태(`DISCARD ALL;`)를 초기화하거나,
+       동일 조건의 웜 상태 측정을 위해 `--no-warmup` 플래그 없이 1회 사전 구동 워밍업(`_warmup_pipeline`)을 수행합니다.
+  2. 타이머 구간 분리:
+     - `CaseResult` 및 집계 리포트에서 외부 API RTT(LLM 생성 및 임베딩)와 내부 파이프라인(pgvector HNSW 검색, RRF 병합)을
+       분리하여 p50/p90/p95/p99 통계를 독립 산출합니다.
 
 산출 지표·채점 방식은 benchmark_metrics 모듈 docstring 참조.
 
@@ -92,6 +100,8 @@ def _load_checkpoint(path: Path, expected_k: int | None = None) -> list[CaseResu
                 diag=c["diag"],
                 error=c.get("error"),
                 elapsed_sec=c.get("elapsed_sec"),
+                external_sec=c.get("external_sec"),
+                internal_sec=c.get("internal_sec"),
             )
             for c in data.get("cases", [])
         ]
@@ -119,6 +129,8 @@ def _save_checkpoint(path: Path, results: list[CaseResult], k: int, indexed: lis
                 "diag": r.diag,
                 "error": r.error,
                 "elapsed_sec": r.elapsed_sec,
+                "external_sec": r.external_sec,
+                "internal_sec": r.internal_sec,
             }
             for r in results
         ],
