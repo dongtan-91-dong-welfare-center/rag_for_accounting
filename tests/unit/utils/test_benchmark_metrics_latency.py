@@ -317,3 +317,22 @@ class TestCheckpointParameterGuard:
     def test_load_checkpoint_non_existent_file_returns_empty(self, tmp_path):
         chk_file = tmp_path / "non_existent.json"
         assert _load_checkpoint(chk_file, expected_k=10) == []
+
+
+@pytest.mark.unit
+class TestBenchmarkCliOptions:
+    """scripts/benchmark_baseline.py CLI 옵션 및 인자 유효성 검증을 테스트합니다."""
+
+    def test_main_limit_zero_or_negative_returns_error(self, capsys):
+        from scripts.benchmark_baseline import main
+
+        ret_zero = main(["--limit", "0"])
+        assert ret_zero == 2
+        captured_zero = capsys.readouterr()
+        assert "--limit 옵션 값은 1 이상의 양의 정수여야 합니다: 0" in captured_zero.out
+
+        ret_neg = main(["--limit", "-5"])
+        assert ret_neg == 2
+        captured_neg = capsys.readouterr()
+        assert "--limit 옵션 값은 1 이상의 양의 정수여야 합니다: -5" in captured_neg.out
+
