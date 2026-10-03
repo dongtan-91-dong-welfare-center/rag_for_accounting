@@ -29,4 +29,4 @@ jobs:
         run: |
           tailscale ssh \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "set -euo pipefail && cd \"$DEPLOY_PATH\" && git fetch origin main && git reset --hard origin/main && ./deploy.sh && ./check.sh"
+            "set -euo pipefail && cd \"$DEPLOY_PATH\" && git fetch origin main && if [ -n \"\$(git status --porcelain --untracked-files=no)\" ]; then echo \"서버 체크아웃에 커밋되지 않은 변경이 있어 배포를 중단합니다.\" >&2; git status --short --untracked-files=no >&2; exit 1; fi && git reset --hard origin/main && ./deploy.sh && ./check.sh"

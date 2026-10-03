@@ -294,7 +294,8 @@ git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
 flowchart TD
     A["GitHub Actions 러너 (Ubuntu)"] -->|TAILSCALE_AUTHKEY (tag:ci)| B["Tailscale 테일넷 조인"]
     B -->|tailscale ssh (ACL: tag:ci -> tag:server root accept)| C["운영 서버 (Rocky Linux / Podman)"]
-    C --> D["git fetch origin main && git reset --hard origin/main"]
+    C --> G["추적 파일 변경 검사 (변경이 있으면 배포 중단)"]
+    G --> D["git fetch origin main && git reset --hard origin/main"]
     D --> E["./deploy.sh (정적 인프라 DB/TEI 유지, app 증분 재빌드)"]
     E --> F["./check.sh (인프라 및 헬스체크 검증)"]
 ```
@@ -309,7 +310,7 @@ flowchart TD
 #### 3) 파이프라인 실행 동작
 1. GitHub Actions 워크플로가 Ephemeral 노드로 테일넷에 임시 조인(`tag:ci`)합니다.
 2. Tailscale ACL 규칙(`tag:ci` → `tag:server`, `root` accept)에 따라 원격 서버에 비밀번호/키 파일 없이 무인 SSH로 접속합니다.
-3. 대상 디렉터리로 이동 후 Git 원격 최신 커밋을 강제 동기화(`git fetch origin main && git reset --hard origin/main`)하여 히스토리 정합성을 보장합니다.
+3. 대상 디렉터리로 이동한 뒤 `git status --porcelain --untracked-files=no`로 추적 파일의 로컬 수정을 검사합니다. 변경이 있으면 수정 내용이 경고 없이 사라지지 않도록 배포를 중단하고 실패로 종료합니다. 변경이 없을 때에 한하여 Git 원격 최신 커밋을 강제 동기화(`git fetch origin main && git reset --hard origin/main`)하여 히스토리 정합성을 보장합니다. 서버의 로컬 수정은 배포 전에 저장소에 반영하거나 별도 override 파일로 분리해야 합니다.
 4. `./deploy.sh`를 실행하여 데이터베이스와 TEI 임베딩 컨테이너를 유지한 채 애플리케이션(`app`) 컨테이너만 증분 재빌드 및 교체합니다.
 5. `./check.sh`를 실행하여 모든 엔드포인트와 컨테이너가 정상 준비(`ready`) 상태인지 검증합니다.
 

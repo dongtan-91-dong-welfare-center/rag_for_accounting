@@ -128,6 +128,9 @@ class TestGitHubWorkflows:
         ssh_run = ssh_step.get("run", "")
         assert "git fetch origin main" in ssh_run
         assert "git reset --hard origin/main" in ssh_run
+        # 서버의 로컬 수정이 경고 없이 사라지지 않도록 reset 이전에 변경 검사가 선행되어야 한다
+        assert "git status --porcelain" in ssh_run
+        assert ssh_run.index("git status --porcelain") < ssh_run.index("git reset --hard")
         assert "./deploy.sh" in ssh_run
         assert "./check.sh" in ssh_run
 
