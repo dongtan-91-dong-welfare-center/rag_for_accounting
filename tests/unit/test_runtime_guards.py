@@ -8,6 +8,8 @@ from src.clients.llm import client as openai_client
 from src.db import connection
 from src.utils.config import (
     DB_POOL_TIMEOUT_SECONDS,
+    EMBEDDING_BATCH_TIMEOUT_SECONDS,
+    EMBEDDING_QUERY_TIMEOUT_SECONDS,
     GRAPH_STEP_TIMEOUT_SECONDS,
     LLM_MAX_RETRIES,
     LLM_TIMEOUT_SECONDS,
@@ -18,7 +20,7 @@ from src.utils.config import (
 def test_timeout_hierarchy_invariants():
     """
     Inside-Out 타임아웃 계층 불변식을 검증한다.
-    개별 I/O 타임아웃 (DB 검색 10s, DB 풀 10s, LLM 45s)은 반드시
+    개별 I/O 타임아웃 (DB 검색 10s, DB 풀 10s, LLM 45s, 쿼리 임베딩 10s)은 반드시
     상위 LangGraph 노드 타임아웃(60s)보다 작아야 한다.
     """
     assert SEARCH_TIMEOUT_SECONDS < GRAPH_STEP_TIMEOUT_SECONDS, (
@@ -30,6 +32,43 @@ def test_timeout_hierarchy_invariants():
     assert LLM_TIMEOUT_SECONDS < GRAPH_STEP_TIMEOUT_SECONDS, (
         f"LLM_TIMEOUT_SECONDS({LLM_TIMEOUT_SECONDS}) >= GRAPH_STEP_TIMEOUT_SECONDS({GRAPH_STEP_TIMEOUT_SECONDS})"
     )
+    assert EMBEDDING_QUERY_TIMEOUT_SECONDS < GRAPH_STEP_TIMEOUT_SECONDS, (
+        f"EMBEDDING_QUERY_TIMEOUT_SECONDS({EMBEDDING_QUERY_TIMEOUT_SECONDS}) >= GRAPH_STEP_TIMEOUT_SECONDS({GRAPH_STEP_TIMEOUT_SECONDS})"
+    )
+    assert EMBEDDING_BATCH_TIMEOUT_SECONDS >= GRAPH_STEP_TIMEOUT_SECONDS, (
+        f"EMBEDDING_BATCH_TIMEOUT_SECONDS({EMBEDDING_BATCH_TIMEOUT_SECONDS}) < GRAPH_STEP_TIMEOUT_SECONDS({GRAPH_STEP_TIMEOUT_SECONDS})"
+    )
+
+
+def test_embedding_client_contextual_timeout_routing(monkeypatch):
+    """
+    embed_texts()가 node='search'일 때는 쿼리 타임아웃(10s),
+    node='index'일 때는 배치 타임아웃(120s)을 원격 클라이언트에 전달하는지 검증한다.
+    """
+    from src.clients import embedding, embedding_remote
+    from src.utils import config
+
+    monkeypatch.setattr(config, "EMBEDDING_SERVER_URL", "http://fake-tei:8080")
+
+    recorded_timeouts = []
+
+    def fake_remote_embed(texts, timeout=None):
+        recorded_timeouts.append(timeout)
+        return [[0.1] * 1024 for _ in texts]
+
+    monkeypatch.setattr(embedding_remote, "embed_texts", fake_remote_embed)
+
+    # 1. search 노드 (런타임 질의)
+    embedding.embed_texts(["회계 질문"], node="search")
+    assert recorded_timeouts[-1] == config.EMBEDDING_QUERY_TIMEOUT_SECONDS
+
+    # 2. index 노드 (오프라인 배치)
+    embedding.embed_texts(["청크 데이터"], node="index")
+    assert recorded_timeouts[-1] == config.EMBEDDING_BATCH_TIMEOUT_SECONDS
+
+    # 3. 명시적 timeout 전달
+    embedding.embed_texts(["임의 데이터"], node="search", timeout=25.0)
+    assert recorded_timeouts[-1] == 25.0
 
 
 def test_openai_client_timeout_and_retries_configured():
