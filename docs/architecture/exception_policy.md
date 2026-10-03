@@ -1,0 +1,121 @@
+# 예외 처리 및 런타임 타임아웃 정책
+
+본 문서는 Accounting RAG 시스템의 **예외 분류 체계**, **타임아웃 계층 구조**, **일시 장애 재시도** 및 **상태 폴백 처리 규약**을 명문화합니다.
+
+---
+
+## 1. 예외 분류 체계
+
+모든 커스텀 예외는 `AccountingRAGError`([src/utils/exception.py](../../src/utils/exception.py))를 상속하며, 발생한 노드와 카테고리별 에러 코드를 보유하여 `ErrorLog` 스키마로 구조화됩니다.
+
+| 카테고리 | 에러 코드 | 예외 클래스 | 설명 |
+|---|---|---|---|
+| **Common (CM)** | `CM-001` | `ConfigNotFoundError` | 필수 환경변수 또는 설정 파일 누락 |
+| | `CM-002` | `LLMAPIConnectionError` | OpenAI/임베딩 API 연결 실패, 타임아웃, 인코딩 실패 |
+| | `CM-003` | `DocumentParseError` | 문서 파일 파싱 실패 |
+| **Ontology (OT)** | `OT-103` | `OntologyParsingError` | 비정형 텍스트 구조 파악 실패 |
+| **Search (SE)** | `SE-101` | `SearchTimeoutError` | pgvector 쿼리 실행 시간 초과 |
+| | `SE-102` | `DatabaseQueryError` | DB 커넥션 풀 고갈/연결 실패 또는 쿼리 실행 오류 |
+| | `SE-103` | `NoContextFoundError` | 검색 결과 부재 또는 검색 임계치 미달 |
+| **Rerank (RR)** | `RR-201` | `RerankFailureError` | 리랭킹 모델 호출/점수 계산 실패 |
+| | `RR-202` | `ScoreThresholdError` | 리랭킹 후 임계치 만족 청크 0건 |
+| **Index (IX)** | `IX-201` | `EmbeddingTokenLimitError` | 임베딩 생성 시 토큰 한도 초과 (부분 스킵) |
+| **Evaluate (EV)**| `EV-301` | `EvaluationParsingError` | LLM 평가 응답 스키마 파싱 실패 |
+| | `EV-302` | `InconsistentVerdictError` | 평가 내부 일관성 위반 |
+| | `EV-303` | `HallucinationDetectedError` | 검색 결과 미근거 주장의 환각 감지 |
+| **Generate (GN)**| `GN-401` | `LLMResponseFormatError` | LLM 답변 포맷/스키마 불일치 |
+| | `GN-402` | `ContextLengthExceededError` | 컨텍스트 길이가 모델 최대 토큰 초과 |
+
+---
+
+## 2. 타임아웃 계층 구조
+
+시스템 런타임 안정성과 자원 누수 방지를 위해 **"안쪽(개별 I/O) 타임아웃 < 바깥쪽(노드 step_timeout) 타임아웃"** 원칙을 엄격히 준수합니다.
+
+```mermaid
+graph TD
+    subgraph Layer3["Layer 3: Remote Subsystem / Batch (120s)"]
+        EMB["EMBEDDING_BATCH_TIMEOUT_SECONDS (120.0s)<br/>(Offline Batch Indexing)"]
+    end
+
+    subgraph Layer2["Layer 2: LangGraph Node Workflow (60s)"]
+        NODE["GRAPH_STEP_TIMEOUT_SECONDS (120.0s)"]
+    end
+
+    subgraph Layer1["Layer 1: Individual I/O Operations (10s ~ 45s)"]
+        DB_STMT["SEARCH_TIMEOUT_SECONDS (10.0s)<br/>(DB statement_timeout)"]
+        DB_POOL["DB_POOL_TIMEOUT_SECONDS (10.0s)<br/>(DB getconn wait)"]
+        EMB_QUERY["EMBEDDING_QUERY_TIMEOUT_SECONDS (10.0s)<br/>(Runtime Query Embedding)"]
+        LLM["LLM_TIMEOUT_SECONDS (45.0s)<br/>(OpenAI HTTP Request)"]
+    end
+
+    NODE --> DB_STMT
+    NODE --> DB_POOL
+    NODE --> EMB_QUERY
+    NODE --> LLM
+```
+
+### 계층별 설정값 및 단일 진실원 (SSoT: `src/utils/config.py`)
+
+1. **Layer 1: Individual I/O**
+   - `SEARCH_TIMEOUT_SECONDS` (기본값: 10.0초): PostgreSQL `statement_timeout`으로 전달. 초과 시 `SearchTimeoutError(SE-101)` 발생.
+   - `DB_POOL_TIMEOUT_SECONDS` (기본값: 10.0초): 커넥션 풀의 `getconn()` 대기 상한. 초과 시 `DatabaseQueryError(SE-102)` 파생.
+   - `EMBEDDING_QUERY_TIMEOUT_SECONDS` (기본값: 10.0초): 런타임 질의 임베딩(`search` 노드) 통신 상한. 초과 시 `LLMAPIConnectionError(CM-002, node="search")` 발생.
+   - `LLM_TIMEOUT_SECONDS` (기본값: 45.0초): OpenAI Client HTTP 요청 타임아웃. 초과 시 `LLMAPIConnectionError(CM-002)` 파생.
+2. **Layer 2: LangGraph Node Workflow**
+   - `GRAPH_STEP_TIMEOUT_SECONDS` (기본값: 120.0초): LangGraph 노드 1개 단위 실행 상한.
+     - 근거: SDK 재시도 1회를 포함한 최악 시나리오가 노드 상한보다 짧아야 하므로 `LLM_TIMEOUT_SECONDS * (1 + LLM_MAX_RETRIES) + backoff_buffer < GRAPH_STEP_TIMEOUT_SECONDS`(45 * 2 + 5 = 95 < 120)를 유지합니다. `backoff_buffer`는 약 5초로 추정한 값이며 실측(#38) 이후 재조정합니다.
+3. **Layer 3: External Remote Subsystem (Batch)**
+   - `EMBEDDING_BATCH_TIMEOUT_SECONDS` (기본값: 120.0초): 오프라인 대량 청크 인덱싱 배치 임베딩 통신 상한 (역호환용 `EMBEDDING_SERVER_TIMEOUT_SECONDS` 제공).
+
+> **안전 마진 및 선순위 이점**: LangSmith/운영 실측 데이터 수집 전 긴 회계 답변 생성이 억울하게 취소되지 않도록 45s/120s의 여유 버퍼를 부여합니다. Layer 1의 I/O 타임아웃(10초~45초)이 Layer 2 노드 타임아웃(120초)보다 먼저 발생하므로, 임베딩이나 OpenAI API 요청이 멈춘 상태로 장시간 지속되면서 토큰 비용과 커넥션을 소모하는 고아 요청 현상을 차단합니다.
+
+---
+
+## 3. 재시도 및 에러 복구 정책
+
+인프라 일시 장애와 질의 품질 부족에 따른 CRAG 쿼리 재작성 루프를 개념적으로 분리하여 관리합니다.
+
+1. **국소 SDK 재시도**
+   - `LLM_MAX_RETRIES` (기본값: 1회): OpenAI SDK 차원의 재시도를 1회로 제한합니다.
+   - 순간적인 네트워크 지연은 SDK 레벨에서 1회 신속 재시도 후 흡수하며, 지속 실패 시 빠르게 `LLMAPIConnectionError`를 던집니다.
+2. **CRAG 쿼리 재작성 루프**
+   - `MAX_REWRITE_COUNT` (기본값: 3회): 검색 결과의 신뢰도/근거성이 부족할 때 쿼리를 재작성하여 통과를 시도합니다.
+   - SDK `LLM_MAX_RETRIES`를 1회로 제한함으로써, 동일 장애 상황에서 SDK 재시도와 CRAG 루프가 중복으로 동작하여 요청 지연이 증폭되는 현상을 막습니다.
+
+---
+
+## 4. 런타임 예외 처리 및 폴백
+
+1. **노드 단위 예외 흡수**:
+   - 각 노드 내부 예외는 `handle_node_errors` 데코레이터에 의해 캐치되어 `state.error_logs`에 기록되고 워크플로우 실행이 지속됩니다.
+2. **워크플로우 레벨 완전 타임아웃/재귀 폴백**:
+   - 노드 타임아웃이나 최대 재귀 깊이 초과 발생 시, 시스템은 예외를 무작정 터뜨리지 않고 폴백 응답 및 `error_code="TIMEOUT"` 또는 `"RECURSION_LIMIT"`을 전달합니다.
+
+---
+
+## 5. 에러 로그 가드 및 부분 실패 복구 신호 (#192)
+
+1. **`GraphState.error_logs` 무한 증가 가드**:
+   - 파이프라인 전역 설정값 `MAX_ERROR_LOGS`(기본값: 50건, SSoT: `src/utils/config.py`)를 초과하는 경우, FIFO 방식으로 가장 오래된 에러 로그를 밀어내고 최신 N개만 유지합니다.
+   - 단일 세션 내 반복적인 재시도나 노드 예외 발생 시에도 상태 객체의 메모리 누적을 구조적으로 차단합니다. (체크포인트 스냅샷의 전체 생명주기 관리는 #209 체크포인터 정책을 따릅니다)
+2. **`index_documents` 부분 실패 dead-letter 및 재적재 훅**:
+   - 대량 문서 적재 시 발생하는 세 가지 부분 실패 경로(토큰 초과, 배치 실패, 컬렉션 DDL 실패)를 `SkippedChunk` 및 `IndexingResult`로 추적합니다.
+   - 재적재 가능 여부(`is_retryable`):
+     - `IX-201` (토큰 초과): `is_retryable=False`. 문서 전처리 및 청킹 분할 없이는 재시도 불가.
+     - `SE-102` (DB 쿼리/커넥션 풀/DDL 일시 오류), `CM-002` (임베딩 일시 통신 장애): `is_retryable=True`. 일시적 네트워크/DB 장애이므로 동일 청크에 대한 재적재 가능.
+   - 부분 적재 후 `result.get_retryable_chunks()`를 호출하여 재적재가 필요한 dead-letter 청크들만 선별해 복구 작업을 수행할 수 있습니다.
+
+---
+
+## 6. HIL 체크포인터 외부 저장소 장애 대응 정책 (#299)
+
+1. **상태 정합성 보장 원칙**:
+   - HIL(Human-in-the-Loop) 체크포인터는 PostgreSQL(`PostgresSaver`)을 단일 정본으로 사용합니다.
+   - 외부 저장소(PostgreSQL) 연결 실패나 일시적 장애 발생 시 임의의 로컬 인메모리 폴백(`MemorySaver`)으로 전환하지 않습니다.
+   - 근거: 다중 워커 환경에서 특정 워커만 인메모리로 폴백할 경우 워커 간 세션 상태 불일치 및 사용자 피드백 유실이 발생하므로, 장애 상태를 명확히 노출하고 격리하는 것이 안전합니다.
+2. **API 계층 Fast-Fail 및 503(Service Unavailable) 반환**:
+   - `/resume` 엔드포인트에서 세션 조회(`thread_exists`) 또는 세션 재개(`resume_workflow`) 중 `psycopg.Error`(커넥션 풀 고갈, 연결 단절, 타임아웃 등)가 발생하면 즉시 `HTTPException(status_code=503, detail="...")`을 반환합니다.
+   - 클라이언트는 세션이 영구 소실된 것(404 Not Found)과 데이터베이스 일시 장애(503 Service Unavailable)를 명확히 구분하여 인지할 수 있으며, 데이터베이스 복구 후 동일 `thread_id`로 재시도할 수 있습니다.
+
+

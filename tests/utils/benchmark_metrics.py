@@ -15,54 +15,129 @@ NFR-002 벤치마크 조항정확도 측정 공용 모듈
 "검색이 못 찾은 것"과 "찾았는데 인용에서 누락된 것"을 분리한다.
 함께 Hit@1 / Hit@k / MRR / Recall, CRAG 루프 횟수, 재작성 전략, needs_external 판정, 에러 로그를 기록한다.
 
-전제: pgvector(Docker) + 라이브 LLM. benchmark.jsonl은 K-GAAP 14건이고 적재 데이터도 GAAP뿐이므로,
+전제: pgvector(Docker) + 라이브 LLM. benchmark.jsonl은 K-GAAP 114건이고 적재 데이터도 GAAP뿐이므로,
 gold references 중 "일반기업회계기준 …" 항목만 채점 대상으로 삼는다(K-IFRS 라벨은 미적재 → 채점 제외).
 """
 from __future__ import annotations
 
 import os
 import re
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Iterable, Literal
 
 from pydantic import BaseModel
-from src.utils.config import KST
+from src.utils.clause_paras import (
+    NUM_CORE_PATTERN,
+    PARA_TOKEN_RE,
+    PREFIX_PATTERN,
+    chunk_paras,
+)
+from src.utils.config import KST, TARGET_LATENCY_TOTAL_SEC
 from tests.utils.benchmark_loader import BenchmarkCase
 
-# NFR-002 정확도 목표(리포트 갭 표기용, 하드게이트 아님)
+# NFR-002 정확도 목표
 NFR_002_TARGET = 0.90
 
 # 검색 통과 기준: 핵심 조항이 검색 Top-N 안에 있으면 통과
 RETRIEVAL_PASS_TOP_N = 5
 
 
+def _percentile(data: list[float], percentile: float) -> float:
+    """오름차순 정렬된 실수 리스트에서 지정한 백분위수(0~100) 값을 선형 보간(linear interpolation)하여 계산합니다.
+
+    계산 절차:
+      1. 가상 인덱스 k = (len(data) - 1) * (percentile / 100.0)를 산출합니다.
+      2. k의 정수부 f = int(k)와 올림 인덱스 c = f + 1을 구합니다.
+      3. c가 리스트 인덱스 범위 이상이면 최댓값 data[-1]을 반환합니다.
+      4. 그렇지 않으면 두 인접 값 data[f]와 data[c] 사이를 k의 소수부 비율로 선형 보간합니다:
+         결과 = data[f] * (c - k) + data[c] * (k - f)
+
+    동작 예시:
+      - 예시 1 (2개 요소, p50 중앙값 산출):
+        data = [10.0, 20.0], percentile = 50.0일 때
+        k = (2 - 1) * (50.0 / 100.0) = 0.5
+        f = 0, c = 1
+        d0 = 10.0 * (1 - 0.5) = 5.0
+        d1 = 20.0 * (0.5 - 0) = 10.0
+        산출 결과: 5.0 + 10.0 = 15.0
+
+      - 예시 2 (2개 요소, p25 사분위수 산출):
+        data = [10.0, 20.0], percentile = 25.0일 때
+        k = (2 - 1) * 0.25 = 0.25
+        f = 0, c = 1
+        d0 = 10.0 * (1 - 0.25) = 7.5
+        d1 = 20.0 * (0.25 - 0) = 5.0
+        산출 결과: 7.5 + 5.0 = 12.5
+
+      - 예시 3 (100개 연속 정수, p95 산출):
+        data = [1.0, 2.0, ..., 100.0], percentile = 95.0일 때
+        k = (100 - 1) * 0.95 = 94.05
+        f = 94(값 95.0), c = 95(값 96.0)
+        d0 = 95.0 * (1 - 0.05) = 90.25
+        d1 = 96.0 * 0.05 = 4.8
+        산출 결과: 90.25 + 4.8 = 95.05
+
+    경계값 예외 처리:
+      - data가 빈 리스트([])인 경우 0.0을 반환합니다.
+      - data의 요소가 1개인 경우 보간 없이 해당 요소(data[0])를 반환합니다.
+      - percentile이 100.0이거나 k의 올림 인덱스가 상한을 넘으면 최댓값(data[-1])을 반환합니다.
+    """
+    if not data:
+        return 0.0
+    if len(data) == 1:
+        return data[0]
+    k = (len(data) - 1) * (percentile / 100.0)
+    f = int(k)
+    c = f + 1
+    if c >= len(data):
+        return data[-1]
+    d0 = data[f] * (c - k)
+    d1 = data[c] * (k - f)
+    return d0 + d1
+
+
 # ════════════════════════════════ 조항키 유틸 ════════════════════════════════
-# 청크 본문의 문단 헤더:  "#### 21.8", "#### 2.6.5", "#### 6.13의2"
-_CHUNK_PARA_RE = re.compile(r"####\s+(\d+\.\d+(?:\.\d+)?(?:의\d+)?)")
+# 문단번호 추출 규칙은 src/utils/clause_paras가 단일 정본
 # gold 라벨에서 장 번호:   "일반기업회계기준 제21장 …"
 _GOLD_CHAPTER_RE = re.compile(r"제\s*(\d+)\s*장")
-# 문단 토큰:               "21.8", "2.6.5", "6.13의2"
-_PARA_TOKEN_RE = re.compile(r"\d+\.\d+(?:\.\d+)?(?:의\d+)?")
-# 범위 표기:               "15.15조~15.16조"
-_RANGE_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?)\s*조?\s*~\s*(\d+\.\d+(?:\.\d+)?)")
+# 문단 토큰:               "21.8", "2.6.5", "6.13의2", "실2.11" (접두 실·결·소 보존)
+_PARA_TOKEN_RE = PARA_TOKEN_RE
+# 범위 표기:               "15.15조~15.16조", "실2.46조~실2.47조"
+_RANGE_RE = re.compile(
+    rf"({PREFIX_PATTERN}?{NUM_CORE_PATTERN})\s*조?\s*~\s*({PREFIX_PATTERN}?{NUM_CORE_PATTERN})"
+)
+# 접두와 숫자 본체 분리용: "실2.46" → ("실", "2.46")
+_PREFIX_SPLIT_RE = re.compile(rf"^({PREFIX_PATTERN}?)(.+)$")
 
 
 def _normalize_para(p: str) -> str:
-    """가지번호 접미사(의N)를 제거해 기준 문단번호로 정규화한다. '21.5의2' → '21.5'."""
+    """
+    가지번호 접미사(의N)를 제거해 기준 문단번호로 정규화한다. '21.5의2' → '21.5'.
+
+    접두(실·결·소)는 키의 일부라 보존한다.
+    """
     return re.sub(r"의\d+$", "", p)
 
 
 def _expand_range(a: str, b: str) -> set[str]:
-    """'15.15'~'15.16' 처럼 같은 prefix의 연속 범위를 끝점 포함으로 펼친다."""
-    pa, pb = a.split("."), b.split(".")
-    if len(pa) == len(pb) == 2 and pa[0] == pb[0]:
+    """'
+    15.15'~'15.16' 처럼 같은 prefix의 연속 범위를 끝점 포함으로 펼친다.
+
+    '실2.46'~'실2.47'처럼 접두가 붙은 범위는 접두가 양끝에서 같을 때만 펼치고, 펼친 문단에도 접두를 유지한다(실2.46 ≠ 2.46).
+    """
+    (pre_a, num_a), (pre_b, num_b) = (
+        _PREFIX_SPLIT_RE.match(x).groups() for x in (a, b)
+    )
+    pa, pb = num_a.split("."), num_b.split(".")
+    if pre_a == pre_b and len(pa) == len(pb) == 2 and pa[0] == pb[0]:
         try:
             lo, hi = int(pa[1]), int(pb[1])
             if 0 <= hi - lo <= 50:
-                return {f"{pa[0]}.{i}" for i in range(lo, hi + 1)}
+                return {f"{pre_a}{pa[0]}.{i}" for i in range(lo, hi + 1)}
         except ValueError:
             pass
     return {a, b}
@@ -104,9 +179,13 @@ def gold_para_set(clauses: list[GoldClause]) -> set[str]:
     return s
 
 
-def extract_chunk_paras(content: str) -> set[str]:
-    """청크/인용 본문에서 문단 헤더 번호를 정규화 집합으로 추출한다."""
-    return {_normalize_para(p) for p in _CHUNK_PARA_RE.findall(content)}
+def extract_chunk_paras(content: str, chunk_id: str = "") -> set[str]:
+    """
+    청크/인용에서 문단번호를 정규화 집합으로 추출한다(content 헤더 ∪ chunk_id).
+
+    chunk_id를 함께 주면 단일 조항 노드(번호가 본문에 없고 id에만 있는 청크, 예: "gaap-ch2-실2.11")도 채점된다.
+    """
+    return {_normalize_para(p) for p in chunk_paras(content, chunk_id)}
 
 
 def _paras_match(gold_paras: set[str], cand_paras: set[str], mode: str) -> set[str]:
@@ -126,14 +205,22 @@ def _paras_match(gold_paras: set[str], cand_paras: set[str], mode: str) -> set[s
     return hits
 
 
-def rank_hit(contents: list[str], gold_paras: set[str], mode: str) -> tuple[int | None, set[str]]:
-    """순위대로 정렬된 후보 본문 리스트에서 첫 hit 순위(1-based)와 누적 커버 문단을 반환한다."""
+def rank_hit(
+    contents: list[str | tuple[str, str]], gold_paras: set[str], mode: str
+) -> tuple[int | None, set[str]]:
+    """
+    순위대로 정렬된 후보 리스트에서 첫 hit 순위(1-based)와 누적 커버 문단을 반환한다.
+
+    항목은 본문 문자열, 또는 (본문, chunk_id) 쌍이다.
+    쌍으로 주면 번호가 chunk_id에만 있는 단일 조항 청크도 hit로 인정된다. 문자열 형태는 기존 재현 하니스(scripts/*_replay.py)의 호출을 깨지 않기 위한 하위호환이다.
+    """
     first_hit: int | None = None
     covered: set[str] = set()
     if not gold_paras:
         return None, covered
-    for rank, content in enumerate(contents, start=1):
-        inter = _paras_match(gold_paras, extract_chunk_paras(content), mode)
+    for rank, item in enumerate(contents, start=1):
+        content, chunk_id = (item, "") if isinstance(item, str) else item
+        inter = _paras_match(gold_paras, extract_chunk_paras(content, chunk_id), mode)
         if inter:
             covered |= inter
             if first_hit is None:
@@ -153,9 +240,15 @@ def resolve_core_paras(case: BenchmarkCase, gold_paras: set[str]) -> set[str]:
 
 
 def retrieval_pass(
-    search_contents: list[str], core_paras: set[str], top_n: int = RETRIEVAL_PASS_TOP_N
+    search_contents: list[str | tuple[str, str]],
+    core_paras: set[str],
+    top_n: int = RETRIEVAL_PASS_TOP_N,
 ) -> bool:
-    """핵심 조항이 검색 결과 상위 top_n 안에 있으면 검색 통과(True)."""
+    """
+    핵심 조항이 검색 결과 상위 top_n 안에 있으면 검색 통과(True).
+
+    항목 형태(본문 문자열 또는 (본문, chunk_id) 쌍)는 rank_hit와 같다.
+    """
     fh, _ = rank_hit(search_contents, core_paras, "exact")
     return fh is not None and fh <= top_n
 
@@ -218,6 +311,14 @@ def get_indexed_chapters() -> set[str]:
         return {r[0] for r in cur.fetchall() if r[0]}
 
 
+def sort_chapters(chapters: Iterable[str]) -> list[str]:
+    """장 번호 목록을 정수 장 번호 오름차순, 비정수 장(예: '부록') 문자열 오름차순으로 정렬합니다.
+
+    근거: 코퍼스에 비정수 장이 포함되었을 때 int(x) 변환 시 발생하는 ValueError를 방어합니다.
+    """
+    return sorted(chapters, key=lambda x: (0, int(x)) if str(x).isdigit() else (1, str(x)))
+
+
 def get_chunk_count() -> int:
     """현재 pgvector chunks 테이블의 전체 청크 수를 조회한다(코퍼스 가드용)."""
     from src.db.connection import get_pool
@@ -237,6 +338,9 @@ class CaseResult:
     metrics: dict = field(default_factory=dict)
     diag: dict = field(default_factory=dict)
     error: str | None = None
+    elapsed_sec: float | None = None  # NFR-001 소요 시간 (초 단위)
+    external_sec: float | None = None  # 외부 API (LLM/임베딩) 지연시간 (초 단위)
+    internal_sec: float | None = None  # 내부 파이프라인 (pgvector HNSW 검색, RRF 등) 지연시간 (초 단위)
 
 
 def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
@@ -252,6 +356,7 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         measurable=True,
         gold_paras=sorted(gold_paras),
     )
+    t0 = time.perf_counter()
     try:
         # 케이스 식별 정보를 LangSmith 트레이스에 부착. 트레이싱 비활성 시 무해하게 무시됨.
         state = run_workflow_to_completion(
@@ -260,20 +365,29 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
             metadata={"case_id": case.id, "gold": sorted(gold_paras)},
         )
     except Exception as e:  # 케이스 격리: 한 건 실패해도 전체 측정 계속
+        dt = time.perf_counter() - t0
+        res.elapsed_sec = round(dt, 2)
+        res.diag["elapsed_sec"] = res.elapsed_sec
         res.error = f"{type(e).__name__}: {e}"
         res.diag["traceback"] = traceback.format_exc()[-1500:]
         return res
+
+    dt = time.perf_counter() - t0
+    res.elapsed_sec = round(dt, 2)
+    res.diag["elapsed_sec"] = res.elapsed_sec
 
     fr = state.get("final_response")
     reranked = state.get("reranked_chunks") or []
     retrieved = state.get("retrieved_chunks") or []
     citations = list(fr.citations) if fr else []
 
-    search_contents = [r.chunk.content for r in reranked]
-    cite_contents = [c.content for c in citations]
+    # (본문, chunk_id) 쌍으로 채점합니다: 단일 조항 청크의 경우 번호가 chunk_id에만 존재하는 케이스를 인정합니다.
+    search_items = [(r.chunk.content, r.chunk.chunk_id) for r in reranked]
+    cite_items = [(c.content, c.chunk_id) for c in citations]
+    cite_contents = [c.content for c in citations]  # 전문 영속화(diag)용
 
     metrics: dict = {}
-    for stage, contents in (("retrieval", search_contents), ("generation", cite_contents)):
+    for stage, contents in (("retrieval", search_items), ("generation", cite_items)):
         for mode in ("exact", "prefix"):
             fh, cov = rank_hit(contents, gold_paras, mode)
             metrics[f"{stage}_{mode}_hit@1"] = fh == 1
@@ -285,7 +399,7 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
     metrics["legacy_substring"] = legacy_substring_hit(case.references, citations)
     metrics["is_answerable"] = bool(fr.is_answerable) if fr else False
     # 핵심(core) 조항이 검색 Top-5 안에 있으면 통과
-    metrics["retrieval_pass"] = retrieval_pass(search_contents, resolve_core_paras(case, gold_paras))
+    metrics["retrieval_pass"] = retrieval_pass(search_items, resolve_core_paras(case, gold_paras))
     res.metrics = metrics
 
     # 진단 정보(오답 분석용) + 회계사 검토·content 판정용 전문 영속화
@@ -301,15 +415,29 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         "needs_external": getattr(ev, "needs_external", None),
         "eval_reasoning": (getattr(ev, "reasoning", "") or ""),
         "retrieval_chapters": [r.chunk.metadata.chapter for r in reranked][:10],
-        "citation_paras": sorted({p for c in citations for p in extract_chunk_paras(c.content)}),
+        "citation_paras": sorted(
+            {p for c in citations for p in extract_chunk_paras(c.content, c.chunk_id)}
+        ),
         "query": case.query,
         "expected_answer": case.expected_answer,
         "answer": (fr.answer if fr else ""),
         "citations": cite_contents,
         "error_logs": state.get("error_logs") or [],
+        "elapsed_sec": res.elapsed_sec,
     }
 
-    # content_pass(내용 통과) 판정 — 옵트인(CONTENT_JUDGE). 검색축과 분리된 별도 LLM 판정 축.
+    # 세분화 계측 데이터(latency_breakdown) 추출
+    breakdown = state.get("metadata", {}).get("latency_breakdown") if isinstance(state.get("metadata"), dict) else None
+    if isinstance(breakdown, dict):
+        ext = breakdown.get("external_sec")
+        intl = breakdown.get("internal_sec")
+        if ext is not None:
+            res.external_sec = round(float(ext), 2)
+        if intl is not None:
+            res.internal_sec = round(float(intl), 2)
+        res.diag["latency_breakdown"] = breakdown
+
+    # content_pass(내용 통과) 판정: 옵트인(CONTENT_JUDGE) 방식으로 동작하며, 검색축과 분리된 별도의 LLM 판정 축입니다.
     # expected_answer 신뢰성 전제
     if os.getenv("CONTENT_JUDGE"):
         try:
@@ -363,6 +491,46 @@ def aggregate(results: list[CaseResult], k: int) -> dict:
             "rate": round(ch / len(content_rows), 4),
             "n": len(content_rows),
         }
+
+    # 지연 시간 통계 (NFR-001): 에러 여부와 무관하게 유효한 소요 시간이 계측된 모든 측정 대상 케이스를 포함합니다.
+    def _compute_stats(series: list[float]) -> dict:
+        s = sorted(series)
+        return {
+            "p50": round(_percentile(s, 50.0), 2),
+            "p90": round(_percentile(s, 90.0), 2),
+            "p95": round(_percentile(s, 95.0), 2),
+            "p99": round(_percentile(s, 99.0), 2),
+            "max": round(max(s), 2),
+            "min": round(min(s), 2),
+            "avg": round(sum(s) / len(s), 2),
+            "count": len(s),
+        }
+
+    total_latencies = [
+        r.elapsed_sec for r in results
+        if r.measurable and r.elapsed_sec is not None
+    ]
+    external_latencies = [
+        r.external_sec for r in results
+        if r.measurable and r.external_sec is not None
+    ]
+    internal_latencies = [
+        r.internal_sec for r in results
+        if r.measurable and r.internal_sec is not None
+    ]
+
+    if total_latencies:
+        total_stats = _compute_stats(total_latencies)
+        total_stats["target_sec"] = TARGET_LATENCY_TOTAL_SEC
+
+        summary["latency"] = total_stats
+        summary["latency_breakdown"] = {
+            "total": total_stats,
+        }
+        if external_latencies:
+            summary["latency_breakdown"]["external"] = _compute_stats(external_latencies)
+        if internal_latencies:
+            summary["latency_breakdown"]["internal"] = _compute_stats(internal_latencies)
     return summary
 
 
@@ -382,42 +550,72 @@ def _summary_rows(k: int) -> list[tuple[str, str]]:
     ]
 
 
-def write_markdown_report(
-    results: list[CaseResult],
-    summary: dict,
-    *,
-    k: int,
-    indexed_chapters: list[str],
-    n_chunks: int | None,
-    use_reranker: bool,
-    out_dir: Path | str = "docs/measurements",
-    generated_at: datetime | None = None,
-) -> Path:
-    """사람이 읽을 수 있는 측정 결과 리포트(.md)를 생성하고 경로를 반환한다.
+def _report_header_lines(
+    ts: datetime, k: int, indexed_chapters: list[str], n_chunks: int | None, use_reranker: bool, n: int
+) -> list[str]:
+    """리포트 상단 메타 정보(생성 시각·적재 현황·측정 케이스 수) 줄을 만든다."""
+    return [
+        "# 벤치마크 평가 리포트 (NFR-001 성능 / NFR-002 정확도)",
+        "",
+        f"- 생성 시각: {ts.isoformat()}",
+        f"- Hit@k 의 k: {k}",
+        f"- 적재 장: {len(indexed_chapters)}개",
+        f"- 적재 청크 수: {n_chunks if n_chunks is not None else '미상'}",
+        f"- USE_RERANKER: {use_reranker}",
+        f"- 측정 케이스: {n}건",
+        "",
+    ]
 
-    요약표 + 케이스별 hit/miss + 90% 목표 대비 갭 + USE_RERANKER/적재청크수 메타에 더해,
-    검색 미적중 케이스 진단 목록과 회계사가 직접 채워 검토할 케이스별 대조표(질문·예상정답·실제답변·판정 체크박스)까지 포함한다.
-    """
-    ts = generated_at or datetime.now(KST)
-    stamp = ts.strftime("%Y%m%d_%H%M")
-    n = summary.get("n_measured", 0)
 
-    lines: list[str] = []
-    lines.append("# 벤치마크 조항정확도 리포트 (NFR-002)")
-    lines.append("")
-    lines.append(f"- 생성 시각: {ts.isoformat()}")
-    lines.append(f"- Hit@k 의 k: {k}")
-    lines.append(f"- 적재 장: {len(indexed_chapters)}개")
-    lines.append(f"- 적재 청크 수: {n_chunks if n_chunks is not None else '미상'}")
-    lines.append(f"- USE_RERANKER: {use_reranker}")
-    lines.append(f"- 측정 케이스: {n}건")
-    lines.append("")
+def _report_latency_lines(summary: dict) -> list[str]:
+    """NFR-001 지연 시간 요약(p50/p90/p95/p99/max/min/avg) 및 내부/외부 분리 섹션을 만든다."""
+    target_sec = TARGET_LATENCY_TOTAL_SEC
+    lines = [f"## 지연 시간 요약 (NFR-001 목표 {target_sec:.1f}초)", ""]
+    lat = summary.get("latency")
+    if lat and isinstance(lat, dict):
+        p90_str = f"{lat['p90']:.2f}s" if "p90" in lat else "—"
+        p99_str = f"{lat['p99']:.2f}s" if "p99" in lat else "—"
+        lines += [
+            "| 지표 | 측정값(초) | 목표(초) | 여유 마진 |",
+            "|------|------------|----------|-----------|",
+            f"| 중위 지연 시간 (p50) | {lat['p50']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p50']:+.2f}s |",
+            f"| 90 백분위수 (p90) | {p90_str} | — | — |",
+            f"| 95 백분위수 (p95) | {lat['p95']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p95']:+.2f}s |",
+            f"| 99 백분위수 (p99) | {p99_str} | — | — |",
+            f"| 최대 지연 시간 (Max) | {lat['max']:.2f}s | {target_sec:.1f}s | {target_sec - lat['max']:+.2f}s |",
+            f"| 최소 지연 시간 (Min) | {lat['min']:.2f}s | — | — |",
+            f"| 평균 지연 시간 (Avg) | {lat['avg']:.2f}s | — | — |",
+        ]
 
-    # ── 지표 요약 (90% 목표 갭 포함) ──
-    lines.append(f"## 지표 요약 (NFR-002 목표 {NFR_002_TARGET:.0%})")
+        # 내부 파이프라인 vs 외부 API 세분화 테이블
+        bk = summary.get("latency_breakdown")
+        if bk and isinstance(bk, dict) and ("external" in bk or "internal" in bk):
+            ext = bk.get("external")
+            intl = bk.get("internal")
+            lines += [
+                "",
+                "### 구간별 지연 시간 분리 (외부 API vs 내부 파이프라인)",
+                "",
+                "| 구간 | p50(초) | p90(초) | p95(초) | p99(초) | 평균(초) |",
+                "|------|---------|---------|---------|---------|----------|",
+            ]
+            if ext:
+                lines.append(
+                    f"| 외부 API (LLM/임베딩) | {ext['p50']:.2f}s | {ext['p90']:.2f}s | {ext['p95']:.2f}s | {ext['p99']:.2f}s | {ext['avg']:.2f}s |"
+                )
+            if intl:
+                lines.append(
+                    f"| 내부 파이프라인 (DB/RRF) | {intl['p50']:.2f}s | {intl['p90']:.2f}s | {intl['p95']:.2f}s | {intl['p99']:.2f}s | {intl['avg']:.2f}s |"
+                )
+    else:
+        lines.append("- 지연 시간 측정 데이터 없음")
     lines.append("")
-    lines.append("| 지표 | 적중 | 비율 | 목표 갭 |")
-    lines.append("|------|------|------|---------|")
+    return lines
+
+
+def _report_metrics_summary_lines(summary: dict, k: int, n: int) -> list[str]:
+    """NFR-002 지표 요약표(적중·비율·목표 갭)와 평균 MRR 줄을 만든다."""
+    lines = [f"## 지표 요약 (NFR-002 목표 {NFR_002_TARGET:.0%})", "", "| 지표 | 적중 | 비율 | 목표 갭 |", "|------|------|------|---------|"]
     for label, key in _summary_rows(k):
         v = summary.get(key)
         if not isinstance(v, dict):
@@ -431,96 +629,167 @@ def write_markdown_report(
         f"검색 {summary.get('retrieval_exact_mrr_avg', 0.0)}"
     )
     lines.append("")
+    return lines
 
-    # ── 케이스별 결과 ──
-    lines.append("## 케이스별 결과")
-    lines.append("")
-    lines.append("| 케이스 | 장 | gold 문단 | 검색 exact@k | 생성 exact@1 | answerable | CRAG | 상태 |")
-    lines.append("|--------|----|-----------|--------------|--------------|------------|------|------|")
-    for r in results:
-        if not r.measurable:
-            lines.append(f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | 미적재 SKIP |")
-            continue
-        if r.error:
-            lines.append(f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | ✗ {r.error[:40]} |")
-            continue
-        m = r.metrics
-        def _mark(b: bool) -> str:
-            return "✅" if b else "❌"
-        lines.append(
-            f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | "
-            f"{_mark(m.get(f'retrieval_exact_hit@{k}'))} | {_mark(m.get('generation_exact_hit@1'))} | "
-            f"{_mark(m.get('is_answerable'))} | {r.diag.get('rewrite_count')} | OK |"
-        )
-    lines.append("")
 
-    # ── miss 진단 (정답 미적중 케이스) ──
+def _mark(b: bool) -> str:
+    return "✅" if b else "❌"
+
+
+def _report_case_row(r: CaseResult, k: int) -> str:
+    """케이스별 결과 표의 행 하나를 만든다(미적재·에러·정상 세 경로)."""
+    elapsed_str = f"{r.elapsed_sec:.2f}s" if r.elapsed_sec is not None else "—"
+    if not r.measurable:
+        return f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | — | 미적재 SKIP |"
+    if r.error:
+        return f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | — | — | — | — | {elapsed_str} | ✗ {r.error[:40]} |"
+    m = r.metrics
+    return (
+        f"| {r.case_id} | {r.chapter} | {', '.join(r.gold_paras)} | "
+        f"{_mark(m.get(f'retrieval_exact_hit@{k}'))} | {_mark(m.get('generation_exact_hit@1'))} | "
+        f"{_mark(m.get('is_answerable'))} | {r.diag.get('rewrite_count')} | {elapsed_str} | OK |"
+    )
+
+
+def _report_case_results_lines(results: list[CaseResult], k: int) -> list[str]:
+    """케이스별 결과 표 섹션을 만든다."""
+    lines = [
+        "## 케이스별 결과",
+        "",
+        "| 케이스 | 장 | gold 문단 | 검색 exact@k | 생성 exact@1 | answerable | CRAG | 소요(초) | 상태 |",
+        "|--------|----|-----------|--------------|--------------|------------|------|----------|------|",
+    ]
+    lines += [_report_case_row(r, k) for r in results]
+    lines.append("")
+    return lines
+
+
+def _report_miss_diagnosis_lines(results: list[CaseResult], k: int) -> list[str]:
+    """검색 미적중 케이스 진단 섹션을 만든다(미적중 건이 없으면 빈 리스트)."""
     misses = [
         r for r in results
         if r.measurable and r.error is None and not r.metrics.get(f"retrieval_exact_hit@{k}")
     ]
-    if misses:
-        lines.append(f"## 검색 미적중 진단 ({len(misses)}건)")
-        lines.append("")
-        for r in misses:
-            lines.append(
-                f"- **{r.case_id}** (제{r.chapter}장, gold={r.gold_paras}): "
-                f"검색 장={r.diag.get('retrieval_chapters')}, 인용 문단={r.diag.get('citation_paras')}, "
-                f"전략={r.diag.get('strategy')}, needs_external={r.diag.get('needs_external')}"
-            )
-        lines.append("")
-
-    # ── 케이스별 회계사 검토 대조표 ──
-    lines.append("## 케이스별 회계사 검토 대조표")
+    if not misses:
+        return []
+    lines = [f"## 검색 미적중 진단 ({len(misses)}건)", ""]
+    for r in misses:
+        lines.append(
+            f"- **{r.case_id}** (제{r.chapter}장, gold={r.gold_paras}): "
+            f"검색 장={r.diag.get('retrieval_chapters')}, 인용 문단={r.diag.get('citation_paras')}, "
+            f"전략={r.diag.get('strategy')}, needs_external={r.diag.get('needs_external')}"
+        )
     lines.append("")
-    lines.append(
-        "> 케이스별 [질문 · 예상정답+근거 · 실제답변+근거 · 판정]을 대조한다. "
-        "⑤ 회계사 검토란을 직접 채워 답변 정확성·근거 적절성을 판정한다."
+    return lines
+
+
+def _report_slowest_row(r: CaseResult) -> str:
+    """최악 지연 시간 진단 목록의 항목 하나를 만든다(에러·정상 두 경로)."""
+    breakdown_str = ""
+    if r.external_sec is not None or r.internal_sec is not None:
+        ext = f"{r.external_sec:.2f}s" if r.external_sec is not None else "—"
+        intl = f"{r.internal_sec:.2f}s" if r.internal_sec is not None else "—"
+        breakdown_str = f" [외부={ext}, 내부={intl}]"
+
+    if r.error:
+        clean_err = r.error.replace("\n", " ").strip()
+        return f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s{breakdown_str}): 에러={clean_err}"
+    return (
+        f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s{breakdown_str}): "
+        f"전략={r.diag.get('strategy')}, CRAG={r.diag.get('rewrite_count')}, "
+        f"인용={r.diag.get('n_citations')}건, 검색={r.diag.get('n_retrieved')}건"
     )
+
+
+def _report_slowest_diagnosis_lines(results: list[CaseResult]) -> list[str]:
+    """최악 지연 시간 상위 5건 진단 섹션을 만든다(대상이 없으면 빈 리스트)."""
+    slowest = sorted(
+        [r for r in results if r.measurable and r.elapsed_sec is not None],
+        key=lambda x: x.elapsed_sec or 0.0,
+        reverse=True,
+    )[:5]
+    if not slowest:
+        return []
+    lines = [f"## 최악 지연 시간 진단 (상위 {len(slowest)}건)", ""]
+    lines += [_report_slowest_row(r) for r in slowest]
     lines.append("")
+    return lines
 
-    def _mk(b) -> str:
-        return "✅" if b else "❌"
 
+def _report_accountant_review_block(r: CaseResult, k: int) -> list[str]:
+    """회계사 검토 대조표의 케이스 하나(①②③ 블록)를 만든다."""
+    d, m = r.diag, r.metrics
+    return [
+        f"### {r.case_id} (제{r.chapter}장)",
+        "",
+        (
+            f"**판정:** 검색통과(핵심Top-5) {_mark(m.get('retrieval_pass'))} · "
+            f"검색 exact@{k} {_mark(m.get(f'retrieval_exact_hit@{k}'))} · "
+            f"생성 exact@1 {_mark(m.get('generation_exact_hit@1'))} · "
+            f"answerable {_mark(m.get('is_answerable'))} · CRAG {d.get('rewrite_count')}"
+        ),
+        "",
+        f"**① 예상 근거(gold)**: {', '.join(r.gold_paras) or '없음'}",
+        "",
+        (
+            f"**② 실제 근거(인용 문단)**: {', '.join(d.get('citation_paras') or []) or '없음'}  ·  "
+            f"검색된 장: {d.get('retrieval_chapters') or []}"
+        ),
+        "",
+        "**③ 회계사 검토**: 근거(조항) 적절성: ☐적절 ☐부족 ☐오인용  /  메모: ",
+        "",
+        "---",
+        "",
+    ]
+
+
+def _report_accountant_review_lines(results: list[CaseResult], k: int) -> list[str]:
+    """케이스별 회계사 검토 대조표 섹션을 만든다."""
+    lines = [
+        "## 케이스별 회계사 검토 대조표",
+        "",
+        (
+            "> 케이스별 [예상 근거 · 실제 근거 · 판정]을 대조합니다. "
+            "회계사 검토란을 직접 채워 근거 적절성을 판정합니다. "
+            "(질문 및 답변 전문은 평가 자산 보호를 위해 마크다운 보고서에 기록하지 않으며, 원시 측정 데이터에서 확인합니다.)"
+        ),
+        "",
+    ]
     for r in results:
         if not r.measurable or r.error:
             continue
-        d, m = r.diag, r.metrics
-        lines.append(f"### {r.case_id} (제{r.chapter}장)")
-        lines.append("")
-        lines.append(
-            f"**판정:** 검색통과(핵심Top-5) {_mk(m.get('retrieval_pass'))} · "
-            f"검색 exact@{k} {_mk(m.get(f'retrieval_exact_hit@{k}'))} · "
-            f"생성 exact@1 {_mk(m.get('generation_exact_hit@1'))} · "
-            f"answerable {_mk(m.get('is_answerable'))} · CRAG {d.get('rewrite_count')}"
-        )
-        lines.append("")
-        lines.append("**① 질문**  ")
-        lines.append(d.get("query") or "")
-        lines.append("")
-        lines.append("**② 예상 정답**  ")
-        lines.append(d.get("expected_answer") or "")
-        lines.append("")
-        lines.append(f"**②' 예상 근거(gold)**: {', '.join(r.gold_paras) or '—'}")
-        lines.append("")
-        lines.append("**③ 실제 답변**  ")
-        lines.append(d.get("answer") or "(답변 없음)")
-        lines.append("")
-        lines.append(
-            f"**③' 실제 근거(인용 문단)**: {', '.join(d.get('citation_paras') or []) or '—'}  ·  "
-            f"검색된 장: {d.get('retrieval_chapters') or []}"
-        )
-        lines.append("")
-        if d.get("eval_reasoning"):
-            lines.append(f"**④ 판정 근거(LLM eval)**: {d['eval_reasoning']}")
-            lines.append("")
-        lines.append(
-            "**⑤ 회계사 검토** — 답변 정확성: ☐정확 ☐부분 ☐오류  /  "
-            "근거(조항) 적절성: ☐적절 ☐부족 ☐오인용  /  메모: "
-        )
-        lines.append("")
-        lines.append("---")
-        lines.append("")
+        lines += _report_accountant_review_block(r, k)
+    return lines
+
+
+def write_markdown_report(
+    results: list[CaseResult],
+    summary: dict,
+    *,
+    k: int,
+    indexed_chapters: list[str],
+    n_chunks: int | None,
+    use_reranker: bool,
+    out_dir: Path | str = "docs/benchmark",
+    generated_at: datetime | None = None,
+) -> Path:
+    """사람이 읽을 수 있는 측정 결과 리포트(.md)를 생성하고 경로를 반환한다.
+
+    요약표 + 케이스별 hit/miss + 90% 목표 대비 갭 + USE_RERANKER/적재청크수 메타에 더해,
+    NFR-001 지연 시간 통계(p50, p95, max), 검색 미적중 케이스 진단 목록과 회계사가 직접 채워 검토할 케이스별 대조표까지 포함한다.
+    """
+    ts = generated_at or datetime.now(KST)
+    stamp = ts.strftime("%Y%m%d_%H%M")
+    n = summary.get("n_measured", 0)
+
+    lines: list[str] = []
+    lines += _report_header_lines(ts, k, indexed_chapters, n_chunks, use_reranker, n)
+    lines += _report_latency_lines(summary)
+    lines += _report_metrics_summary_lines(summary, k, n)
+    lines += _report_case_results_lines(results, k)
+    lines += _report_miss_diagnosis_lines(results, k)
+    lines += _report_slowest_diagnosis_lines(results)
+    lines += _report_accountant_review_lines(results, k)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,7 @@ import pytest
 
 from src.models.schemas import RetrievedChunk
 from src.retrieval.searcher import reciprocal_rank_fusion
-from scripts.rerank_replay import EXCLUDED_CASE_IDS, fuse_top_n, judge_adoption
+from scripts.rerank_replay import EXCLUDED_CASE_IDS, fuse_top_n, judge_adoption, min_net_gain
 
 pytestmark = pytest.mark.unit
 
@@ -48,8 +48,25 @@ class TestFuseTopN:
         assert order_k60.index("Y") < order_k60.index("X")  # 2/63 > 1/61+1/70
 
 
+class TestMinNetGain:
+    """min_net_gain() — 모집단 크기에 비례하는 순증 기준선. 작은 표본에서는 하한 2건이 걸린다."""
+
+    @pytest.mark.parametrize(
+        "population_size, expected",
+        [
+            (11, 2),    # 14건 벤치마크 시절 모집단 — 하한 2건이 이긴다(3%면 1건)
+            (34, 2),    # 3%가 1.02건 → 올림 2건, 하한과 같음
+            (67, 3),    # 3%가 2.01건 → 올림 3건, 하한을 넘어선다
+            (114, 4),   # 현행 114건 벤치마크 — 3%가 3.42건 → 올림 4건
+        ],
+    )
+    def test_scales_with_population(self, population_size, expected):
+        """표본이 커지면 기준선도 함께 커진다 — 고정 2건이면 114건에서 1.8%짜리 잡음도 통과한다"""
+        assert min_net_gain(population_size) == expected
+
+
 class TestJudgeAdoption:
-    """judge_adoption() — 사전 확정 기준(Hit@1 순증 ≥+2 · 회귀 0 · MRR 순증 >0 · p50 ≤5s)"""
+    """judge_adoption() — 사전 확정 기준(Hit@1 순증−회귀 ≥ 모집단 비례 기준선 · MRR 순증 >0 · p50 ≤5s)"""
 
     def test_adopts_when_all_criteria_met(self):
         """순증 2건·회귀 0·MRR 상승·지연 통과 → 채택"""
@@ -63,18 +80,47 @@ class TestJudgeAdoption:
         assert verdict["regressions"] == []
         assert verdict["mrr_delta"] > 0
 
-    def test_single_regression_rejects(self):
-        """순증이 충분해도 기존 hit@1 케이스가 1건이라도 밀리면 롤백"""
+    def test_regressions_offset_by_gains_adopts(self):
+        """
+        회귀가 1건 있어도 순증이 3건이면 순증(net) 2건으로 기준을 채워 채택된다.
+
+        구 기준("회귀 0건")은 표본이 114건으로 커진 뒤 사실상 달성 불가라 폐기했다 —
+        대신 MRR 순증 조건이 "전체 순위가 나빠지는 교환"을 막는다.
+        """
         base = {"A": 2, "B": None, "C": None, "D": 1}
         cand = {"A": 1, "B": 1, "C": 1, "D": 3}
 
         verdict = judge_adoption(base, cand, p50_latency_s=0.4, excluded_ids=frozenset())
 
-        assert verdict["adopt"] is False
+        assert verdict["adopt"] is True
         assert verdict["regressions"] == ["D"]
+        assert verdict["net_gain"] == 2
+
+    def test_regressions_canceling_gains_rejects(self):
+        """순증 2건을 회귀 2건이 상쇄하면 순증(net) 0건이라 기각된다"""
+        base = {"A": 2, "B": None, "C": 1, "D": 1}
+        cand = {"A": 1, "B": 1, "C": 4, "D": 3}
+
+        verdict = judge_adoption(base, cand, p50_latency_s=0.4, excluded_ids=frozenset())
+
+        assert verdict["adopt"] is False
+        assert verdict["net_gain"] == 0
+
+    def test_large_population_requires_proportional_gains(self):
+        """114건 모집단에서는 순증 3건이 미달이고 4건이어야 채택된다 — 표본이 8배 커진 만큼 기준선도 오른다"""
+        base = {f"C{i:03d}": 2 for i in range(114)}
+        cand_three = {**base, "C000": 1, "C001": 1, "C002": 1}
+        cand_four = {**cand_three, "C003": 1}
+
+        rejected = judge_adoption(base, cand_three, p50_latency_s=0.4, excluded_ids=frozenset())
+        adopted = judge_adoption(base, cand_four, p50_latency_s=0.4, excluded_ids=frozenset())
+
+        assert rejected["adopt"] is False
+        assert rejected["min_net_gain"] == 4
+        assert adopted["adopt"] is True
 
     def test_insufficient_gains_rejects(self):
-        """순증 +1건은 기준(≥+2) 미달"""
+        """순증 +1건은 기준(순증−회귀 ≥ 2) 미달"""
         base = {"A": None, "B": 3, "C": 2}
         cand = {"A": 1, "B": 2, "C": 2}
 

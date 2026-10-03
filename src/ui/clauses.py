@@ -5,9 +5,10 @@ NFR-002: 조항 검색이 1순위, LLM 답변은 참고용 — app.py는 이 모
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.models.schemas import RerankingResult
+from src.utils.clause_paras import chunk_paras
 
 DEFAULT_TOP_N = 5
 
@@ -24,11 +25,17 @@ class ClauseRow:
     document_id: str = ""          # 원문 문서 식별자(chunk.document_id) — 뷰어의 PDF 서빙 경로에 사용(#196)
     page_start: int | None = None  # 원본 PDF 페이지 범위(#196 백필 metadata) — 미백필/미매칭이면 None
     page_end: int | None = None
+    # 문단번호 목록
+    # 공용 규칙이 content 헤더 ∪ chunk_id에서 원형 그대로(가지번호 유지) 뽑는다.
+    # 용어 정의처럼 번호가 본래 없는 청크는 빈 목록.
+    paras: list[str] = field(default_factory=list)
+    is_cited: bool = False         # 답변에서 해당 조항이 인용되었는지 여부 (✓ / ◌)
 
 
 def build_clause_rows(
     reranked: list[RerankingResult] | None,
     top_n: int = DEFAULT_TOP_N,
+    cited_chunk_ids: set[str] | None = None,
 ) -> list[ClauseRow]:
     """reranked를 검색 순위 상위 top_n개의 ClauseRow 리스트로 변환한다.
 
@@ -38,9 +45,11 @@ def build_clause_rows(
     - 리랭커를 켜도 이 함수는 여전히 chunk.score만 노출한다.
       TODO: rerank_score로 점수 출처를 전환하는 로직은 아직 구현돼 있지 않다.
     - top_n<=0이거나 입력이 비면 빈 리스트를 반환한다.
+    - cited_chunk_ids에 chunk.chunk_id가 존재하면 is_cited=True로 표시한다.
     """
     if not reranked or top_n <= 0:
         return []
+    cited_ids = cited_chunk_ids or set()
     rows: list[ClauseRow] = []
     for rank, item in enumerate(reranked[:top_n], start=1):
         chunk = item.chunk
@@ -56,6 +65,8 @@ def build_clause_rows(
                 document_id=chunk.document_id,
                 page_start=extra.get("page_start"),
                 page_end=extra.get("page_end"),
+                paras=chunk_paras(chunk.content, chunk.chunk_id),
+                is_cited=chunk.chunk_id in cited_ids,
             )
         )
     return rows

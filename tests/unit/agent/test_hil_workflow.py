@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
+import src.agent.workflow as workflow_module
 from src.agent.workflow import (
     build_workflow,
     human_review,
@@ -13,7 +14,7 @@ from src.agent.workflow import (
 )
 from src.models.state import GraphState
 from src.models.schemas import RetrievedChunk, RewrittenQuery
-from src.utils.config import MAX_HIL_COUNT
+from src.utils.config import MAX_HIL_COUNT, GRAPH_STEP_TIMEOUT_SECONDS
 
 # TODO: Fixture를 testconf.py에서 정의할 수 있는지 점검
 
@@ -23,6 +24,16 @@ def _mock_resp(content: dict) -> MagicMock:
     resp.choices[0].message.content = json.dumps(content)
     return resp
 
+
+@pytest.fixture(autouse=True)
+def mock_checkpointer(monkeypatch):
+    """PostgresSaver(#209)는 DB 풀이 필요하므로, 단위 테스트는 인메모리 MemorySaver로 대체한다.
+
+    run_workflow → resume_workflow로 이어지는 interrupt/resume 테스트도 동일 싱글턴 인스턴스를
+    공유해야 하므로, 매 호출마다 새로 만들지 않고 _get_checkpointer()의 지연 초기화 캐시 자리를
+    미리 하나의 MemorySaver로 채워 둔다.
+    """
+    monkeypatch.setattr(workflow_module, "_checkpointer", MemorySaver())
 
 @pytest.fixture(autouse=True)
 def mock_searcher():
@@ -112,7 +123,7 @@ class TestHILInterruptResume:
         """decompose 전략으로 분류되도록 강제하여 워크플로우를 invoke"""
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, "decompose", 0.8),
+            return_value=(True, "decompose", 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": ["유형자산 감가상각은?", "무형자산 상각은?"]}
@@ -153,7 +164,7 @@ class TestHILInterruptResume:
         # 루프백 시 rewrite가 다시 호출되므로 classify/client를 동일하게 패치
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, "decompose", 0.8),
+            return_value=(True, "decompose", 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": ["유형자산 감가상각은?", "무형자산 상각은?"]}
@@ -174,7 +185,7 @@ class TestHILInterruptResume:
 
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, "decompose", 0.8),
+            return_value=(True, "decompose", 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": ["유형자산 감가상각은?", "무형자산 상각은?"]}
@@ -203,7 +214,7 @@ class TestRunResumeWorkflow:
             result = run_workflow("영업권 손상차손 인식 기준은?")
         assert "thread_id" in result    # thread_id 포함 확인
         assert isinstance(result["thread_id"], str) and result["thread_id"] # thread_id 유효성 확인
-        assert mock_app.step_timeout == 30 # step_timeout 확인
+        assert mock_app.step_timeout == GRAPH_STEP_TIMEOUT_SECONDS # step_timeout 확인
 
     def test_run_workflow_reuses_given_thread_id(self):
         """thread_id를 명시하면 그대로 사용한다"""
@@ -231,7 +242,7 @@ class TestRunResumeWorkflow:
         """실제 그래프에서 decompose 질의가 interrupt되면 thread_id와 __interrupt__를 함께 반환한다"""
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, "decompose", 0.8),
+            return_value=(True, "decompose", 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": ["a", "b"]}
@@ -275,7 +286,7 @@ class TestHILDisabledGraph:
         """
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, strategy, 0.8),
+            return_value=(True, strategy, 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             # decompose(sub_queries)·stepback(abstract_query) 양쪽 키를 모두 담아 전략 무관 대응
             mock_client.chat.completions.create.return_value = _mock_resp({

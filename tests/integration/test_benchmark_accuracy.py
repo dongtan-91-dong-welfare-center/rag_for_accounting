@@ -2,7 +2,7 @@
 Phase 2: 조항정확도 벤치마크 — 비회귀 플로어
 
 항키 기반 측정(Hit@1/@10/MRR/answerable)을 관리 테스트(run_tests.py Phase 2)로 편입한다.
-실제 파이프라인으로 K-GAAP 14건을 **케이스당 1회만** 관통시켜 전 지표를 산출하고,
+실제 파이프라인으로 K-GAAP 114건을 **케이스당 1회만** 관통시켜 전 지표를 산출하고,
 사람이 읽는 .md 리포트를 생성한 뒤 **비회귀 플로어**를 단언한다.
 
 단언 정책 (결정됨):
@@ -11,7 +11,7 @@ Phase 2: 조항정확도 벤치마크 — 비회귀 플로어
   - 비교는 rate가 아닌 hit 카운트 + 허용밴드: hits >= floor - tolerance.
   - 코퍼스(적재 장 집합/청크 수)가 floor 파일의 baseline과 불일치하면 단언을 skip한다
     (데이터 상태 차이는 코드 회귀가 아니므로). 코퍼스 재적재 시 benchmark_floor.json을 재시드할 것.
-  - NFR-002 90% 목표는 리포트에 갭으로 표기하되 하드게이트로 쓰지 않는다.
+  - NFR-002 90% 목표는 리포트에 갭으로 표기하되 실패 차단 기준으로 사용하지 않습니다.
 
 라이브(DB+OPENAI) 부재 시 tests/integration/conftest.py 의 autouse 픽스처가 세션 skip 한다.
 """
@@ -30,6 +30,7 @@ from tests.utils.benchmark_metrics import (
     get_indexed_chapters,
     measure_case,
     parse_gold_clauses,
+    sort_chapters,
     write_markdown_report,
 )
 
@@ -77,7 +78,7 @@ def benchmark_measurement():
             results,
             summary,
             k=k,
-            indexed_chapters=sorted(indexed, key=lambda x: int(x)),
+            indexed_chapters=sort_chapters(indexed),
             n_chunks=n_chunks,
             use_reranker=USE_RERANKER,
         )
@@ -86,7 +87,7 @@ def benchmark_measurement():
             "k": k,
             "results": results,
             "summary": summary,
-            "indexed_chapters": sorted(indexed, key=lambda x: int(x)),
+            "indexed_chapters": sort_chapters(indexed),
             "n_chunks": n_chunks,
             "report_path": report_path,
         }
@@ -106,7 +107,7 @@ class TestBenchmarkAccuracy:
         if exp_chapters and exp_chapters != act_chapters:
             pytest.skip(
                 f"코퍼스 불일치 → 플로어 단언 skip. "
-                f"적재 장 baseline={sorted(exp_chapters, key=int)} vs 현재={sorted(act_chapters, key=int)}. "
+                f"적재 장 baseline={sort_chapters(exp_chapters)} vs 현재={sort_chapters(act_chapters)}. "
                 f"재적재했다면 benchmark_floor.json을 재시드하십시오."
             )
         exp_chunks = corpus.get("n_chunks")

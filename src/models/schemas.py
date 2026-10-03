@@ -2,6 +2,8 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Literal
 
+QueryScopeCategory = Literal["accounting", "out_of_scope_adjacent", "completely_unrelated"]
+
 class Citation(BaseModel):
     """인용 근거 — 답변 생성 시 참조한 문서 출처 정보"""
     document_id: str
@@ -46,16 +48,47 @@ class SkippedChunk(BaseModel):
     error_type: str   # "IX-201" | "SE-102" | "CM-002" ... (docs/func_interfaces.md 카탈로그)
     reason: str       # 로그 문구와 동일한 상세 메시지
 
+    @property
+    def is_retryable(self) -> bool:
+        """일시적 장애(DB 통신 오류, 임베딩 API 장애 등)로 인한 누락인 경우 재시도 가능으로 판별한다.
+
+        IX-201(토큰 초과)은 텍스트 분할 없이는 단순 재시도해도 동일하게 실패하므로 False이다.
+        """
+        return self.error_type in {"SE-102", "CM-002"}
+
 class IndexingResult(BaseModel):
     """인덱싱 결과 — pgvector 저장 완료 여부 (FUNC-003 출력)"""
     document_id: str
     chunk_count: int                                                 # 성공 적재 건수
     status: Literal["success", "partial", "failed"]
     skipped_chunks: list[SkippedChunk] = Field(default_factory=list)  # 누락 청크 추적
-    # @field_validator("chunk_count")
-    # def count_positive(cls, v):
-    #     assert v >= 0
-    #     return v
+
+    def get_retryable_chunks(self) -> list[SkippedChunk]:
+        """부분 실패 중 재적재(재시도)가 가능한 dead-letter 청크 목록을 반환한다."""
+        return [chunk for chunk in self.skipped_chunks if chunk.is_retryable]
+
+class ClassifyResult(BaseModel):
+    """질의 분류 및 전략 선정 결과 — rewrite 노드의 classify 단계 출력"""
+    is_accounting: bool = True
+    query_scope: QueryScopeCategory = "accounting"
+    strategy: Literal["hyde", "decompose", "stepback", "bypass"] = "hyde"
+    confidence: float = 0.0
+
+
+class HydeResult(BaseModel):
+    """HyDE 가상 답변 생성 결과"""
+    hypothetical_answer: str = ""
+
+
+class DecomposeResult(BaseModel):
+    """복합 질의 분해 결과"""
+    sub_queries: list[str] = Field(default_factory=list)
+
+
+class StepbackResult(BaseModel):
+    """구체적 질의의 일반 원칙 추상화 결과"""
+    abstract_query: str = ""
+
 
 class RewrittenQuery(BaseModel):
     """재작성 질의 — rewrite 노드 출력. search_queries를 search 노드에 전달한다."""
@@ -107,3 +140,19 @@ class EvaluationResult(BaseModel):
     reasoning: str
     # Pseudo validator:
     # 동일한 validator 적용: confidence ∈ [0, 1]
+
+
+class ContextCheckResult(BaseModel):
+    """
+    청크 문맥 보존 여부 점검 결과: context_harness 하나의 검사 케이스 출력
+
+    chunk_id     : 검사 대상 청크 식별자
+    check_type   : 검사 종류: "sentence_boundary" 또는 "clause_number_gap"
+    passed       : True이면 문맥이 온전히 보존됨, False이면 단절 또는 이상 감지
+    detail       : 판정 근거 텍스트 (docs/benchmark/ 형식과 동일하게 케이스별 근거 포함)
+    """
+
+    chunk_id: str
+    check_type: Literal["sentence_boundary", "clause_number_gap"]
+    passed: bool
+    detail: str

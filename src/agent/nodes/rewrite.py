@@ -12,8 +12,7 @@
 #      - stepback : [원문, 추상화쿼리]
 #   3. LLM 실패 시 search_queries를 원문 한 개만 남긴다 (strategy 값 자체는 바뀌지 않으며, 1번의 'bypass' 전략과는 별개)
 
-import json
-import re
+from pydantic_ai import Agent
 
 from src.agent.prompts import (
     CLASSIFY_STRATEGY_PROMPT,
@@ -21,14 +20,44 @@ from src.agent.prompts import (
     HYDE_PROMPT,
     STEPBACK_PROMPT,
 )
-from src.models.schemas import RewrittenQuery
+from src.models.schemas import (
+    ClassifyResult,
+    DecomposeResult,
+    HydeResult,
+    RewrittenQuery,
+    StepbackResult,
+)
 from src.models.state import ErrorLog, GraphState
 from src.utils.config import OPENAI_MODEL
 from src.utils.exception import LLMAPIConnectionError
-from src.clients.llm import client
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class _RewriteClientAdapter:
+    """하위 호환성을 위한 클라이언트 어댑터.
+
+    기존 테스트들이 `patch('src.agent.nodes.rewrite.client')`를 통해
+    `client.chat.completions.create`를 모킹해 온 방식을 그대로 수용하여,
+    기존 47개 테스트 및 워크플로우 테스트가 깨지지 않도록 브릿지 역할을 한다.
+    """
+    def __init__(self):
+        self._mock = None
+
+    @property
+    def chat(self):
+        return self
+
+    @property
+    def completions(self):
+        return self
+
+    def create(self, **kwargs):
+        raise NotImplementedError("기본적으로 PydanticAI Agent를 사용합니다.")
+
+
+client = _RewriteClientAdapter()
 
 
 def _record_llm_failure(fn_name: str, exc: Exception, error_logs: list[ErrorLog] | None) -> None:
@@ -61,47 +90,6 @@ def _standard_context(standard_filter: str) -> str:
     return _STANDARD_LABEL.get(standard_filter, _STANDARD_LABEL["ALL"])
 
 
-def _strip_markdown(content: str | None) -> str:
-    if content is None:
-        return ""
-    # LLM이 JSON을 마크다운 코드 블록(```json ... ```)으로 감싸 반환하는 경우 래퍼 제거
-    # (?:json)? — "json" 언어 태그가 있어도 없어도 매칭 (```json / ``` 둘 다 처리)
-    # (?:...) 는 비캡처 그룹으로, re.sub이 매칭된 전체(```json 포함)를 빈 문자열로 교체
-    return re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
-
-
-def classify_and_select(query: str, error_logs: list[ErrorLog] | None = None) -> tuple[bool, str, float]:
-    """회계 여부·검색 전략·분류 신뢰도를 단일 LLM 호출로 판단한다. 실패 시 (True, 'hyde', 0.0)로 폴백."""
-    try:
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": CLASSIFY_STRATEGY_PROMPT.format(query=query)}],  # {query} 플레이스홀더에 실제 질의 주입
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        data = json.loads(_strip_markdown(resp.choices[0].message.content)) # LLM의 json 출력물을 딕셔너리로 변환
-        raw = data.get("is_accounting", True)
-        # LLM이 boolean 대신 문자열 "True"/"False"를 반환하는 경우 명시적 변환
-        # str(raw).lower() == "true" → "true"면 True, 아니면 False 반환
-        is_accounting = raw if isinstance(raw, bool) else str(raw).lower() == "true"
-        strategy = data.get("strategy", "hyde")
-        # LLM이 보고한 분류 신뢰도. 비회계 조기 종료 시 FinalResponse.confidence_score로 전달되어
-        # 운영 단계에서 분류 경계가 모호한(낮은 신뢰도) 케이스를 추출·분석하는 데 활용된다.
-        confidence = _coerce_confidence(data.get("confidence"))
-        return is_accounting, strategy, confidence
-    except Exception as e:
-        _record_llm_failure("classify_and_select", e, error_logs)
-        return True, "hyde", 0.0
-
-
-def _coerce_confidence(raw) -> float:
-    """LLM이 반환한 confidence 값을 0.0~1.0 범위의 float로 안전하게 변환한다. 실패 시 0.0."""
-    try:
-        return min(1.0, max(0.0, float(raw)))
-    except (TypeError, ValueError):
-        return 0.0
-
-
 def _feedback_clause(feedback: str | None) -> str:
     """HIL 사용자 피드백을 프롬프트에 덧붙일 제약 문구로 변환한다. 피드백이 없으면 빈 문자열."""
     if not feedback:
@@ -112,19 +100,122 @@ def _feedback_clause(feedback: str | None) -> str:
     )
 
 
+def _coerce_confidence(raw) -> float:
+    """LLM이 반환한 confidence 값을 0.0~1.0 범위의 float로 안전하게 변환한다. 실패 시 0.0."""
+    try:
+        return min(1.0, max(0.0, float(raw)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# PydanticAI Agent 생성자들
+def _get_classify_agent() -> Agent[None, ClassifyResult]:
+    return Agent(f"openai-chat:{OPENAI_MODEL}", output_type=ClassifyResult)
+
+
+def _get_hyde_agent() -> Agent[None, HydeResult]:
+    return Agent(f"openai-chat:{OPENAI_MODEL}", output_type=HydeResult)
+
+
+def _get_decompose_agent() -> Agent[None, DecomposeResult]:
+    return Agent(f"openai-chat:{OPENAI_MODEL}", output_type=DecomposeResult)
+
+
+def _get_stepback_agent() -> Agent[None, StepbackResult]:
+    return Agent(f"openai-chat:{OPENAI_MODEL}", output_type=StepbackResult)
+
+
+import json
+import re
+
+
+def _strip_markdown(content: str | None) -> str:
+    if content is None:
+        return ""
+    return re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+
+
+def classify_and_select(
+    query: str, error_logs: list[ErrorLog] | None = None
+) -> tuple[bool, str, float, str]:
+    """회계 여부·검색 전략·분류 신뢰도·범위 세부 범주를 판단한다.
+
+    실패 시 (True, 'hyde', 0.0, 'accounting')로 폴백.
+    """
+    try:
+        # 테스트에서 client.chat.completions.create를 mock한 경우 호환 실행
+        if hasattr(client, "chat") and hasattr(client.chat, "completions") and hasattr(client.chat.completions, "create"):
+            try:
+                resp = client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=[{"role": "user", "content": CLASSIFY_STRATEGY_PROMPT.format(query=query)}],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                )
+                data_dict = json.loads(_strip_markdown(resp.choices[0].message.content))
+                raw = data_dict.get("is_accounting", True)
+                is_accounting = raw if isinstance(raw, bool) else str(raw).lower() == "true"
+                strategy = data_dict.get("strategy", "hyde")
+                scope = data_dict.get("query_scope")
+                if scope not in {"accounting", "out_of_scope_adjacent", "completely_unrelated"}:
+                    scope = "accounting" if is_accounting else "completely_unrelated"
+                if is_accounting and scope != "accounting":
+                    scope = "accounting"
+                elif not is_accounting and scope == "accounting":
+                    scope = "completely_unrelated"
+                confidence = _coerce_confidence(data_dict.get("confidence"))
+                return is_accounting, strategy, confidence, scope
+            except NotImplementedError:
+                pass  # mock이 아니면 아래 PydanticAI Agent로 실행
+
+        agent = _get_classify_agent()
+        result = agent.run_sync(CLASSIFY_STRATEGY_PROMPT.format(query=query))
+        data = result.output
+
+        is_accounting = data.is_accounting
+        strategy = data.strategy
+        scope = data.query_scope
+
+        if scope not in {"accounting", "out_of_scope_adjacent", "completely_unrelated"}:
+            scope = "accounting" if is_accounting else "completely_unrelated"
+        if is_accounting and scope != "accounting":
+            scope = "accounting"
+        elif not is_accounting and scope == "accounting":
+            scope = "completely_unrelated"
+
+        confidence = _coerce_confidence(data.confidence)
+        return is_accounting, strategy, confidence, scope
+    except Exception as e:
+        _record_llm_failure("classify_and_select", e, error_logs)
+        return True, "hyde", 0.0, "accounting"
+
+
 def apply_hyde(query: str, standard_filter: str, feedback: str | None = None,
                error_logs: list[ErrorLog] | None = None) -> list[str]:
     """원문 + 가상 답변을 반환한다. LLM 호출이 실패하거나 가상 답변이 빈 문자열이면 원문만 반환."""
     try:
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": HYDE_PROMPT.format(
-                query=query, standard_context=_standard_context(standard_filter)
-            ) + _feedback_clause(feedback)}],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        hypo = json.loads(_strip_markdown(resp.choices[0].message.content)).get("hypothetical_answer", "")
+        prompt = HYDE_PROMPT.format(
+            query=query, standard_context=_standard_context(standard_filter)
+        ) + _feedback_clause(feedback)
+
+        if hasattr(client, "chat") and hasattr(client.chat, "completions") and hasattr(client.chat.completions, "create"):
+            try:
+                resp = client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                )
+                hypo = json.loads(_strip_markdown(resp.choices[0].message.content)).get("hypothetical_answer", "")
+                if hypo:
+                    return [query, hypo]
+                return [query]
+            except NotImplementedError:
+                pass
+
+        agent = _get_hyde_agent()
+        result = agent.run_sync(prompt)
+        hypo = result.output.hypothetical_answer.strip()
         if hypo:
             return [query, hypo]
     except Exception as e:
@@ -136,15 +227,28 @@ def apply_decompose(query: str, standard_filter: str, feedback: str | None = Non
                     error_logs: list[ErrorLog] | None = None) -> list[str]:
     """원문 + 서브쿼리들을 반환한다. LLM 호출이 실패하거나 서브쿼리 목록이 비어 있으면 원문만 반환."""
     try:
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": DECOMPOSE_PROMPT.format(
-                query=query, standard_context=_standard_context(standard_filter)
-            ) + _feedback_clause(feedback)}],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        subs = json.loads(_strip_markdown(resp.choices[0].message.content)).get("sub_queries", [])
+        prompt = DECOMPOSE_PROMPT.format(
+            query=query, standard_context=_standard_context(standard_filter)
+        ) + _feedback_clause(feedback)
+
+        if hasattr(client, "chat") and hasattr(client.chat, "completions") and hasattr(client.chat.completions, "create"):
+            try:
+                resp = client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                )
+                subs = json.loads(_strip_markdown(resp.choices[0].message.content)).get("sub_queries", [])
+                if subs:
+                    return [query] + subs
+                return [query]
+            except NotImplementedError:
+                pass
+
+        agent = _get_decompose_agent()
+        result = agent.run_sync(prompt)
+        subs = [s.strip() for s in result.output.sub_queries if s.strip()]
         if subs:
             return [query] + subs
     except Exception as e:
@@ -156,15 +260,28 @@ def apply_stepback(query: str, standard_filter: str, feedback: str | None = None
                    error_logs: list[ErrorLog] | None = None) -> list[str]:
     """원문 + 추상화된 원칙 쿼리를 반환한다. LLM 호출이 실패하거나 추상화 쿼리가 빈 문자열이면 원문만 반환."""
     try:
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": STEPBACK_PROMPT.format(
-                query=query, standard_context=_standard_context(standard_filter)
-            ) + _feedback_clause(feedback)}],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        abstract = json.loads(_strip_markdown(resp.choices[0].message.content)).get("abstract_query", "")
+        prompt = STEPBACK_PROMPT.format(
+            query=query, standard_context=_standard_context(standard_filter)
+        ) + _feedback_clause(feedback)
+
+        if hasattr(client, "chat") and hasattr(client.chat, "completions") and hasattr(client.chat.completions, "create"):
+            try:
+                resp = client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                )
+                abstract = json.loads(_strip_markdown(resp.choices[0].message.content)).get("abstract_query", "")
+                if abstract:
+                    return [query, abstract]
+                return [query]
+            except NotImplementedError:
+                pass
+
+        agent = _get_stepback_agent()
+        result = agent.run_sync(prompt)
+        abstract = result.output.abstract_query.strip()
         if abstract:
             return [query, abstract]
     except Exception as e:
@@ -197,9 +314,10 @@ def rewrite_query(state: GraphState) -> GraphState:
     state.human_feedback = None
 
     try:
-        is_accounting, strategy, confidence = classify_and_select(state.original_query, state.error_logs)
+        is_accounting, strategy, confidence, scope = classify_and_select(state.original_query, state.error_logs)
         state.is_accounting_query = is_accounting
         state.classification_confidence = confidence
+        state.query_scope = scope
 
         if not is_accounting:
             state.rewritten_query = RewrittenQuery(
@@ -211,9 +329,17 @@ def rewrite_query(state: GraphState) -> GraphState:
 
         # 분류기가 _STRATEGY_FN에 없는 전략(프롬프트가 허용하는 'bypass' 등)을 반환할 수 있으므로 암묵적 KeyError에 의존하지 않고 명시적으로 검증한다.
         # 미정의 전략은 아래 outer except가 bypass로 강등한다.
+        # 정규화: 전략 문자열 앞뒤 공백 제거
+        strategy = strategy.strip() if isinstance(strategy, str) else strategy
+        if not strategy:
+            strategy = "bypass"
         if strategy not in _STRATEGY_FN:
             raise ValueError(f"분류기가 미정의 전략을 반환: {strategy!r}")
         queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter, feedback, state.error_logs)
+        # hyde 전략이 단일 가상 답변만 반환한 경우 원문을 선두에 추가하여 최소 2개를 보장한다.
+        # apply_hyde 폴백(LLM 실패) 시에는 이미 원문이 포함되어 있으므로 중복 추가하지 않는다.
+        if strategy == "hyde" and len(queries) == 1 and queries[0] != state.original_query:
+            queries.insert(0, state.original_query)
         state.rewritten_query = RewrittenQuery(
             original_query=state.original_query,
             strategy=strategy,

@@ -36,8 +36,23 @@ def _word_count(text: str) -> int:
 
 
 def _load_graph(chapter: str) -> OntologyGraph:
-    """data/ontology/<chapter>.json을 OntologyGraph로 역직렬화한다."""
+    """data/ontology/<chapter>.json을 OntologyGraph로 역직렬화한다.
+
+    파일이 없으면 실패시키지 않고 건너뛴다.
+    이 JSON은 저작권이 있는 기준서 원문을 온톨로지 빌더에 통과시켜 얻는 파생물이라 레포에 추적하지 않는다.
+    원자료는 각자 준비한다는 방침이고, .gitignore가 data/ontology를 제외한다.
+    그래서 레포를 새로 받은 사람에게 이 파일이 없는 것은 정상이다.
+    없다고 실패시키면 데이터 미보유가 코드 결함처럼 보여서, 진짜 결함을 찾는 시간을 빼앗는다.
+
+    갖추는 방법은 장별로 온톨로지를 빌드하는 것이다.
+    예: uv run python -m src.ingest.ontology.builder --input <원문.md> --output data/ontology/gaap-ch6.json --standard-id gaap-ch6 --standard-type GAAP
+    """
     path = ONTOLOGY_DIR / f"{chapter}.json"
+    if not path.exists():
+        pytest.skip(
+            f"온톨로지 JSON을 찾지 못했습니다: {path} — "
+            "레포에 추적되지 않는 데이터입니다. 온톨로지 빌더로 생성한 뒤 실행하면 검증됩니다"
+        )
     return OntologyGraph.model_validate_json(path.read_text(encoding="utf-8"))
 
 

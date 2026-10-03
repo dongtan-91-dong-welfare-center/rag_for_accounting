@@ -1,7 +1,15 @@
 # FUNC-009: LangGraph 파이프라인 전체 노드가 공유하는 상태 객체
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Literal, TypedDict
-from src.models.schemas import RewrittenQuery, RetrievedChunk, RerankingResult, EvaluationResult, FinalResponse
+from src.models.schemas import (
+    RewrittenQuery,
+    RetrievedChunk,
+    RerankingResult,
+    EvaluationResult,
+    FinalResponse,
+    QueryScopeCategory,
+)
+from src.utils.config import MAX_ERROR_LOGS
 
 class ErrorLog(TypedDict):
     """
@@ -12,11 +20,22 @@ class ErrorLog(TypedDict):
     error_type: str   # 커스텀 에러 코드 (예: "CM-002", "SE-101") 또는 일반 예외 시 "UNKNOWN"
     message:    str   # 에러 상세 메시지
 
+def cap_error_logs(v: list[ErrorLog]) -> list[ErrorLog]:
+    """MAX_ERROR_LOGS 상한을 초과하는 경우 가장 오래된 항목을 밀어내고 최신 항목만 유지한다(FIFO).
+
+    GraphState의 field_validator와 workflow.py의 invoke() 최종 출력 가드가 동일 로직을 공유하도록
+    모듈 레벨 함수로 둔다(#192 후속: field_validator는 그래프 마지막 노드 출력이 그대로 invoke()의
+    반환값이 되는 경로와 속성 재할당 경로에서는 재검증되지 않는다).
+    """
+    if len(v) > MAX_ERROR_LOGS:
+        return v[-MAX_ERROR_LOGS:]
+    return v
+
 class GraphState(BaseModel):
     """
     LangGraph StateGraph의 공유 상태 (State) 객체.
     모든 노드는 이 상태를 입력받아 작업을 수행하고, 변경할 필드만 담은 dict를 반환하여 증분 업데이트(Merge) 합니다.
-    전체 흐름은 [아키텍처 개요](docs/architecture/architecture_overview.md)를 참고하세요.
+    전체 흐름은 [아키텍처 개요](docs/ARCHITECTURE.md)를 참고하세요.
     """
     # 사용자 초기 입력값
     original_query:                str                    # 워크플로우 시작 시 주입됨. 불변에 가깝게 유지
@@ -26,6 +45,7 @@ class GraphState(BaseModel):
 
     # 의도 분류
     is_accounting_query:  bool                   = True   # 회계 질의 여부. 비회계면 route_after_rewrite가 early_exit로 분기
+    query_scope:          QueryScopeCategory     = "accounting"  # 질의 범위 세부 분류 ("accounting" | "out_of_scope_adjacent" | "completely_unrelated")
     classification_confidence: float             = 0.0    # [rewrite 노드] LLM이 보고한 회계/비회계 분류 신뢰도(0.0~1.0). early_exit가 FinalResponse.confidence_score로 전달
 
     # 질의 재작성 및 검색 관련
@@ -51,7 +71,10 @@ class GraphState(BaseModel):
     generation_score:     float                  = 0.0    # [generate 노드] LLM 생성 자가 검증 점수
 
     # 에러 추적 및 부가 정보
-    # 참고: error_logs를 노드가 실행될 때마다 기존 로그에 누적 추가하기 위해 데코레이터에서 직접 list.append()를 수행하거나,
-    # LangGraph의 Annotated[list, add_messages] 패턴을 도입할 수 있습니다.
-    error_logs:           list[ErrorLog]         = []     # 예외 발생 시 누적
+    error_logs:           list[ErrorLog]         = []     # 예외 발생 시 누적 (MAX_ERROR_LOGS 상한 유지)
     metadata:             dict                   = {}     # 예: {"search_mode": "hybrid"}
+
+    @field_validator("error_logs")
+    @classmethod
+    def _cap_error_logs(cls, v: list[ErrorLog]) -> list[ErrorLog]:
+        return cap_error_logs(v)

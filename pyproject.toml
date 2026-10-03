@@ -1,7 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
 [project]
 name = "rag-for-accounting"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.1.0"
+description = "회계기준(K-GAAP) 조항을 근거 인용과 함께 답하는 한국어 RAG 시스템"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -21,7 +28,13 @@ dependencies = [
     "httpx>=0.27.0",
     # MCP 서버(src/mcp_server/server.py) — RAG 질의를 MCP 도구로 노출
     "fastmcp>=3.4.0",
+    # 형태소 토큰화 — sparse 검색이 질의를, 색인이 본문을 같은 함수로 쪼갠다. 검색이 운영 핵심 경로라 dev 그룹이 아닌 본 의존성이다.
+    "kiwipiepy>=0.23.2",
+    "langgraph-checkpoint-postgres>=3.1.2",
 ]
+
+[project.scripts]
+rag-accounting-mcp = "src.mcp_server.server:main"
 
 [project.optional-dependencies]
 ingest = [
@@ -30,6 +43,8 @@ ingest = [
     "pdfminer-six>=20260107",
     "pikepdf>=10.7.2",
     "pyhwp>=0.1b15",
+    # 정본 마크다운 생성기(scripts/llm_parse.py)가 PDF 페이지를 PNG로 렌더할 때 쓴다. 코퍼스 생성 전용이다.
+    "pymupdf>=1.24.0",
 ]
 local-embedding = [
     "sentence-transformers>=3.0.0",
@@ -44,10 +59,10 @@ reranker = [
 # reranker·ingest·local-embedding 등 무거운 스택은 해당 --extra를 명시한 환경에서만 설치한다.
 [dependency-groups]
 dev = [
-    "kiwipiepy>=0.23.2",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
     "rank-bm25>=0.2.2",
+    "ruff>=0.8.0",
 ]
 
 [tool.pytest.ini_options]
@@ -57,6 +72,25 @@ markers = [
     "system: 시스템 통합 테스트 — 가짜 데이터 기반 예외 경로/데이터 규격 검증 (Phase 1: Fast Fail)",
     "benchmark: 비즈니스 통합 테스트 — Benchmark 정답셋 기반 답변 품질 검증 (Phase 2: Quality)",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# 기존 고복잡도 파일에 대한 한시적 베이스라인 예외 (순환 복잡도 > 10)
+# 점진적 리팩터링을 통해 본 예외 목록을 축소하고 침식도를 0.3 이하로 낮춘다.
+"src/ingest/ontology/md_parser.py" = ["C901"]
+"src/ingest/ontology/resolver.py" = ["C901"]
+"src/ingest/ontology/review_auditor.py" = ["C901"]
+"src/ingest/parse/cluster_merge.py" = ["C901"]
+"src/ingest/parse/layout_config.py" = ["C901"]
 
 [tool.pyright]
 include = ["src"]

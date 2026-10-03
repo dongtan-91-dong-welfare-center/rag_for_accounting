@@ -8,9 +8,10 @@ src/main.py 질의 진입점 단위 테스트
 run_workflow/init_pool 등 외부 의존은 mock으로 차단해 라이브 모델·DB 없이 진입점 논리만 검증한다.
 """
 import argparse
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch
 
 from src.utils.exception import LLMAPIConnectionError
 
@@ -57,3 +58,28 @@ class TestRunQueryPreload:
 
         assert rc == 0
         assert ran == ["workflow"]    # preload 실패에도 워크플로는 실행됨
+
+
+@pytest.mark.unit
+class TestRunMigrate:
+    """run_migrate() — CLI migrate 서브커맨드 검증"""
+
+    def test_run_migrate_success(self):
+        from src import main
+        from src.db.migrator import Migration
+
+        mock_migration = Migration(version="0001", name="0001_initial.sql", path=Path("dummy"))
+        with patch("src.db.migrator.run_migrations", return_value=[mock_migration]), \
+             patch.object(main, "close_pool"):
+            rc = main.run_migrate(argparse.Namespace())
+
+        assert rc == 0
+
+    def test_run_migrate_failure(self):
+        from src import main
+
+        with patch("src.db.migrator.run_migrations", side_effect=RuntimeError("DB 접속 에러")), \
+             patch.object(main, "close_pool"):
+            rc = main.run_migrate(argparse.Namespace())
+
+        assert rc == 1

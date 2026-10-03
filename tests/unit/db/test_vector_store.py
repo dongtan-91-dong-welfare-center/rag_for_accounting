@@ -96,6 +96,23 @@ class TestIndexDocuments:
         assert "ON CONFLICT" in query_obj.as_string(None)
         assert len(params) == 2     # 청크 2건 모두 파라미터로 전달
 
+    def test_upsert_fills_content_morph(self, mock_db_pool, mock_embedding):
+        """
+        upsert가 content_morph(형태소 사본)를 함께 저장하는지 검증 — 비면 그 청크는 sparse 검색에서 빠진다.
+
+        값은 검색 쪽 질의 토큰화와 같은 함수의 출력이어야 한다
+        색인과 질의가 다른 토큰화를 타면 매칭이 조용히 깨진다.
+        """
+        from src.db.vector_store import index_documents
+        from src.retrieval.tokenizer import morph_text
+
+        chunks = make_chunks(1)
+        index_documents(chunks, collection="test_collection")
+
+        query_obj, params = mock_db_pool.executemany.call_args[0]
+        assert "content_morph" in query_obj.as_string(None)
+        assert params[0][-1] == morph_text(chunks[0].content)
+
     def test_batch_split_by_batch_size(self, mock_db_pool, mock_embedding):
         """BATCH_SIZE를 초과하는 입력이 배치로 나뉘어 처리되는지 검증"""
         from src.db.vector_store import index_documents
@@ -170,6 +187,8 @@ class TestIndexDocuments:
         # 실패한 배치2(c2·c3)가 SE-102로 추적된다
         assert {s.chunk_id for s in result.skipped_chunks} == {"c2", "c3"}
         assert {s.error_type for s in result.skipped_chunks} == {"SE-102"}
+        assert all(s.is_retryable for s in result.skipped_chunks)
+        assert {s.chunk_id for s in result.get_retryable_chunks()} == {"c2", "c3"}
         assert result.chunk_count + len(result.skipped_chunks) == 5
 
     def test_ensure_collection_failure_returns_failed(self, mock_embedding):
@@ -186,6 +205,26 @@ class TestIndexDocuments:
         # DDL 실패 시에도 누락 청크 전부를 SE-102로 추적
         assert {s.chunk_id for s in result.skipped_chunks} == {"c0", "c1"}
         assert {s.error_type for s in result.skipped_chunks} == {"SE-102"}
+        assert all(s.is_retryable for s in result.skipped_chunks)
+        assert len(result.get_retryable_chunks()) == 2
+
+    def test_token_limit_skipped_chunk_is_not_retryable(self, mock_db_pool, mock_embedding):
+        """IX-201 토큰 한도 초과 청크는 재시도 불가(is_retryable=False)로 판별된다"""
+        from src.db.vector_store import index_documents
+        from src.utils.config import EMBEDDING_MAX_TOKENS
+
+        _, mock_count = mock_embedding
+        mock_count.side_effect = [EMBEDDING_MAX_TOKENS + 1, 10]  # 첫 번째 청크 초과
+        chunks = make_chunks(2)
+        result = index_documents(chunks, collection="test_collection")
+
+        assert result.status == "partial"
+        assert len(result.skipped_chunks) == 1
+        skipped = result.skipped_chunks[0]
+        assert skipped.chunk_id == "c0"
+        assert skipped.error_type == "IX-201"
+        assert skipped.is_retryable is False
+        assert len(result.get_retryable_chunks()) == 0
 
 
 # 테스트용 DB 행 데이터 (chunk_id, document_id, content, metadata, score)

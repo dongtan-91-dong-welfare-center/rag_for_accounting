@@ -64,6 +64,28 @@ def test_empty_and_nonpositive_top_n():
     assert build_clause_rows([_rr("a", 1.0)], top_n=0) == []
 
 
+def test_paras_from_content_headers_and_chunk_id():
+    """
+    문단번호 칩 — 공용 규칙으로 content 헤더 ∪ chunk_id에서 채운다.
+
+    다발 청크는 본문 헤더에서, 단일 조항 청크(번호가 id에만 있음)는 chunk_id에서
+    번호가 나오고, 용어 정의처럼 번호가 본래 없는 청크는 빈 목록이다.
+    """
+    bundle = _rr("gaap-ch6-s1-최초인식", 0.9, content="#### 6.13\n금융자산은...\n#### 6.14\n...")
+    single = _rr("gaap-ch2-실2.11", 0.8, content="차익, 차손 등은 총액으로 표시하지만...")
+    plain = _rr("gaap-ch10-용어의_정의-원가", 0.7, content="자산을 취득하기 위하여...")
+    rows = build_clause_rows([bundle, single, plain])
+    assert rows[0].paras == ["6.13", "6.14"]
+    assert rows[1].paras == ["실2.11"]
+    assert rows[2].paras == []
+
+
+def test_paras_preserve_branch_suffix_verbatim():
+    """가지번호(6.13의2)는 원형 그대로 — 합쳐서(→6.13) 보여주면 회계사가 조항을 못 찾는다."""
+    rows = build_clause_rows([_rr("a", 0.9, content="#### 6.13의2\n내재파생...")])
+    assert rows[0].paras == ["6.13의2"]
+
+
 def test_page_range_and_document_id_from_metadata():
     """metadata extra의 page_start/page_end와 chunk.document_id를 노출한다 — #196 뷰어가 소비."""
     rr = RerankingResult(
@@ -85,3 +107,12 @@ def test_page_range_defaults_to_none_when_absent():
     """백필 전(또는 미매칭) 청크는 페이지가 None — 뷰어 버튼 미표시로 강등된다."""
     row = build_clause_rows([_rr("a", 0.5)])[0]
     assert (row.page_start, row.page_end) == (None, None)
+
+
+def test_is_cited_flag_mapping():
+    """cited_chunk_ids에 포함된 청크는 is_cited=True, 아닌 것은 False로 표시된다."""
+    rr1 = _rr("chunk_1", 0.9)
+    rr2 = _rr("chunk_2", 0.8)
+    rows = build_clause_rows([rr1, rr2], cited_chunk_ids={"chunk_1"})
+    assert rows[0].is_cited is True
+    assert rows[1].is_cited is False

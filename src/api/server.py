@@ -5,11 +5,14 @@ CLI와 동일한 워크플로(run_workflow → resume_workflow)를
 React 프론트엔드가 소비할 수 있게 노출한다. 응답 조립은 src/api/schemas.to_api_response가
 전담하므로 이 모듈은 HTTP 관심사(검증·상태코드·CORS·lifespan)만 다룬다.
 
-실행 (단일 워커 전제 — HIL 체크포인터가 프로세스-로컬 MemorySaver):
+실행:
     uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000
 
+HIL 체크포인터는 PostgreSQL 기반(PostgresSaver, #209)이라 서버 재시작이나 다중 워커에도
+진행 중인 HIL 세션이 유지된다.
+
 엔드포인트는 async def가 아닌 일반 def로 선언한다
-run_workflow는 동기·블로킹(매 호출 그래프 재컴파일 + LLM 수 초)이므로 Starlette 스레드풀에서 실행해 단일 워커의 이벤트 루프가 막히지 않게 한다.
+run_workflow는 동기·블로킹(매 호출 그래프 재컴파일 + LLM 수 초)이므로 Starlette 스레드풀에서 실행해 이벤트 루프가 막히지 않게 한다.
 """
 from __future__ import annotations
 
@@ -22,16 +25,19 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi import Path as PathParam
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
+import psycopg
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
-from src.api.schemas import QueryDoneResponse, WorkflowResponse, to_api_response
-from src.db.connection import close_pool, init_pool
+from src.api.schemas import FeedbackResponse, QueryDoneResponse, WorkflowResponse, to_api_response
+from src.db.answer_feedback import ensure_answer_feedback_table, save_feedback
+from src.db.connection import close_checkpointer_pool, close_pool, get_pool, init_pool
 from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.ingest.parse.page_map import resolve_pdf_path
-from src.utils.config import API_CORS_ORIGINS, PDF_DIR
+from src.utils.config import API_CORS_ORIGINS, EMBEDDING_SERVER_URL, PDF_DIR, READINESS_PROBE_TIMEOUT_SECONDS
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -64,9 +70,11 @@ def _warmup_embedding() -> None:
 async def lifespan(app: FastAPI):
     init_pool()
     ensure_interaction_log_table()
+    ensure_answer_feedback_table()
     _warmup_embedding()
     yield
     close_pool()
+    close_checkpointer_pool()
 
 
 def _record_interaction(
@@ -145,9 +153,63 @@ class ResumeRequest(BaseModel):
     feedback: str | None = None
 
 
+class FeedbackRequest(BaseModel):
+    """답변 평가 요청(#300) — thread_id는 /query 응답의 것을 그대로 돌려보낸다."""
+
+    thread_id: str = Field(min_length=1)
+    rating: Literal["up", "down"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _strip_reason(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
+    """라이브니스: 프로세스가 응답하는지만 확인한다. 외부 의존성은 점검하지 않는다."""
     return {"status": "ok"}
+
+
+def _check_database() -> None:
+    """DB에 실제로 질의를 보낼 수 있는지 확인한다. 실패하면 예외를 던진다."""
+    with get_pool().connection(timeout=READINESS_PROBE_TIMEOUT_SECONDS) as conn:
+        conn.execute("SELECT 1")
+
+
+def _check_embedding() -> str:
+    """원격 임베딩 서버(TEI)의 /health 도달성을 확인한다. 로컬 임베딩 구성이면 점검 대상이 아니다."""
+    if not EMBEDDING_SERVER_URL:
+        return "skipped"
+    httpx.get(f"{EMBEDDING_SERVER_URL}/health", timeout=READINESS_PROBE_TIMEOUT_SECONDS).raise_for_status()
+    return "ok"
+
+
+def _run_check(check) -> str:
+    try:
+        return check() or "ok"
+    except Exception as e:  # noqa: BLE001 — 점검 실패는 상태 문자열로 보고하며 서버를 죽이지 않는다
+        return f"fail: {type(e).__name__}"
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """
+    준비성: 지금 질의를 받아도 되는지 확인한다. DB 또는 임베딩 서버에 닿지 않으면 503을 돌려준다.
+
+    /health(라이브니스)와 분리한 이유: DB 장애로 컨테이너를 재시작해도 해결되지 않으므로,
+    라이브니스까지 실패시키면 불필요한 재시작 루프가 생긴다.
+    """
+    checks = {"database": _run_check(_check_database), "embedding": _run_check(_check_embedding)}
+    ok = not any(v.startswith("fail") for v in checks.values())
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={"status": "ready" if ok else "not_ready", "checks": checks},
+    )
 
 
 @app.post("/query", response_model=WorkflowResponse)
@@ -169,14 +231,32 @@ def query(req: QueryRequest) -> WorkflowResponse:
 
 @app.post("/resume", response_model=WorkflowResponse)
 def resume(req: ResumeRequest) -> WorkflowResponse:
-    """HIL 중단 재개 — 재중단 가능(MAX_HIL_COUNT까지), 미존재 thread_id는 404."""
-    if not thread_exists(req.thread_id):
+    """HIL 중단 재개 — 재중단 가능(MAX_HIL_COUNT까지), 미존재 thread_id는 404, DB 장애 시 503."""
+    try:
+        exists = thread_exists(req.thread_id)
+    except psycopg.Error as e:
+        logger.error(f"HIL 세션 확인 중 DB 오류 발생: thread_id={req.thread_id}, {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="데이터베이스 연결 장애로 세션을 조회할 수 없습니다.",
+        ) from e
+
+    if not exists:
         raise HTTPException(status_code=404, detail=f"unknown thread_id: {req.thread_id}")
+
     decision: dict = {"action": req.action}
     if req.feedback is not None:
         decision["feedback"] = req.feedback
     start = time.perf_counter()
-    result = resume_workflow(req.thread_id, decision)
+    try:
+        result = resume_workflow(req.thread_id, decision)
+    except psycopg.Error as e:
+        logger.error(f"HIL 세션 재개 중 DB 오류 발생: thread_id={req.thread_id}, {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="데이터베이스 연결 장애로 세션을 재개할 수 없습니다.",
+        ) from e
+
     response = to_api_response(result)
     _record_interaction(
         endpoint="resume",
@@ -187,6 +267,17 @@ def resume(req: ResumeRequest) -> WorkflowResponse:
         elapsed_ms=round((time.perf_counter() - start) * 1000),
     )
     return response
+
+
+@app.post("/feedback", response_model=FeedbackResponse)
+def feedback(req: FeedbackRequest) -> FeedbackResponse:
+    """답변 평가 저장 — 저장 실패는 사용자가 알 수 있도록 503으로 알린다."""
+    try:
+        save_feedback(thread_id=req.thread_id, rating=req.rating, reason=req.reason)
+    except Exception as e:  # noqa: BLE001 — DB 오류 종류와 무관하게 503으로 변환
+        logger.error(f"answer_feedback 저장 실패: thread_id={req.thread_id}, {e}")
+        raise HTTPException(status_code=503, detail="feedback not saved") from e
+    return FeedbackResponse()
 
 
 @app.get("/documents/{document_id}/pdf")
@@ -203,7 +294,14 @@ def document_pdf(
     pdf_path = resolve_pdf_path(document_id, PDF_DIR)
     if pdf_path is None:
         raise HTTPException(status_code=404, detail=f"no pdf for document_id: {document_id}")
-    return FileResponse(pdf_path, media_type="application/pdf", filename=pdf_path.name)
+    # filename을 넘기면 Starlette이 표지를 attachment로 기본 설정해 뷰어 iframe이 PDF를 표시하지 못한다
+    # inline으로 명시해 화면 표시를 되살린다
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=pdf_path.name,
+        content_disposition_type="inline",
+    )
 
 
 @app.get("/favicon.svg")

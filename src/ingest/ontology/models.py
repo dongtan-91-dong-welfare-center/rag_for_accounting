@@ -30,6 +30,8 @@ class OntologyNode(BaseModel):
     title: str = ""                 # 절·소절 제목. 예: "제1절 공통사항"
     order: int = 0                  # 부모 노드 안에서의 순서 (1-based)
     content: str = ""               # 전체 텍스트. Section은 직속 문단만, Subsection은 소절 전체
+    start_page: int | None = None
+    # start_page: 노드 내용이 시작되는 원본 PDF 쪽. 마크다운의 `<!-- page N -->` 마커에서 얻으며(#297), 마커가 없으면 None.
     paragraphs: list[str] = Field(default_factory=list)
     # paragraphs: 포함된 문단 번호 목록. 예: ["6.4", "6.4의2"]
     # Section의 경우 직속 문단(예: 6.3)만 포함된다.

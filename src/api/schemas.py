@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from src.agent.interrupts import extract_interrupt_payload, is_interrupt
 from src.ui.clauses import build_clause_rows
+from src.utils.clause_paras import chunk_paras
 
 
 class ClauseOut(BaseModel):
@@ -32,6 +33,8 @@ class ClauseOut(BaseModel):
     document_id: str = ""          # 뷰어가 GET /documents/{document_id}/pdf를 여는 데 사용(#196)
     page_start: int | None = None  # 원본 PDF 페이지 범위(#196) — 미백필/미매칭이면 None(뷰어 버튼 미표시)
     page_end: int | None = None
+    paras: list[str] = []          # 문단번호 칩(#260) — 공용 규칙(clause_paras) 추출, 원형 보존
+    is_cited: bool = False         # 답변 인용 여부(✓/◌ 교차표시)
 
 
 class CitationOut(BaseModel):
@@ -43,6 +46,15 @@ class CitationOut(BaseModel):
     relevance_score: float
     page_start: int | None = None  # chunk_id로 reranked_chunks metadata를 조회해 결합(#196)
     page_end: int | None = None
+    # 문단번호 칩 — 검색 조항 목록과 같은 규칙으로 뽑아야 화면의 두 목록에서 같은 조항이 같은 모양으로 보인다.
+    # Citation 스키마 불변 원칙에 따라 여기서 파생한다.
+    paras: list[str] = []
+
+
+class FeedbackResponse(BaseModel):
+    """POST /feedback 응답(#300) — 저장 성공만 알린다."""
+
+    status: Literal["saved"] = "saved"
 
 
 class InterruptOption(BaseModel):
@@ -63,14 +75,14 @@ class InterruptInfo(BaseModel):
 
 
 class QueryDoneResponse(BaseModel):
-    """워크플로 완료 응답. 폴백(타임아웃·recursion)도 이 형태다(200, is_answerable=false)."""
+    """워크플로 완료 응답. 폴백(타임아웃·recursion) 및 비회계 조기종료도 이 형태다(200, is_answerable=false)."""
 
     status: Literal["done"] = "done"
     thread_id: str
     answer: str
     is_answerable: bool
     confidence: float
-    error_code: Literal["TIMEOUT", "RECURSION_LIMIT"] | None = None
+    error_code: Literal["TIMEOUT", "RECURSION_LIMIT", "NON_ACCOUNTING"] | None = None
     clauses: list[ClauseOut]
     citations: list[CitationOut]
 
@@ -86,13 +98,19 @@ class QueryInterruptedResponse(BaseModel):
 WorkflowResponse = QueryDoneResponse | QueryInterruptedResponse
 
 
-def _derive_error_code(error_logs: list[dict]) -> Literal["TIMEOUT", "RECURSION_LIMIT"] | None:
+def _derive_error_code(
+    error_logs: list[dict],
+    is_accounting_query: bool = True,
+) -> Literal["TIMEOUT", "RECURSION_LIMIT", "NON_ACCOUNTING"] | None:
     """
-    폴백이 기록한 워크플로 레벨 오류(TIMEOUT·RECURSION_LIMIT)를 응답 구분자로 파생한다.
+    폴백이 기록한 워크플로 레벨 오류(TIMEOUT·RECURSION_LIMIT) 및 비회계 조기종료(NON_ACCOUNTING)를 응답 구분자로 파생한다.
 
     타임아웃과 재시도 소진 둘 다 error_logs에 한 줄을 남기므로, 클라이언트가 이 코드로 일시적 실패(재시도 유도)를 일반 답변불가와 구분한다.
+    비회계 질의(is_accounting_query=False)는 회계 질의이나 근거가 부족한 일반 답변불가와 구분하여 화면에 안내한다.
     노드 레벨 에러(CM-002 등)는 폴백 구분자가 아니므로 매핑하지 않는다.
     """
+    if not is_accounting_query:
+        return "NON_ACCOUNTING"
     if any(log.get("error_type") == "TIMEOUT" for log in error_logs):
         return "TIMEOUT"
     if any(log.get("error_type") == "RECURSION_LIMIT" for log in error_logs):
@@ -123,13 +141,18 @@ def to_api_response(result: dict) -> WorkflowResponse:
         extra = item.chunk.metadata.model_extra or {}
         pages_by_chunk[item.chunk.chunk_id] = (extra.get("page_start"), extra.get("page_end"))
 
+    cited_chunk_ids = {c.chunk_id for c in response.citations}
+    is_accounting = result.get("is_accounting_query", True)
     return QueryDoneResponse(
         thread_id=thread_id,
         answer=response.answer,
         is_answerable=response.is_answerable,
         confidence=response.confidence_score,
-        error_code=_derive_error_code(result.get("error_logs", [])),
-        clauses=[ClauseOut(**asdict(row)) for row in build_clause_rows(result.get("reranked_chunks"))],
+        error_code=_derive_error_code(result.get("error_logs", []), is_accounting),
+        clauses=[
+            ClauseOut(**asdict(row))
+            for row in build_clause_rows(result.get("reranked_chunks"), cited_chunk_ids=cited_chunk_ids)
+        ],
         citations=[
             CitationOut(
                 document_id=c.document_id,
@@ -138,6 +161,7 @@ def to_api_response(result: dict) -> WorkflowResponse:
                 relevance_score=c.relevance_score,
                 page_start=pages_by_chunk.get(c.chunk_id, (None, None))[0],
                 page_end=pages_by_chunk.get(c.chunk_id, (None, None))[1],
+                paras=chunk_paras(c.content, c.chunk_id),
             )
             for c in response.citations
         ],

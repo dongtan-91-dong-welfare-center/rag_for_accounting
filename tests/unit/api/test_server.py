@@ -148,8 +148,9 @@ class TestQuery:
         assert body["is_answerable"] is False
 
     def test_non_accounting_early_exit(self, client, monkeypatch):
-        """비회계 질의 조기종료도 정상 done 응답이다(error_code 없음, 안내 answer)."""
+        """비회계 질의 조기종료는 error_code="NON_ACCOUNTING"을 포함하는 done 응답이다."""
         early = _done_result(
+            is_accounting_query=False,
             final_response=FinalResponse(
                 answer="죄송합니다. 회계 관련 질문을 해 주세요.",
                 citations=[],
@@ -161,7 +162,7 @@ class TestQuery:
         body = client.post("/query", json={"query": "오늘 점심 메뉴 추천"}).json()
         assert body["status"] == "done"
         assert body["is_answerable"] is False
-        assert body["error_code"] is None
+        assert body["error_code"] == "NON_ACCOUNTING"
 
 
 class TestResume:
@@ -210,10 +211,17 @@ class TestResume:
         assert r.status_code == 404
 
 
-def test_thread_exists_false_for_unknown_thread():
-    """404 가드의 근거 계약 — 체크포인터에 없는 thread_id는 False다(실제 MemorySaver 조회)."""
+def test_thread_exists_false_for_unknown_thread(monkeypatch):
+    """404 가드의 근거 계약 — 체크포인터에 없는 thread_id는 False다.
+
+    실제 운영 체크포인터(PostgresSaver)는 DB 풀이 필요해(#209) 단위 테스트에서는
+    인메모리 MemorySaver로 대체해 DB 의존성 없이 조회 계약만 검증한다.
+    """
+    from langgraph.checkpoint.memory import MemorySaver
+    import src.agent.workflow as workflow_module
     from src.agent.workflow import thread_exists
 
+    monkeypatch.setattr(workflow_module, "_get_checkpointer", lambda: MemorySaver())
     assert thread_exists(str(uuid.uuid4())) is False
 
 
@@ -232,6 +240,34 @@ class TestDocumentPdf:
         """BYO 환경에서 PDF 미제공 시 404 — 뷰어는 안내 메시지로 강등한다(DoD)."""
         monkeypatch.setattr("src.api.server.PDF_DIR", str(tmp_path))
         assert client.get("/documents/gaap-ch10/pdf").status_code == 404
+
+    def test_disposition_is_inline_with_filename(self, client, monkeypatch, tmp_path):
+        """
+        표지(Content-Disposition: 브라우저에게 파일 처리 방식을 알리는 응답 헤더)가 inline이어야 뷰어 iframe에 PDF가 화면으로 뜬다.
+
+        attachment면 iframe이 빈 화면이 되거나 파일이 내려받아진다. 
+        파일명은 사용자가 직접 저장할 때 남도록 헤더에 유지한다.
+        """
+        (tmp_path / "gaap-ch10.pdf").write_bytes(b"%PDF-1.4 test")
+        monkeypatch.setattr("src.api.server.PDF_DIR", str(tmp_path))
+        r = client.get("/documents/gaap-ch10/pdf")
+        disposition = r.headers["content-disposition"]
+        assert disposition.startswith("inline")
+        assert "filename" in disposition
+
+    def test_disposition_stays_inline_for_korean_filename(self, client, monkeypatch, tmp_path):
+        """
+        실제 기준서 파일명은 한글이라 표지가 RFC 5987 표기(filename*=UTF-8''…)로 나간다
+        그 경로에서도 inline이 유지되는지 고정한다.
+
+        영문 파일명으로만 시험하면 실제 운영 파일에서만 깨지는 상황이 남는다.
+        전체 문자열 단언은 인코딩 표기 차이로 깨지므로 표지 타입만 단언한다.
+        """
+        (tmp_path / "제6장 금융자산·금융부채.pdf").write_bytes(b"%PDF-1.4 test")
+        monkeypatch.setattr("src.api.server.PDF_DIR", str(tmp_path))
+        r = client.get("/documents/gaap-ch6/pdf")
+        assert r.status_code == 200
+        assert r.headers["content-disposition"].startswith("inline")
 
     def test_head_is_supported_for_availability_check(self, client, monkeypatch, tmp_path):
         """React 뷰어(checkPdfAvailable)는 HEAD로 제공 여부를 묻는다.
@@ -254,3 +290,119 @@ class TestDocumentPdf:
         r = client.get("/documents/..%2Fsecret/pdf")
         assert r.headers["content-type"] != "application/pdf"
         assert client.get("/documents/GAAP_CH10/pdf").status_code == 422
+
+
+class TestReadiness:
+    """#193 준비성 프로브: /health는 라이브니스, /ready는 DB와 임베딩 도달성을 확인한다."""
+
+    def test_health_stays_liveness_even_when_db_down(self, client, monkeypatch):
+        monkeypatch.setattr("src.api.server._check_database", lambda: (_ for _ in ()).throw(RuntimeError("down")))
+        assert client.get("/health").json() == {"status": "ok"}
+
+    def test_ready_ok_when_all_checks_pass(self, client, monkeypatch):
+        monkeypatch.setattr("src.api.server._check_database", lambda: None)
+        monkeypatch.setattr("src.api.server._check_embedding", lambda: "ok")
+        r = client.get("/ready")
+        assert r.status_code == 200
+        assert r.json() == {"status": "ready", "checks": {"database": "ok", "embedding": "ok"}}
+
+    def test_ready_503_when_database_down(self, client, monkeypatch):
+        def boom():
+            raise RuntimeError("connection refused")
+
+        monkeypatch.setattr("src.api.server._check_database", boom)
+        monkeypatch.setattr("src.api.server._check_embedding", lambda: "ok")
+        r = client.get("/ready")
+        assert r.status_code == 503
+        body = r.json()
+        assert body["status"] == "not_ready"
+        assert body["checks"]["database"].startswith("fail")
+        assert body["checks"]["embedding"] == "ok"
+
+    def test_ready_503_when_embedding_down(self, client, monkeypatch):
+        monkeypatch.setattr("src.api.server._check_database", lambda: None)
+
+        def boom():
+            raise RuntimeError("timeout")
+
+        monkeypatch.setattr("src.api.server._check_embedding", boom)
+        r = client.get("/ready")
+        assert r.status_code == 503
+        assert r.json()["checks"]["embedding"].startswith("fail")
+
+
+class TestReadinessChecks:
+    def test_embedding_skipped_for_local_embedding(self, monkeypatch):
+        from src.api import server
+
+        monkeypatch.setattr("src.api.server.EMBEDDING_SERVER_URL", "")
+        assert server._check_embedding() == "skipped"
+
+    def test_embedding_checks_remote_health(self, monkeypatch):
+        from src.api import server
+
+        seen = {}
+
+        class R:
+            def raise_for_status(self):
+                seen["raised"] = True
+
+        def fake_get(url, timeout):
+            seen["url"] = url
+            return R()
+
+        monkeypatch.setattr("src.api.server.EMBEDDING_SERVER_URL", "http://embedding:80")
+        monkeypatch.setattr("src.api.server.httpx.get", fake_get)
+        assert server._check_embedding() == "ok"
+        assert seen["url"] == "http://embedding:80/health"
+
+    def test_database_check_runs_select_1(self, monkeypatch):
+        from src.api import server
+
+        executed = []
+
+        class Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def execute(self, sql):
+                executed.append(sql)
+
+        class Pool:
+            def connection(self, timeout=None):
+                return Conn()
+
+        monkeypatch.setattr("src.api.server.get_pool", lambda: Pool())
+        server._check_database()
+        assert executed == ["SELECT 1"]
+
+
+class TestFeedback:
+    """POST /feedback — 답변 평가 저장(#300)."""
+
+    def test_saves_feedback(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("src.api.server.save_feedback", lambda **kw: captured.update(kw))
+        r = client.post("/feedback", json={"thread_id": "t1", "rating": "down", "reason": " 조항 오류 "})
+        assert r.status_code == 200
+        assert r.json() == {"status": "saved"}
+        assert captured == {"thread_id": "t1", "rating": "down", "reason": "조항 오류"}
+
+    def test_invalid_rating_is_422(self, client):
+        r = client.post("/feedback", json={"thread_id": "t1", "rating": "meh"})
+        assert r.status_code == 422
+
+    def test_reason_too_long_is_422(self, client):
+        r = client.post("/feedback", json={"thread_id": "t1", "rating": "up", "reason": "가" * 2001})
+        assert r.status_code == 422
+
+    def test_db_failure_is_503(self, client, monkeypatch):
+        def boom(**kw):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr("src.api.server.save_feedback", boom)
+        r = client.post("/feedback", json={"thread_id": "t1", "rating": "up"})
+        assert r.status_code == 503

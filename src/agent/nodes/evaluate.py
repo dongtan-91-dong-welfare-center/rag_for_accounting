@@ -59,6 +59,92 @@ _CITATION_PATTERN = re.compile(
 )
 
 
+def _filter_relevant_chunks(reranked_chunks: list[RerankingResult], query: str) -> list[RerankingResult]:
+    """관련 청크만 필터링한다 (rerank_score 임계값 + content 비어있지 않음)."""
+    return [r for r in reranked_chunks if check_relevance(r, query)]
+
+
+def _execute_evaluator_llm(prompt: str, rewrite_count: int, error_logs: list[dict]) -> tuple[EvaluationResult | None, list[dict]]:
+    """PydanticAI LLM을 실행하고 예외(EV-301, CM-002, 도메인 에러)를 포착하여 폴백을 반환한다."""
+    evaluator_agent = Agent(f"openai-chat:{OPENAI_MODEL}", output_type=EvaluationResult)
+    try:
+        try:
+            result = evaluator_agent.run_sync(prompt)
+            return result.output, error_logs
+        except (pydantic.ValidationError, UnexpectedModelBehavior) as e:
+            raise EvaluationParsingError(f"LLM 평가 응답 파싱 실패: {e}")
+        except httpx.RequestError as e:
+            raise LLMAPIConnectionError(f"LLM API 연결 오류: {e}", node="evaluate")
+    except EvaluationParsingError as e:
+        new_logs = error_logs + [e.to_error_log()]
+        fallback = EvaluationResult(
+            is_relevant=False,
+            needs_external=True,
+            confidence=0.0,
+            reasoning="EV-301: LLM 응답 파싱 실패로 보수적 폴백 반환",
+        )
+        return fallback, new_logs
+    except LLMAPIConnectionError as e:
+        new_logs = error_logs + [e.to_error_log()]
+        needs_external = rewrite_count < MAX_REWRITE_COUNT
+        fallback = EvaluationResult(
+            is_relevant=False,
+            needs_external=needs_external,
+            confidence=0.0,
+            reasoning=f"CM-002: API 연결 오류, {'재시도 가능' if needs_external else '최대 재시도 도달'}",
+        )
+        return fallback, new_logs
+    except AccountingRAGError as e:
+        new_logs = error_logs + [e.to_error_log()]
+        fallback = EvaluationResult(
+            is_relevant=False,
+            needs_external=True,
+            confidence=0.0,
+            reasoning=f"{type(e).__name__}: 도메인 에러 보수적 폴백",
+        )
+        return fallback, new_logs
+    except Exception as e:
+        logger.error(f"[{type(e).__name__}] evaluate_context 노드 시스템 에러: {e}", exc_info=True)
+        raise
+
+
+def _validate_and_postprocess(
+    eval_result: EvaluationResult,
+    standard_filter: str,
+    relevant_chunks: list[RerankingResult],
+    error_logs: list[dict],
+) -> tuple[EvaluationResult, list[dict]]:
+    """외부 참조 검사, 내부 일관성(EV-302), 환각(EV-303)을 검증하고 결과를 반환한다."""
+    if check_external_reference(eval_result, standard_filter):
+        eval_result = eval_result.model_copy(update={"needs_external": True})
+
+    try:
+        validate_verdict(eval_result)
+    except InconsistentVerdictError as e:
+        new_logs = error_logs + [e.to_error_log()]
+        fallback = EvaluationResult(
+            is_relevant=False,
+            needs_external=False,
+            confidence=0.0,
+            reasoning="EV-302: 평가 결과 내부 일관성 위반으로 보수적 폴백 반환",
+        )
+        return fallback, new_logs
+
+    try:
+        detect_hallucination(eval_result, relevant_chunks)
+    except HallucinationDetectedError as e:
+        new_logs = error_logs + [e.to_error_log()]
+        fallback = EvaluationResult(
+            is_relevant=False,
+            needs_external=False,
+            confidence=0.0,
+            reasoning="EV-303: 근거 없는 주장 감지로 is_relevant=False 반환",
+        )
+        return fallback, new_logs
+
+    return eval_result, error_logs
+
+
 def evaluate_context(state: GraphState) -> dict:
     """
     reranked_chunks를 EVALUATION_PROMPT + config.OPENAI_MODEL로 평가한다.
@@ -72,120 +158,44 @@ def evaluate_context(state: GraphState) -> dict:
                 is_relevant=False,
                 needs_external=False,
                 confidence=0.0,
-                reasoning="reranked_chunks가 비어 있어 평가 대상 컨텍스트가 없습니다."
+                reasoning="reranked_chunks가 비어 있어 평가 대상 컨텍스트가 없습니다.",
             )
         }
 
-    # 관련 청크만 필터링 (rerank_score 임계값 + content 비어있지 않음)
-    relevant_chunks = [r for r in state.reranked_chunks if check_relevance(r, state.original_query)]
-
+    relevant_chunks = _filter_relevant_chunks(state.reranked_chunks, state.original_query)
     if not relevant_chunks:
         return {
             "evaluation": EvaluationResult(
                 is_relevant=False,
                 needs_external=False,
                 confidence=0.0,
-                reasoning="rerank_score가 임계값 미만이거나 본문이 비어 있는 청크만 존재합니다."
+                reasoning="rerank_score가 임계값 미만이거나 본문이 비어 있는 청크만 존재합니다.",
             )
         }
 
-    # 청크 인덱스 부여 후 프롬프트 컨텍스트 조립
     chunks_text = "\n\n".join(
         f"[{idx}] {r.chunk.content}" for idx, r in enumerate(relevant_chunks, start=1)
     )
-
     prompt = EVALUATION_PROMPT.format(
         query=state.original_query,
         standard_filter=state.standard_filter,
         chunks=chunks_text,
     )
 
-    # PydanticAI Agent로 EvaluationResult 직접 파싱
-    # 접두사를 "openai-chat:"으로 고정한다. pydantic-ai v2.0부터 "openai:"는 Responses API로
-    # 해석되도록 바뀌어 DeprecationWarning이 발생하므로, 현행 Chat Completions 동작을 명시적으로 유지한다.
-    evaluator_agent = Agent(f"openai-chat:{OPENAI_MODEL}", output_type=EvaluationResult)
+    eval_result, logs_after_llm = _execute_evaluator_llm(
+        prompt, state.rewrite_count, state.error_logs
+    )
+    if len(logs_after_llm) > len(state.error_logs):
+        # LLM 실행 도중 도메인 오류나 파싱 오류로 폴백이 생성된 경우
+        return {"evaluation": eval_result, "error_logs": logs_after_llm}
 
-    try:
-        # PydanticAI 실행 — 파싱 실패(pydantic.ValidationError/UnexpectedModelBehavior)를 EV-301로 래핑한다.
-        # (generate 노드와 동일 패턴) 래핑하지 않으면 아래 except Exception으로 떨어져 노드가 하드 크래시한다.
-        try:
-            result = evaluator_agent.run_sync(prompt)
-            eval_result: EvaluationResult = result.output
-        except (pydantic.ValidationError, UnexpectedModelBehavior) as e:
-            raise EvaluationParsingError(f"LLM 평가 응답 파싱 실패: {e}")
-        except httpx.RequestError as e:
-            raise LLMAPIConnectionError(f"LLM API 연결 오류: {e}", node="evaluate")
-    except EvaluationParsingError as e:
-        # EV-301: 파싱 실패 → CRAG 루프 재진입 유도 (보수적 폴백)
-        new_logs = state.error_logs + [e.to_error_log()]
-        fallback = EvaluationResult(
-            is_relevant=False,
-            needs_external=True,
-            confidence=0.0,
-            reasoning="EV-301: LLM 응답 파싱 실패로 보수적 폴백 반환"
-        )
-        return {"evaluation": fallback, "error_logs": new_logs}
+    final_result, final_logs = _validate_and_postprocess(
+        eval_result, state.standard_filter, relevant_chunks, logs_after_llm
+    )
+    if len(final_logs) > len(state.error_logs):
+        return {"evaluation": final_result, "error_logs": final_logs}
 
-    except LLMAPIConnectionError as e:
-        # CM-002: 네트워크 오류 → rewrite_count 기반 판단
-        # 재시도 여지가 있으면 CRAG 루프로 재진입, 한계 도달 시 강제 종료
-        new_logs = state.error_logs + [e.to_error_log()]
-        needs_external = state.rewrite_count < MAX_REWRITE_COUNT
-        fallback = EvaluationResult(
-            is_relevant=False,
-            needs_external=needs_external,
-            confidence=0.0,
-            reasoning=f"CM-002: API 연결 오류, {'재시도 가능' if needs_external else '최대 재시도 도달'}"
-        )
-        return {"evaluation": fallback, "error_logs": new_logs}
-
-    except AccountingRAGError as e:
-        # 기타 도메인 에러: 보수적 폴백으로 CRAG 루프 유지
-        new_logs = state.error_logs + [e.to_error_log()]
-        fallback = EvaluationResult(
-            is_relevant=False,
-            needs_external=True,
-            confidence=0.0,
-            reasoning=f"{type(e).__name__}: 도메인 에러 보수적 폴백"
-        )
-        return {"evaluation": fallback, "error_logs": new_logs}
-
-    except Exception as e:
-        # 시스템 에러: 원본 예외 그대로 전파 → LangGraph 파이프라인 중단
-        logger.error(f"[{type(e).__name__}] evaluate_context 노드 시스템 에러: {e}", exc_info=True)
-        raise
-
-    # reasoning 후처리: 외부 참조 지시가 감지되면 needs_external을 True로 오버라이드
-    if check_external_reference(eval_result, state.standard_filter):
-        eval_result = eval_result.model_copy(update={"needs_external": True})
-
-    # EV-302: 내부 일관성 검증
-    try:
-        validate_verdict(eval_result)
-    except InconsistentVerdictError as e:
-        new_logs = state.error_logs + [e.to_error_log()]
-        fallback = EvaluationResult(
-            is_relevant=False,
-            needs_external=False,
-            confidence=0.0,
-            reasoning="EV-302: 평가 결과 내부 일관성 위반으로 보수적 폴백 반환"
-        )
-        return {"evaluation": fallback, "error_logs": new_logs}
-
-    # EV-303: 환각 감지 검증
-    try:
-        detect_hallucination(eval_result, relevant_chunks)
-    except HallucinationDetectedError as e:
-        new_logs = state.error_logs + [e.to_error_log()]
-        fallback = EvaluationResult(
-            is_relevant=False,
-            needs_external=False,
-            confidence=0.0,
-            reasoning="EV-303: 근거 없는 주장 감지로 is_relevant=False 반환"
-        )
-        return {"evaluation": fallback, "error_logs": new_logs}
-
-    return {"evaluation": eval_result}
+    return {"evaluation": final_result}
 
 
 def check_relevance(chunk: RerankingResult, query: str) -> bool:
@@ -261,6 +271,7 @@ def validate_verdict(eval_result: EvaluationResult) -> None:
         1. is_relevant=True이고 confidence < 0.3이면 신뢰도 불일치
         2. needs_external=True이고 is_relevant=True인데 reasoning에 외부 참조 근거가 없으면 불일치
     """
+    # !TODO: config에 confidence 기준 추가
     if eval_result.is_relevant and eval_result.confidence < 0.3:
         raise InconsistentVerdictError(
             f"is_relevant=True이지만 confidence={eval_result.confidence:.2f}로 신뢰도 불일치"

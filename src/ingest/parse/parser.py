@@ -15,10 +15,40 @@ Docling이란?
     - Docling을 감싸서(wrapping) 우리 프로젝트에 맞는 인터페이스를 제공합니다.
     - PDF에서 마크다운 텍스트와 표 데이터를 추출하여 ParsedDocument로 반환합니다.
 """
+from __future__ import annotations
+
 import html
 from pathlib import Path
+from typing import TYPE_CHECKING
+
 from src.ingest.parse.parser_dtos import ParsedDocument, _PAGE_TOP_THRESHOLD, _PAGE_BOT_THRESHOLD
-from docling.document_converter import DocumentConverter
+
+# docling은 선택 의존성이다 — `uv sync --extra ingest`로만 설치되고, 운영 이미지·기본 개발 환경에는 없다(용량이 커서 파싱을 실제로 돌리는 환경에만 넣는다).
+# 그래서 모듈 최상단이 아니라 실제로 converter를 만드는 _get_converter()에서 import한다.
+# 이렇게 해두면 파싱 스택이 없는 환경에서도 이 모듈을 import해 DoclingParser를 만들거나 table_to_text() 같은 순수 로직을 쓸 수 있다.
+# 최상단 import였을 때는 모듈을 불러오기만 해도 ModuleNotFoundError가 났다.
+# 타입 표기에 쓰는 이름은 TYPE_CHECKING 블록에서만 가져온다. 이 블록은 pyright 같은 타입 검사기만 읽고 실행 시점에는 건너뛴다.
+if TYPE_CHECKING:
+    from docling.document_converter import DocumentConverter
+
+
+def export_markdown_with_page_markers(doc) -> str:
+    """문서를 쪽 단위로 마크다운 변환하고, 각 쪽 앞에 `<!-- page N -->` 마커 줄을 붙여 이어붙인다. (#297)
+
+    근거: 전체 export는 쪽 정보를 잃으므로, 이후 단계(조항 분할·청킹)가 쪽 번호를 알 수 있도록
+    Docling이 아는 쪽 귀속(prov.page_no)을 변환 시점에 마커로 남긴다.
+    마커는 "이 줄부터 N쪽 내용"을 뜻하며, 청킹 단계에서 content에서 제거되어 임베딩 입력에는 섞이지 않는다.
+    쪽 정보가 없는 문서는 기존 전체 export 결과를 그대로 반환한다.
+    """
+    pages = sorted(getattr(doc, "pages", None) or {})
+    if not pages:
+        return html.unescape(doc.export_to_markdown())
+    parts = []
+    for page_no in pages:
+        body = html.unescape(doc.export_to_markdown(page_no=page_no))
+        if body.strip():
+            parts.append(f"<!-- page {page_no} -->\n{body}")
+    return "\n\n".join(parts)
 
 
 class DoclingParser:
@@ -79,6 +109,9 @@ class DoclingParser:
             3. 아무 설정도 없으면 → Docling 기본 converter를 생성
         """
         if self._converter is None:
+            import os
+            # Windows 환경에서 심볼릭 링크 생성 권한 부재로 인한 WinError 1314 에러를 방지한다.
+            os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
             if self._overlap_threshold is not None or self._containment_threshold is not None:
                 # 커스텀 임계값이 지정된 경우: 레이아웃 후처리를 패치한 converter 생성
                 # (layout_config.py의 create_converter 참고)
@@ -89,6 +122,7 @@ class DoclingParser:
                 )
             else:
                 # 기본 설정: Docling이 제공하는 기본 DocumentConverter 사용
+                from docling.document_converter import DocumentConverter
                 self._converter = DocumentConverter()
         return self._converter
 
@@ -133,7 +167,7 @@ class DoclingParser:
         # html.unescape()는 HTML 엔티티를 원래 문자로 되돌립니다.
         #   예: "&amp;" → "&",  "&lt;" → "<",  "&#x27;" → "'"
         # Docling이 내부적으로 HTML 인코딩을 사용하는 경우가 있어서 이 처리가 필요합니다.
-        markdown_text = html.unescape(doc.export_to_markdown())
+        markdown_text = export_markdown_with_page_markers(doc)
 
         # ── 4단계: 표(Table) 추출 + 페이지 걸침 테이블 병합 ──
         # doc.tables에서 표를 추출하되, 연속 페이지에 걸쳐 나뉜 테이블을 병합합니다.

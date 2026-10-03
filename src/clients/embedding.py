@@ -100,11 +100,16 @@ def _count_tokens_local(text: str) -> int:
     return len(model.tokenizer.encode(text))
 
 
-def embed_texts(texts: list[str], node: NodeType = "index") -> list[list[float]]:
+def embed_texts(
+    texts: list[str],
+    node: NodeType = "index",
+    timeout: float | None = None,
+) -> list[list[float]]:
     """텍스트 목록을 KURE-v1로 임베딩하여 벡터 목록을 반환한다.
 
     :param texts: 임베딩할 텍스트 목록 (빈 리스트면 빈 리스트 반환)
     :param node: 실패 시 ErrorLog에 기록할 노드명 (인덱싱="index", 검색="search")
+    :param timeout: 원격 임베딩 서버 호출 타임아웃(초). 미지정 시 node="search"는 EMBEDDING_QUERY_TIMEOUT_SECONDS(10s), 그 외는 EMBEDDING_BATCH_TIMEOUT_SECONDS(120s) 자동 적용.
     :raises LLMAPIConnectionError: 모델 로드(최초 다운로드 포함)·인코딩·서빙 서버 호출 실패 시.
         임베딩 실패는 DB 오류(SE-102)가 아니라 임베딩 모델 호출 문제이므로 CM-002로 분류한다.
         ① 로그상 원인이 'DB 쿼리 실패'로 둔갑하지 않고
@@ -112,31 +117,54 @@ def embed_texts(texts: list[str], node: NodeType = "index") -> list[list[float]]
     """
     if not texts:
         return []
+    effective_timeout = (
+        timeout
+        if timeout is not None
+        else (
+            config.EMBEDDING_QUERY_TIMEOUT_SECONDS
+            if node == "search"
+            else config.EMBEDDING_BATCH_TIMEOUT_SECONDS
+        )
+    )
     try:
         if config.EMBEDDING_SERVER_URL:
             from src.clients import embedding_remote as embedding_client
 
-            return embedding_client.embed_texts(texts)
+            return embedding_client.embed_texts(texts, timeout=effective_timeout)
         return _embed_texts_local(texts)
     except Exception as e:
         logger.error(f"임베딩 생성 실패: {e}")
         raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)
 
 
-def count_tokens(text: str, node: NodeType = "index") -> int:
+def count_tokens(
+    text: str,
+    node: NodeType = "index",
+    timeout: float | None = None,
+) -> int:
     """KURE-v1 토크나이저 기준 토큰 수를 반환한다.
 
     인덱싱 시 EMBEDDING_MAX_TOKENS(8192) 초과 청크를 IX-201로 스킵하기 위한 사전 검사에 쓰인다.
     sentence-transformers는 한도 초과 입력을 조용히 잘라내므로(silent truncation),
     잘린 벡터가 저장되는 것을 막으려면 인코딩 전에 이 함수로 길이를 확인해야 한다.
 
+    :param timeout: 원격 임베딩 서버 호출 타임아웃(초). 미지정 시 node="search"는 EMBEDDING_QUERY_TIMEOUT_SECONDS, 그 외는 EMBEDDING_BATCH_TIMEOUT_SECONDS 자동 적용.
     :raises LLMAPIConnectionError: 모델(토크나이저) 로드·서빙 서버 호출 실패 시 CM-002로 분류
     """
+    effective_timeout = (
+        timeout
+        if timeout is not None
+        else (
+            config.EMBEDDING_QUERY_TIMEOUT_SECONDS
+            if node == "search"
+            else config.EMBEDDING_BATCH_TIMEOUT_SECONDS
+        )
+    )
     try:
         if config.EMBEDDING_SERVER_URL:
             from src.clients import embedding_remote as embedding_client
 
-            return embedding_client.count_tokens(text)
+            return embedding_client.count_tokens(text, timeout=effective_timeout)
         return _count_tokens_local(text)
     except Exception as e:
         logger.error(f"토큰 수 계산 실패: {e}")

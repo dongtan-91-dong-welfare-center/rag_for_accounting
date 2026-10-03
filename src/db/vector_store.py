@@ -3,7 +3,10 @@
 # 설계 결정 요약:
 #   - 임베딩: KURE-v1 1024차원, 인덱싱·검색이 src/clients/embedding.embed_texts()를 공유
 #   - 스키마: chunk_id TEXT PK / document_id / content / metadata JSONB / embedding vector(1024)
+#     / content_morph TEXT — content를 형태소 명사류로 사전토큰화한 sparse 검색용 사본.
+#     임베딩과 같은 규약으로 색인·검색이 tokenizer.morph_text()를 공유해 토큰 불일치를 구조적으로 막는다.
 #   - 인덱스: HNSW + vector_cosine_ops (코사인 거리 <=> 연산자와 정합)
+#     / content_morph에 GIN 표현식 인덱스 — sparse가 형태소 매칭으로 행을 실제 반환하게 되면서 순차 스캔 비용이 드러나므로 함께 건다
 #   - upsert: INSERT ... ON CONFLICT(chunk_id) DO UPDATE — 재실행 멱등성 보장
 #   - 부분 실패 정책: 배치 단위 부분 커밋. 실패 배치는 건너뛰고 계속 진행하며,
 #     upsert 멱등성 덕분에 전체 재실행으로 누락분을 복구할 수 있다.
@@ -21,6 +24,7 @@ from src.db.connection import get_pool
 from src.models.schemas import RetrievedChunk, IndexingResult, SkippedChunk
 from src.utils.config import BATCH_SIZE, EMBEDDING_DIM, EMBEDDING_MAX_TOKENS, SEARCH_TIMEOUT_SECONDS
 from src.clients.embedding import embed_texts, count_tokens
+from src.retrieval.tokenizer import morph_text
 from src.utils.exception import (
     AccountingRAGError,
     DatabaseQueryError,
@@ -42,6 +46,7 @@ def _ensure_collection(collection: str) -> None:
     """
     table = sql.Identifier(collection)
     index = sql.Identifier(f"{collection}_embedding_hnsw_idx")
+    morph_index = sql.Identifier(f"{collection}_content_morph_gin_idx")
     try:
         with get_pool().connection() as conn:
             with conn.cursor() as cur:
@@ -54,16 +59,30 @@ def _ensure_collection(collection: str) -> None:
                             document_id TEXT NOT NULL,
                             content TEXT NOT NULL,
                             metadata JSONB,
-                            embedding vector({dim}) NOT NULL
+                            embedding vector({dim}) NOT NULL,
+                            content_morph TEXT
                         )
                         """
                     ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
+                )
+                # 위 CREATE TABLE IF NOT EXISTS는 기존 테이블에 새 컬럼을 더해 주지 않으므로,컬럼 추가 이전에 만들어진 테이블을 위해 멱등 ALTER를 함께 실행한다.
+                # 값 채우기는 여기서 하지 않는다. 기존 행은 scripts/backfill_content_morph.py 담당.
+                cur.execute(
+                    sql.SQL("ALTER TABLE {table} ADD COLUMN IF NOT EXISTS content_morph TEXT").format(
+                        table=table
+                    )
                 )
                 cur.execute(
                     sql.SQL(
                         "CREATE INDEX IF NOT EXISTS {index} ON {table} "
                         "USING hnsw (embedding vector_cosine_ops)"
                     ).format(index=index, table=table)
+                )
+                cur.execute(
+                    sql.SQL(
+                        "CREATE INDEX IF NOT EXISTS {index} ON {table} "
+                        "USING GIN (to_tsvector('simple', content_morph))"
+                    ).format(index=morph_index, table=table)
                 )
     except Exception as e:
         logger.error(f"컬렉션 생성 실패: collection={collection}, {e}")
@@ -94,13 +113,14 @@ def _upsert_batch(collection: str, batch: list[RetrievedChunk], vectors: list[li
     """
     query = sql.SQL(
         """
-        INSERT INTO {table} (chunk_id, document_id, content, metadata, embedding)
-        VALUES (%s, %s, %s, %s, %s::vector)
+        INSERT INTO {table} (chunk_id, document_id, content, metadata, embedding, content_morph)
+        VALUES (%s, %s, %s, %s, %s::vector, %s)
         ON CONFLICT (chunk_id) DO UPDATE SET
             document_id = EXCLUDED.document_id,
             content = EXCLUDED.content,
             metadata = EXCLUDED.metadata,
-            embedding = EXCLUDED.embedding
+            embedding = EXCLUDED.embedding,
+            content_morph = EXCLUDED.content_morph
         """
     ).format(table=sql.Identifier(collection))
 
@@ -112,6 +132,9 @@ def _upsert_batch(collection: str, batch: list[RetrievedChunk], vectors: list[li
             # 명시 필드 중 None은 제외하고, extra="allow" 비정형 키(source 등)는 포함해 저장
             Jsonb(chunk.metadata.model_dump(exclude_none=True)),
             vector,
+            # sparse 검색용 형태소 사본 — 질의 쪽과 같은 함수로 만들어야 색인 토큰과 질의 토큰이 어긋나지 않는다.
+            # 여기서 안 채우면 이 청크는 sparse에 안 잡힌다.
+            morph_text(chunk.content),
         )
         for chunk, vector in zip(batch, vectors)
     ]
@@ -122,6 +145,51 @@ def _upsert_batch(collection: str, batch: list[RetrievedChunk], vectors: list[li
     except Exception as e:
         logger.error(f"배치 upsert 실패: collection={collection}, batch_size={len(batch)}, {e}")
         raise DatabaseQueryError(f"배치 upsert 실패: {e}", node="index")
+
+
+def _filter_token_limit_chunks(
+    batch: list[RetrievedChunk],
+) -> tuple[list[RetrievedChunk], list[SkippedChunk]]:
+    """IX-201: 토큰 한도 초과 청크는 잘린 벡터가 저장되지 않도록 사전에 걸러 스킵 목록으로 분리한다."""
+    valid_chunks = []
+    skipped = []
+    for chunk in batch:
+        token_count = count_tokens(chunk.content)
+        if token_count > EMBEDDING_MAX_TOKENS:
+            error = EmbeddingTokenLimitError(
+                f"청크 토큰 한도 초과로 스킵: chunk_id={chunk.chunk_id}, "
+                f"tokens={token_count} > {EMBEDDING_MAX_TOKENS}"
+            )
+            logger.warning(f"[{error.error_type}] {error.message}")
+            skipped.append(SkippedChunk(
+                chunk_id=chunk.chunk_id, error_type=error.error_type, reason=error.message
+            ))
+        else:
+            valid_chunks.append(chunk)
+    return valid_chunks, skipped
+
+
+def _index_single_batch(
+    collection: str,
+    valid_chunks: list[RetrievedChunk],
+    start: int,
+    batch_len: int,
+) -> tuple[int, list[SkippedChunk]]:
+    """단일 배치의 유효 청크들을 임베딩 및 upsert하고 성공 건수와 실패 누락 청크를 반환한다."""
+    if not valid_chunks:
+        return 0, []
+
+    try:
+        vectors = embed_texts([chunk.content for chunk in valid_chunks], node="index")
+        _upsert_batch(collection, valid_chunks, vectors)
+        return len(valid_chunks), []
+    except AccountingRAGError as e:
+        logger.error(f"[{e.error_type}] 배치 인덱싱 실패 (chunks[{start}:{start + batch_len}]): {e.message}")
+        skipped = [
+            SkippedChunk(chunk_id=c.chunk_id, error_type=e.error_type, reason=e.message)
+            for c in valid_chunks
+        ]
+        return 0, skipped
 
 
 def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingResult:
@@ -160,38 +228,15 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
     skipped: list[SkippedChunk] = []
     for start in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[start:start + BATCH_SIZE]
-        valid_chunks = []
         try:
-            # IX-201: 토큰 한도 초과 청크는 잘린 벡터가 저장되지 않도록 사전에 걸러 스킵한다
-            for chunk in batch:
-                token_count = count_tokens(chunk.content)
-                if token_count > EMBEDDING_MAX_TOKENS:
-                    error = EmbeddingTokenLimitError(
-                        f"청크 토큰 한도 초과로 스킵: chunk_id={chunk.chunk_id}, "
-                        f"tokens={token_count} > {EMBEDDING_MAX_TOKENS}"
-                    )
-                    logger.warning(f"[{error.error_type}] {error.message}")
-                    skipped.append(SkippedChunk(
-                        chunk_id=chunk.chunk_id, error_type=error.error_type, reason=error.message
-                    ))
-                else:
-                    valid_chunks.append(chunk)
+            valid_chunks, token_skipped = _filter_token_limit_chunks(batch)
+            skipped.extend(token_skipped)
 
-            if not valid_chunks:
-                continue
-
-            vectors = embed_texts([chunk.content for chunk in valid_chunks], node="index")
-            _upsert_batch(collection, valid_chunks, vectors)
-            success_count += len(valid_chunks)
-        except AccountingRAGError as e:
-            # CM-002(임베딩)·SE-102(DB) 등 배치 단위 실패 — 부분 커밋 정책에 따라 다음 배치 계속
-            logger.error(f"[{e.error_type}] 배치 인덱싱 실패 (chunks[{start}:{start + len(batch)}]): {e.message}")
-            # 해당 배치의 valid_chunks(IX-201로 이미 걸러진 청크 제외)를 누락으로 기록
-            skipped.extend(
-                SkippedChunk(chunk_id=c.chunk_id, error_type=e.error_type, reason=e.message)
-                for c in valid_chunks
+            batch_success, batch_skipped = _index_single_batch(
+                collection, valid_chunks, start, len(batch)
             )
-            continue
+            success_count += batch_success
+            skipped.extend(batch_skipped)
         finally:
             # 배치마다 해제 힙을 OS에 반환해 누적 RSS 증가를 완화한다
             _release_heap()

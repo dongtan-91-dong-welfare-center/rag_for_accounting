@@ -1,5 +1,6 @@
 # FUNC-009: LangGraph StateGraph 파이프라인 정의
 
+import threading
 import uuid
 from datetime import datetime
 from functools import wraps, partial
@@ -9,14 +10,15 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.types import interrupt, Command
+from src.db.connection import get_checkpointer_pool
 from src.agent.nodes.generate import generate_response as generate
 from src.agent.nodes.evaluate import evaluate_context as evaluate
 from src.retrieval.searcher import search_chunks as _search_impl
 from src.retrieval.reranker import rerank_chunks as _rerank_impl
 from src.utils import config
-from src.utils.config import MAX_REWRITE_COUNT, MAX_HIL_COUNT, KST, TOP_K_RETRIEVAL
+from src.utils.config import MAX_REWRITE_COUNT, MAX_HIL_COUNT, KST, TOP_K_RETRIEVAL, GRAPH_STEP_TIMEOUT_SECONDS
 from src.utils.exception import (
     AccountingRAGError,
     RerankFailureError,
@@ -27,7 +29,8 @@ from src.utils.exception import (
     LLMAPIConnectionError,
 )
 from src.utils.logger import get_logger
-from src.models.state import GraphState, ErrorLog
+from src.utils.tracing import init_tracing
+from src.models.state import GraphState, ErrorLog, cap_error_logs
 from src.models.schemas import (
     RetrievedChunk, FinalResponse, RerankingResult
 )
@@ -79,7 +82,7 @@ def rewrite(state: GraphState) -> dict:
     # 실제 모듈을 통해 상태 변화 수행 (in-place mutation)
     # updated_state는 사실상 state와 동일한 객체입니다.
     updated_state = _rewrite_impl(state)
-    
+
     # TODO: _rewrite_impl과 handle_node_errors 간의 이중 예외 처리 중복 해결 필요
     return {
         "rewrite_count": updated_state.rewrite_count,
@@ -102,9 +105,20 @@ def early_exit(state: GraphState) -> dict:
     confidence_score에는 rewrite 노드가 기록한 LLM 분류 신뢰도를 그대로 전달하여,
     운영 단계에서 분류 경계가 모호한 케이스를 추출·분석할 수 있도록 한다.
     """
+    # query_scope에 따라 안내 메시지를 달리하여 사용자가 왜 답을 얻을 수 없는지 구분하여 전달한다.
+    # - out_of_scope_adjacent: 회계·세무 인접이지만 K-GAAP 조항 검색 범위 밖임을 안내
+    # - completely_unrelated(기본): 회계와 무관한 질의임을 안내
+    if state.query_scope == "out_of_scope_adjacent":
+        answer = (
+            "죄송합니다. 해당 질문은 회계와 인접한 분야(세무 신고, 특정 기업 감사 의견 등)이지만 "
+            "본 시스템의 검색 범위(K-GAAP 조항)를 벗어납니다. "
+            "관련 전문가나 세무사·공인회계사에게 문의해 주세요."
+        )
+    else:
+        answer = "죄송합니다. 회계 관련 질문을 해 주세요."
     return {
         "final_response": FinalResponse(
-            answer="죄송합니다. 회계 관련 질문을 해 주세요.",
+            answer=answer,
             citations=[],
             is_answerable=False,
             confidence_score=state.classification_confidence,
@@ -207,11 +221,18 @@ def search(state: GraphState) -> dict:
     if state.standard_filter != "ALL":
         metadata_filter = {"standard_type": state.standard_filter}
 
+    # hyde 전략의 두 번째 쿼리는 LLM이 지어낸 가상 답변이라,
+    # 비도메인 명사류가 Sparse의 ts_rank_cd 점수를 노이즈로 오염시킨다.
+    # Dense에는 그대로 넣되 Sparse에서만 제외한다.
+    # 원문(0번) 및 decompose·stepback의 서브쿼리는 실제 질의이므로 그대로 둔다.
+    is_hyde = state.rewritten_query is not None and state.rewritten_query.strategy == "hyde"
+
     try:
         # 복수 쿼리에 대해 검색 후 병합·중복 제거
         all_chunks: dict[str, RetrievedChunk] = {}
-        for q in search_queries:
-            results = _search_impl(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter)
+        for idx, q in enumerate(search_queries):
+            include_sparse = not (is_hyde and idx == 1)
+            results = _search_impl(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter, include_sparse=include_sparse)
             for chunk in results:
                 if chunk.chunk_id not in all_chunks or chunk.score > all_chunks[chunk.chunk_id].score:
                     all_chunks[chunk.chunk_id] = chunk
@@ -347,7 +368,7 @@ def route_after_evaluate(state: GraphState) -> str:
     무시된 채 잘못된 답변 생성으로 직행하는 버그가 발생한다.
     """
     # TODO: evaluation이 None일 경우의 예외 처리에 대해 재검토 요망.
-    # 현재 단계에서는 유닛 테스트와의 충돌 방지 및 파이프라인의 안전한 종료를 위해 
+    # 현재 단계에서는 유닛 테스트와의 충돌 방지 및 파이프라인의 안전한 종료를 위해
     # ValueError 발생 대신 generate로 안전하게 우회하도록 유지합니다.
 
     # 1순위: 어느 노드에서든 재검색이 확정된 상태라면, 다른 안전장치보다 먼저 rewrite를 고려한다.
@@ -387,7 +408,7 @@ def build_workflow(checkpointer: BaseCheckpointSaver | None = None) -> CompiledS
         None이면 체크포인트 없이 컴파일되며 interrupt()를 호출할 수 없다(단순 단방향 실행 전용).
         이때 human_review 노드는 HIL 비활성화(hil_enabled=False)로 바인딩되어 decompose/stepback
         질의도 interrupt 없이 search로 통과한다.
-        HIL을 사용하는 run_workflow/resume_workflow는 MemorySaver 싱글턴(_CHECKPOINTER)을 주입한다.
+        HIL을 사용하는 run_workflow/resume_workflow는 PostgresSaver 싱글턴(_get_checkpointer())을 주입한다.
 
     return CompiledStateGraph : LangGraph로 빌드된 상태 그래프
     왜 CompiledGraph를 사용하는가? -> 성능 때문이 아니라 필수 절차이기 때문이다. StateGraph 자체에는
@@ -452,11 +473,30 @@ def build_workflow(checkpointer: BaseCheckpointSaver | None = None) -> CompiledS
     return workflow.compile(checkpointer=checkpointer)
 
 
-# HIL(interrupt/resume) 상태를 run_workflow와 resume_workflow 호출 간 공유하기 위한 인메모리 체크포인터 싱글턴
-# MemorySaver는 체크포인트를 자신의 내부 저장소에 thread_id로 보관하므로
-# 매 호출마다 build_workflow로 그래프를 새로 컴파일하더라도 동일 인스턴스를 주입하면 중단된 세션을 정상적으로 재개할 수 있다.
-# !TODO: 실서비스 전환 시 AsyncPostgresSaver로 교체 (checkpointer 인터페이스 통일됨)
-_CHECKPOINTER: BaseCheckpointSaver = MemorySaver()
+# HIL(interrupt/resume) 상태를 run_workflow와 resume_workflow 호출 간, 그리고 서버 재시작·다중 워커
+# 사이에도 공유하기 위한 PostgreSQL 기반 체크포인터 싱글턴(#209). 기존 MemorySaver는 프로세스
+# 로컬 메모리에만 상태를 둬 서버가 여러 대이거나 재시작되면 진행 중인 HIL 세션을 잃어버렸다.
+_checkpointer: BaseCheckpointSaver | None = None
+_checkpointer_lock = threading.Lock()
+
+
+def _get_checkpointer() -> BaseCheckpointSaver:
+    """HIL 체크포인터를 지연 초기화하여 반환한다.
+
+    PostgresSaver는 get_checkpointer_pool()의 전용 커넥션 풀을 쓴다. 모듈 임포트 시점에
+    즉시 생성하면 init_pool() 계열보다 먼저 workflow 모듈을 임포트하는 모든 경로(단위
+    테스트 포함)가 깨지므로, 최초 사용 시점까지 생성을 미룬다. setup()은 checkpoints
+    테이블이 없으면 생성하는 멱등 DDL이라 매 프로세스 기동 시 1회 호출해도 안전하다
+    (ensure_interaction_log_table()과 동일한 패턴).
+    """
+    global _checkpointer
+    if _checkpointer is None:
+        with _checkpointer_lock:
+            if _checkpointer is None:
+                saver = PostgresSaver(get_checkpointer_pool())
+                saver.setup()
+                _checkpointer = saver
+    return _checkpointer
 
 
 def _run_config(thread_id: str, metadata: dict[str, Any] | None = None) -> RunnableConfig:
@@ -520,7 +560,7 @@ def thread_exists(thread_id: str) -> bool:
     resume_workflow는 미존재 thread_id에 대한 동작이 정의돼 있지 않으므로(체크포인트 없이
     Command(resume=...) 주입), API 계층(#195)이 재개 전에 이 함수로 404를 판정한다.
     """
-    return _CHECKPOINTER.get(_run_config(thread_id)) is not None
+    return _get_checkpointer().get(_run_config(thread_id)) is not None
 
 
 def run_workflow(
@@ -532,19 +572,20 @@ def run_workflow(
     """
     외부에서 워크플로우를 실행하기 위한 진입점 함수.
 
-    HIL을 지원하기 위해 MemorySaver 체크포인터를 주입하고 thread_id로 세션을 식별한다.
+    HIL을 지원하기 위해 PostgresSaver 체크포인터를 주입하고 thread_id로 세션을 식별한다.
     thread_id가 주어지지 않으면 새 UUID를 발급한다. 반환 dict에는 항상 thread_id가 포함되어,
     워크플로우가 human_review에서 중단(`__interrupt__` 키 존재)된 경우 클라이언트가 이 값을
     resume_workflow에 전달하여 재개할 수 있다.
 
     metadata는 LangSmith 트레이스에 부착할 케이스 식별 정보(예: {"case_id", "gold"})로,
-    _run_config를 통해 RunnableConfig.metadata로 전달된다. 
+    _run_config를 통해 RunnableConfig.metadata로 전달된다.
     트레이싱 비활성 시 무시된다.
     """
-    app = build_workflow(checkpointer=_CHECKPOINTER)
+    init_tracing()
+    app = build_workflow(checkpointer=_get_checkpointer())
 
-    # 노드별 30초 타임아웃 설정 (LangGraph CompiledStateGraph 속성)
-    app.step_timeout = 30
+    # 노드별 타임아웃 설정 (LangGraph CompiledStateGraph 속성)
+    app.step_timeout = GRAPH_STEP_TIMEOUT_SECONDS
 
     if thread_id is None:
         thread_id = str(uuid.uuid4())
@@ -556,11 +597,16 @@ def run_workflow(
         # human_review에서 interrupt가 발생하면 반환 dict에 "__interrupt__" 키가 포함됩니다.
         result = app.invoke(initial_state, config=_run_config(thread_id, metadata))
         result["thread_id"] = thread_id
+        # field_validator는 그래프 마지막 노드 출력이 그대로 invoke()의 반환값이 되는 경로에서는
+        # 재검증되지 않으므로, 최종 반환 직전에 명시적으로 상한을 다시 적용한다.
+        if "error_logs" in result:
+            result["error_logs"] = cap_error_logs(result["error_logs"])
         return result
     except GraphRecursionError as e:
         # 재시도 소진 — TIMEOUT 폴백과 대칭으로 폴백 GraphState + error_logs를 반환한다.
         initial_state.final_response = _recursion_fallback_response()
-        initial_state.error_logs = initial_state.error_logs + [_recursion_error_log(e)]
+        # 속성 재할당은 field_validator를 재실행하지 않으므로 cap_error_logs를 직접 적용한다.
+        initial_state.error_logs = cap_error_logs(initial_state.error_logs + [_recursion_error_log(e)])
         # invoke() 결과와 동일한 직렬화 구조 유지를 위해, model_dump() 대신
         # Pydantic 인스턴스를 값으로 유지하는 dict comprehension 방식을 사용한다.
         fallback = {k: getattr(initial_state, k) for k in GraphState.model_fields}
@@ -570,7 +616,7 @@ def run_workflow(
         # 노드 실행이 step_timeout을 초과 — 구조화 반환 계약에 따라
         # GraphRecursionError와 동일하게 폴백 GraphState + error_logs를 반환한다.
         initial_state.final_response = _timeout_fallback_response()
-        initial_state.error_logs = initial_state.error_logs + [_timeout_error_log(e)]
+        initial_state.error_logs = cap_error_logs(initial_state.error_logs + [_timeout_error_log(e)])
         fallback = {k: getattr(initial_state, k) for k in GraphState.model_fields}
         fallback["thread_id"] = thread_id
         return fallback
@@ -593,19 +639,24 @@ def resume_workflow(
     metadata는 run_workflow와 동일한 케이스 식별 정보를 재개 실행 트레이스에도 부착하기 위한 것으로,
     호출자가 run_workflow에 넘긴 값을 그대로 전달하면 한 케이스의 run/resume 트레이스가 동일 메타데이터를 공유한다.
     """
-    app = build_workflow(checkpointer=_CHECKPOINTER)
-    app.step_timeout = 30
+    init_tracing()
+    app = build_workflow(checkpointer=_get_checkpointer())
+    app.step_timeout = GRAPH_STEP_TIMEOUT_SECONDS
 
     try:
         result = app.invoke(Command(resume=resume_value), config=_run_config(thread_id, metadata))
         result["thread_id"] = thread_id
+        # field_validator는 그래프 마지막 노드 출력이 그대로 invoke()의 반환값이 되는 경로에서는
+        # 재검증되지 않으므로, 최종 반환 직전에 명시적으로 상한을 다시 적용한다.
+        if "error_logs" in result:
+            result["error_logs"] = cap_error_logs(result["error_logs"])
         return result
     except GraphRecursionError as e:
         # 재개 시점에는 initial_state가 없으므로 체크포인트에 보관된 현재 상태를 복원해 폴백을 구성한다.
         snapshot = app.get_state(_run_config(thread_id))
         fallback = dict(snapshot.values)
         fallback["final_response"] = _recursion_fallback_response()
-        fallback["error_logs"] = list(fallback.get("error_logs", [])) + [_recursion_error_log(e)]
+        fallback["error_logs"] = cap_error_logs(list(fallback.get("error_logs", [])) + [_recursion_error_log(e)])
         fallback["thread_id"] = thread_id
         return fallback
     except TimeoutError as e:
@@ -613,6 +664,6 @@ def resume_workflow(
         snapshot = app.get_state(_run_config(thread_id))
         fallback = dict(snapshot.values)
         fallback["final_response"] = _timeout_fallback_response()
-        fallback["error_logs"] = list(fallback.get("error_logs", [])) + [_timeout_error_log(e)]
+        fallback["error_logs"] = cap_error_logs(list(fallback.get("error_logs", [])) + [_timeout_error_log(e)])
         fallback["thread_id"] = thread_id
         return fallback

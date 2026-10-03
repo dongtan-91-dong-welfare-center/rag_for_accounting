@@ -79,19 +79,50 @@ class TestDoneResponse:
         assert res.error_code is None
 
     def test_clauses_follow_build_clause_rows_contract(self):
-        """clauses[]는 build_clause_rows 재사용 — 1-based rank·chunk.score 노출"""
+        """clauses[]는 build_clause_rows 재사용 — 1-based rank·chunk.score 노출 및 is_cited 인용 교차표시"""
         res = to_api_response(_done_result())
         assert [c.rank for c in res.clauses] == [1, 2]
         assert res.clauses[0].score == 0.9
         assert res.clauses[0].chapter == "6"
         assert res.clauses[0].node_id == "gaap-ch6-s1"
         assert res.clauses[0].content == "조항 본문"
+        assert res.clauses[0].is_cited is False
 
     def test_citations_are_mapped(self):
         res = to_api_response(_done_result())
         assert len(res.citations) == 1
         c = res.citations[0]
         assert (c.document_id, c.chunk_id, c.relevance_score) == ("gaap-ch7", "c1", 0.83)
+
+    def test_clause_and_citation_paras_exposed(self):
+        """
+        clauses[]·citations[] 모두 문단번호 목록(paras)을 노출한다.
+
+        화면의 두 목록(검색된 조항·답변 인용)이 같은 조항을 다른 모양으로 보여주지 않도록, 번호 추출은 서버 공용 규칙 한 곳에서 하고 프론트는 소비만 한다.
+        """
+        result = _done_result(
+            reranked_chunks=[
+                _rr("gaap-ch6-s1-최초인식", 0.9, content="#### 6.13\n...\n#### 6.14\n..."),
+                _rr("gaap-ch2-실2.11", 0.8, content="차익, 차손 등은 총액으로..."),
+            ],
+            final_response=FinalResponse(
+                answer="…",
+                citations=[
+                    Citation(
+                        document_id="gaap-ch2",
+                        chunk_id="gaap-ch2-실2.11",
+                        content="차익, 차손 등은 총액으로...",
+                        relevance_score=0.8,
+                    )
+                ],
+                is_answerable=True,
+                confidence_score=0.9,
+            ),
+        )
+        res = to_api_response(result)
+        assert res.clauses[0].paras == ["6.13", "6.14"]
+        assert res.clauses[1].paras == ["실2.11"]
+        assert res.citations[0].paras == ["실2.11"]
 
     def test_empty_reranked_chunks_yield_empty_clauses(self):
         """폴백·조기종료 결과처럼 reranked_chunks가 비어도 안전하게 빈 리스트"""
@@ -172,6 +203,21 @@ class TestErrorCode:
         node_error = {**TIMEOUT_LOG, "node": "search", "error_type": "CM-002"}
         res = to_api_response(_done_result(error_logs=[node_error]))
         assert res.error_code is None
+
+    def test_non_accounting_sets_error_code(self):
+        """is_accounting_query=False인 경우 error_code="NON_ACCOUNTING"으로 파생한다."""
+        result = _done_result(
+            is_accounting_query=False,
+            final_response=FinalResponse(
+                answer="죄송합니다. 회계 관련 질문을 해 주세요.",
+                citations=[],
+                is_answerable=False,
+                confidence_score=0.95,
+            ),
+        )
+        res = to_api_response(result)
+        assert res.error_code == "NON_ACCOUNTING"
+        assert res.is_answerable is False
 
 
 class TestInterruptedResponse:
