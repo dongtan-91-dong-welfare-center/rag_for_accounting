@@ -28,7 +28,8 @@ import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
-from src.api.schemas import QueryDoneResponse, WorkflowResponse, to_api_response
+from src.api.schemas import FeedbackResponse, QueryDoneResponse, WorkflowResponse, to_api_response
+from src.db.answer_feedback import ensure_answer_feedback_table, save_feedback
 from src.db.connection import close_pool, get_pool, init_pool
 from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.ingest.parse.page_map import resolve_pdf_path
@@ -65,6 +66,7 @@ def _warmup_embedding() -> None:
 async def lifespan(app: FastAPI):
     init_pool()
     ensure_interaction_log_table()
+    ensure_answer_feedback_table()
     _warmup_embedding()
     yield
     close_pool()
@@ -144,6 +146,22 @@ class ResumeRequest(BaseModel):
     thread_id: str
     action: Literal["approve", "rewrite"]
     feedback: str | None = None
+
+
+class FeedbackRequest(BaseModel):
+    """답변 평가 요청(#300) — thread_id는 /query 응답의 것을 그대로 돌려보낸다."""
+
+    thread_id: str = Field(min_length=1)
+    rating: Literal["up", "down"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _strip_reason(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
 
 
 @app.get("/health")
@@ -226,6 +244,17 @@ def resume(req: ResumeRequest) -> WorkflowResponse:
         elapsed_ms=round((time.perf_counter() - start) * 1000),
     )
     return response
+
+
+@app.post("/feedback", response_model=FeedbackResponse)
+def feedback(req: FeedbackRequest) -> FeedbackResponse:
+    """답변 평가 저장 — 저장 실패는 사용자가 알 수 있도록 503으로 알린다."""
+    try:
+        save_feedback(thread_id=req.thread_id, rating=req.rating, reason=req.reason)
+    except Exception as e:  # noqa: BLE001 — DB 오류 종류와 무관하게 503으로 변환
+        logger.error(f"answer_feedback 저장 실패: thread_id={req.thread_id}, {e}")
+        raise HTTPException(status_code=503, detail="feedback not saved") from e
+    return FeedbackResponse()
 
 
 @app.get("/documents/{document_id}/pdf")
