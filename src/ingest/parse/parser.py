@@ -32,6 +32,25 @@ if TYPE_CHECKING:
     from docling.document_converter import DocumentConverter
 
 
+def export_markdown_with_page_markers(doc) -> str:
+    """문서를 쪽 단위로 마크다운 변환하고, 각 쪽 앞에 `<!-- page N -->` 마커 줄을 붙여 이어붙인다. (#297)
+
+    근거: 전체 export는 쪽 정보를 잃으므로, 이후 단계(조항 분할·청킹)가 쪽 번호를 알 수 있도록
+    Docling이 아는 쪽 귀속(prov.page_no)을 변환 시점에 마커로 남긴다.
+    마커는 "이 줄부터 N쪽 내용"을 뜻하며, 청킹 단계에서 content에서 제거되어 임베딩 입력에는 섞이지 않는다.
+    쪽 정보가 없는 문서는 기존 전체 export 결과를 그대로 반환한다.
+    """
+    pages = sorted(getattr(doc, "pages", None) or {})
+    if not pages:
+        return html.unescape(doc.export_to_markdown())
+    parts = []
+    for page_no in pages:
+        body = html.unescape(doc.export_to_markdown(page_no=page_no))
+        if body.strip():
+            parts.append(f"<!-- page {page_no} -->\n{body}")
+    return "\n\n".join(parts)
+
+
 class DoclingParser:
     """
     PDF 파일을 마크다운 텍스트로 변환하는 파서(Parser) 클래스.
@@ -148,7 +167,7 @@ class DoclingParser:
         # html.unescape()는 HTML 엔티티를 원래 문자로 되돌립니다.
         #   예: "&amp;" → "&",  "&lt;" → "<",  "&#x27;" → "'"
         # Docling이 내부적으로 HTML 인코딩을 사용하는 경우가 있어서 이 처리가 필요합니다.
-        markdown_text = html.unescape(doc.export_to_markdown())
+        markdown_text = export_markdown_with_page_markers(doc)
 
         # ── 4단계: 표(Table) 추출 + 페이지 걸침 테이블 병합 ──
         # doc.tables에서 표를 추출하되, 연속 페이지에 걸쳐 나뉜 테이블을 병합합니다.

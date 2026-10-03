@@ -20,6 +20,7 @@
         source_path(파서 메타데이터)는 ChunkMetadata의 extra 필드로 싣는다.
 """
 import re
+from bisect import bisect_right
 from collections.abc import Callable
 
 from src.ingest.ontology.models import OntologyGraph
@@ -40,6 +41,62 @@ _SENTENCE_RE = re.compile(r"(?<=[.。!?！？])\s+")
 # H5까지 경계로 넓히면 다음 재적재부터 청크 구성이 달라져 검색 회귀 검증과 벤치마크 플로어
 # 재시드가 필요해진다. 경계 확장은 별도 이슈에서 A/B 실측으로 판단한다.
 _CLAUSE_HEADER_RE = clause_header_re(levels=(4, 4), prefixes=())
+
+# 파서가 쪽마다 붙이는 마커 줄. "이 줄부터 N쪽 내용"을 뜻한다(#297).
+_PAGE_MARKER_LINE_RE = re.compile(r"^[ \t]*<!--\s*page\s+(\d+)\s*-->[ \t]*$")
+# 조각 위치를 원문에서 되찾을 때 쓰는 머리·꼬리 길이.
+_LOCATE_LEN = 30
+
+
+def _strip_page_markers(content: str) -> tuple[str, list[tuple[int, int]]]:
+    """content에서 쪽 마커 줄을 제거하고, (제거 후 문자 오프셋, 쪽 번호) 목록을 함께 돌려준다.
+
+    근거: 마커를 제거한 텍스트가 마커 도입 전 적재본의 content와 같아야 재적재 시 content·embedding 불변식이 유지된다.
+    """
+    kept: list[str] = []
+    markers: list[tuple[int, int]] = []
+    offset = 0
+    for line in content.split("\n"):
+        m = _PAGE_MARKER_LINE_RE.match(line)
+        if m:
+            markers.append((offset, int(m.group(1))))
+            continue
+        kept.append(line)
+        offset += len(line) + 1
+    clean = "\n".join(kept)
+    lead = len(clean) - len(clean.lstrip())
+    markers = [(max(0, off - lead), page) for off, page in markers]
+    return clean.strip(), markers
+
+
+def _page_range(
+    pieces: list[str], clean: str, markers: list[tuple[int, int]], start_page: int | None
+) -> list[tuple[int, int] | None]:
+    """분할된 조각마다 (page_start, page_end)를 구한다. 쪽 정보가 전혀 없으면 None.
+
+    조각은 clean의 앞에서부터 순서대로 나온 부분 문자열이므로, 머리·꼬리를 커서 뒤에서 찾아 오프셋을 복원한다.
+    찾지 못하면 직전 위치를 그대로 쓰는 보수적 폴백이다(쪽은 단조 증가이므로 범위가 역전되지 않는다).
+    """
+    if start_page is None and not markers:
+        return [None] * len(pieces)
+    offsets = [off for off, _ in markers]
+
+    def page_at(pos: int) -> int | None:
+        i = bisect_right(offsets, pos)
+        return markers[i - 1][1] if i else start_page
+
+    ranges: list[tuple[int, int] | None] = []
+    cursor = 0
+    for piece in pieces:
+        head = clean.find(piece[:_LOCATE_LEN], cursor)
+        begin = head if head >= 0 else cursor
+        tail_text = piece[-_LOCATE_LEN:]
+        tail = clean.find(tail_text, begin)
+        end = tail + len(tail_text) - 1 if tail >= 0 else begin + len(piece) - 1
+        first, last = page_at(begin), page_at(end)
+        ranges.append((first, last) if first is not None and last is not None else None)
+        cursor = max(cursor, end + 1)
+    return ranges
 
 
 def _greedy_pack(units: list[str], sep: str, max_tokens: int, count: Callable[[str], int]) -> list[str]:
@@ -164,7 +221,8 @@ def chunk_graph(
     :raises OntologyParsingError: content 노드가 있는데 document_id를 결정할 수 없을 때 (OT-103)
     """
     # content를 가진 노드만 청크화 대상. (Standard·직속 본문 없는 Section은 제외)
-    content_nodes = [n for n in graph.nodes if (n.content or "").strip()]
+    # 쪽 마커만 있는 노드는 본문이 없으므로 제외한다.
+    content_nodes = [n for n in graph.nodes if _strip_page_markers(n.content or "")[0]]
     if not content_nodes:
         # 빈 문서·구조만 있는 그래프 → 적재할 청크 없음. 정상적으로 빈 리스트 반환.
         logger.info("청킹 대상 노드 없음 — 빈 청크 리스트 반환")
@@ -186,7 +244,7 @@ def chunk_graph(
 
     chunks: list[RetrievedChunk] = []
     for node in content_nodes:
-        text = node.content.strip()
+        text, markers = _strip_page_markers(node.content)
         if clause_level:
             # 조항 경계로 1차 분할한 뒤, 각 조각에 토큰 상한 2차 분할(거대 clause-less 노드 안전망).
             pieces = [
@@ -197,7 +255,8 @@ def chunk_graph(
         else:
             pieces = _split_content(text, max_tokens, token_counter)
         is_single = len(pieces) == 1
-        for seq, piece in enumerate(pieces):
+        page_ranges = _page_range(pieces, text, markers, node.start_page)
+        for seq, (piece, pages) in enumerate(zip(pieces, page_ranges)):
             # 분할되지 않은 노드는 chunk_id == node.id (노드 ↔ 청크 1:1).
             # 분할된 노드는 동일 node.id에 순번을 붙여 멱등성과 매핑을 동시에 만족한다.
             chunk_id = node.id if is_single else f"{node.id}-{seq}"
@@ -209,6 +268,9 @@ def chunk_graph(
             }
             if source_path:
                 metadata_kwargs["source_path"] = source_path  # extra="allow" 비정형 필드
+            if pages:
+                # backfill_page_map과 동일한 키. 파싱 시점 마커에서 직접 얻은 정확한 값이다(#297).
+                metadata_kwargs["page_start"], metadata_kwargs["page_end"] = pages
             chunks.append(
                 RetrievedChunk(
                     chunk_id=chunk_id,
