@@ -11,7 +11,7 @@ Phase 2: 조항정확도 벤치마크 — 비회귀 플로어
   - 비교는 rate가 아닌 hit 카운트 + 허용밴드: hits >= floor - tolerance.
   - 코퍼스(적재 장 집합/청크 수)가 floor 파일의 baseline과 불일치하면 단언을 skip한다
     (데이터 상태 차이는 코드 회귀가 아니므로). 코퍼스 재적재 시 benchmark_floor.json을 재시드할 것.
-  - NFR-002 90% 목표는 리포트에 갭으로 표기하되 하드게이트로 쓰지 않는다.
+  - NFR-002 90% 목표는 리포트에 갭으로 표기하되 실패 차단 기준으로 사용하지 않습니다.
 
 라이브(DB+OPENAI) 부재 시 tests/integration/conftest.py 의 autouse 픽스처가 세션 skip 한다.
 """

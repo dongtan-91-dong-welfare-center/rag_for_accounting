@@ -39,7 +39,7 @@ from src.utils.clause_paras import (
 from src.utils.config import KST, TARGET_LATENCY_TOTAL_SEC
 from tests.utils.benchmark_loader import BenchmarkCase
 
-# NFR-002 정확도 목표(리포트 갭 표기용, 하드게이트 아님)
+# NFR-002 정확도 목표
 NFR_002_TARGET = 0.90
 
 # 검색 통과 기준: 핵심 조항이 검색 Top-N 안에 있으면 통과
