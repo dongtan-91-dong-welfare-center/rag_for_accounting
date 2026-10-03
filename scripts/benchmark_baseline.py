@@ -12,6 +12,7 @@ NFR-002 벤치마크 정확도 베이스라인 측정 하니스 (CLI)
   uv run python scripts/benchmark_baseline.py --all-cases      # 미적재 장 포함 강제
   uv run python scripts/benchmark_baseline.py --case TEST-K-GAAP-002
   uv run python scripts/benchmark_baseline.py --k 5            # Hit@k 의 k (기본 10)
+  uv run python scripts/benchmark_baseline.py --limit 5        # 처음 5개 케이스만 표본 실행
 """
 from __future__ import annotations
 
@@ -139,6 +140,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=None, help="측정할 최대 케이스 수 (표본/스모크 검증용)")
     args = parser.parse_args(argv)
 
+    if args.limit is not None and args.limit <= 0:
+        print(f"[중단] --limit 옵션 값은 1 이상의 양의 정수여야 합니다: {args.limit}")
+        return 2
+
     if args.judge_content:
         os.environ["CONTENT_JUDGE"] = "1"
 
@@ -163,7 +168,8 @@ def main(argv: list[str] | None = None) -> int:
             if not cases:
                 print(f"[중단] 케이스를 찾지 못함: {args.case}")
                 return 2
-        elif args.limit:
+        elif args.limit is not None:
+            # 전체 114건을 모두 실행하지 않고, 초기 N개 표본 케이스만 추출하여 빠른 스모크 테스트 및 파이프라인 검증을 수행합니다.
             cases = cases[:args.limit]
 
         out_dir = Path(args.out_dir)
