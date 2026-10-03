@@ -79,13 +79,14 @@ class TestDoneResponse:
         assert res.error_code is None
 
     def test_clauses_follow_build_clause_rows_contract(self):
-        """clauses[]는 build_clause_rows 재사용 — 1-based rank·chunk.score 노출"""
+        """clauses[]는 build_clause_rows 재사용 — 1-based rank·chunk.score 노출 및 is_cited 인용 교차표시"""
         res = to_api_response(_done_result())
         assert [c.rank for c in res.clauses] == [1, 2]
         assert res.clauses[0].score == 0.9
         assert res.clauses[0].chapter == "6"
         assert res.clauses[0].node_id == "gaap-ch6-s1"
         assert res.clauses[0].content == "조항 본문"
+        assert res.clauses[0].is_cited is False
 
     def test_citations_are_mapped(self):
         res = to_api_response(_done_result())
@@ -202,6 +203,21 @@ class TestErrorCode:
         node_error = {**TIMEOUT_LOG, "node": "search", "error_type": "CM-002"}
         res = to_api_response(_done_result(error_logs=[node_error]))
         assert res.error_code is None
+
+    def test_non_accounting_sets_error_code(self):
+        """is_accounting_query=False인 경우 error_code="NON_ACCOUNTING"으로 파생한다."""
+        result = _done_result(
+            is_accounting_query=False,
+            final_response=FinalResponse(
+                answer="죄송합니다. 회계 관련 질문을 해 주세요.",
+                citations=[],
+                is_answerable=False,
+                confidence_score=0.95,
+            ),
+        )
+        res = to_api_response(result)
+        assert res.error_code == "NON_ACCOUNTING"
+        assert res.is_answerable is False
 
 
 class TestInterruptedResponse:

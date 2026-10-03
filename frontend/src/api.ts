@@ -17,6 +17,8 @@ export interface ClauseOut {
   page_end: number | null;
   /** 문단번호 칩 — 서버 공용 규칙 추출·원형 보존(가지번호 유지). 번호가 없는 청크는 빈 배열. */
   paras: string[];
+  /** 답변 인용 여부(✓/◌ 교차표시). */
+  is_cited: boolean;
 }
 
 export interface CitationOut {
@@ -50,8 +52,8 @@ export interface QueryDoneResponse {
   answer: string;
   is_answerable: boolean;
   confidence: number;
-  /** 서버가 error_logs에서 파생한 폴백 구분자 — TIMEOUT·RECURSION_LIMIT 모두 재시도로 회복 가능. */
-  error_code: "TIMEOUT" | "RECURSION_LIMIT" | null;
+  /** 서버가 error_logs 또는 비회계 판단에서 파생한 구분자 — TIMEOUT·RECURSION_LIMIT·NON_ACCOUNTING. */
+  error_code: "TIMEOUT" | "RECURSION_LIMIT" | "NON_ACCOUNTING" | null;
   clauses: ClauseOut[];
   citations: CitationOut[];
 }

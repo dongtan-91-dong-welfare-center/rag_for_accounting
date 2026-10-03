@@ -34,6 +34,7 @@ class ClauseOut(BaseModel):
     page_start: int | None = None  # 원본 PDF 페이지 범위(#196) — 미백필/미매칭이면 None(뷰어 버튼 미표시)
     page_end: int | None = None
     paras: list[str] = []          # 문단번호 칩(#260) — 공용 규칙(clause_paras) 추출, 원형 보존
+    is_cited: bool = False         # 답변 인용 여부(✓/◌ 교차표시)
 
 
 class CitationOut(BaseModel):
@@ -68,14 +69,14 @@ class InterruptInfo(BaseModel):
 
 
 class QueryDoneResponse(BaseModel):
-    """워크플로 완료 응답. 폴백(타임아웃·recursion)도 이 형태다(200, is_answerable=false)."""
+    """워크플로 완료 응답. 폴백(타임아웃·recursion) 및 비회계 조기종료도 이 형태다(200, is_answerable=false)."""
 
     status: Literal["done"] = "done"
     thread_id: str
     answer: str
     is_answerable: bool
     confidence: float
-    error_code: Literal["TIMEOUT", "RECURSION_LIMIT"] | None = None
+    error_code: Literal["TIMEOUT", "RECURSION_LIMIT", "NON_ACCOUNTING"] | None = None
     clauses: list[ClauseOut]
     citations: list[CitationOut]
 
@@ -91,13 +92,19 @@ class QueryInterruptedResponse(BaseModel):
 WorkflowResponse = QueryDoneResponse | QueryInterruptedResponse
 
 
-def _derive_error_code(error_logs: list[dict]) -> Literal["TIMEOUT", "RECURSION_LIMIT"] | None:
+def _derive_error_code(
+    error_logs: list[dict],
+    is_accounting_query: bool = True,
+) -> Literal["TIMEOUT", "RECURSION_LIMIT", "NON_ACCOUNTING"] | None:
     """
-    폴백이 기록한 워크플로 레벨 오류(TIMEOUT·RECURSION_LIMIT)를 응답 구분자로 파생한다.
+    폴백이 기록한 워크플로 레벨 오류(TIMEOUT·RECURSION_LIMIT) 및 비회계 조기종료(NON_ACCOUNTING)를 응답 구분자로 파생한다.
 
     타임아웃과 재시도 소진 둘 다 error_logs에 한 줄을 남기므로, 클라이언트가 이 코드로 일시적 실패(재시도 유도)를 일반 답변불가와 구분한다.
+    비회계 질의(is_accounting_query=False)는 회계 질의이나 근거가 부족한 일반 답변불가와 구분하여 화면에 안내한다.
     노드 레벨 에러(CM-002 등)는 폴백 구분자가 아니므로 매핑하지 않는다.
     """
+    if not is_accounting_query:
+        return "NON_ACCOUNTING"
     if any(log.get("error_type") == "TIMEOUT" for log in error_logs):
         return "TIMEOUT"
     if any(log.get("error_type") == "RECURSION_LIMIT" for log in error_logs):
@@ -128,13 +135,18 @@ def to_api_response(result: dict) -> WorkflowResponse:
         extra = item.chunk.metadata.model_extra or {}
         pages_by_chunk[item.chunk.chunk_id] = (extra.get("page_start"), extra.get("page_end"))
 
+    cited_chunk_ids = {c.chunk_id for c in response.citations}
+    is_accounting = result.get("is_accounting_query", True)
     return QueryDoneResponse(
         thread_id=thread_id,
         answer=response.answer,
         is_answerable=response.is_answerable,
         confidence=response.confidence_score,
-        error_code=_derive_error_code(result.get("error_logs", [])),
-        clauses=[ClauseOut(**asdict(row)) for row in build_clause_rows(result.get("reranked_chunks"))],
+        error_code=_derive_error_code(result.get("error_logs", []), is_accounting),
+        clauses=[
+            ClauseOut(**asdict(row))
+            for row in build_clause_rows(result.get("reranked_chunks"), cited_chunk_ids=cited_chunk_ids)
+        ],
         citations=[
             CitationOut(
                 document_id=c.document_id,
