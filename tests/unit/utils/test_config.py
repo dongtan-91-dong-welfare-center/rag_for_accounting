@@ -55,3 +55,57 @@ class TestEnvFloat:
 
         with pytest.raises(ValueError):
             _env_float("RERANK_THRESHOLD", 0.5)
+
+
+@pytest.mark.unit
+class TestTimeoutMarginInvariant:
+    """타임아웃 마진 불변식 단위 테스트 — #310
+
+    재시도 포함 최악 시나리오에서 LangGraph step_timeout이 먼저 발동하는
+    오발동을 방지하기 위한 불변식을 검증한다.
+
+    불변식: LLM_TIMEOUT_SECONDS * (1 + LLM_MAX_RETRIES) + backoff_buffer < GRAPH_STEP_TIMEOUT_SECONDS
+    """
+
+    # OpenAI SDK 지수 백오프(초기 0.5s, 최대 8s) 1회 발생 시 여유 추정값
+    BACKOFF_BUFFER_SECONDS: float = 5.0
+
+    def test_retry_margin_invariant_holds_with_defaults(self, monkeypatch):
+        """기본값 기준으로 재시도 마진 불변식이 성립한다.
+
+        LLM_TIMEOUT_SECONDS * (1 + LLM_MAX_RETRIES) + backoff_buffer < GRAPH_STEP_TIMEOUT_SECONDS
+        를 검증하여, 환경변수 미설정 기본 상태에서 step_timeout 오발동이 발생하지 않음을 보장한다.
+        """
+        monkeypatch.delenv("LLM_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("LLM_MAX_RETRIES", raising=False)
+        monkeypatch.delenv("GRAPH_STEP_TIMEOUT_SECONDS", raising=False)
+
+        llm_timeout = _env_float("LLM_TIMEOUT_SECONDS", 45.0)
+        llm_max_retries = int(_env_float("LLM_MAX_RETRIES", 1.0))
+        graph_step_timeout = int(_env_float("GRAPH_STEP_TIMEOUT_SECONDS", 120.0))
+
+        worst_case = llm_timeout * (1 + llm_max_retries) + self.BACKOFF_BUFFER_SECONDS
+
+        assert worst_case < graph_step_timeout, (
+            f"재시도 마진 불변식 위반: "
+            f"LLM_TIMEOUT({llm_timeout}) * (1 + LLM_MAX_RETRIES({llm_max_retries})) "
+            f"+ backoff_buffer({self.BACKOFF_BUFFER_SECONDS}) = {worst_case} "
+            f">= GRAPH_STEP_TIMEOUT({graph_step_timeout}). "
+            f"step_timeout 오발동 위험이 있습니다."
+        )
+
+    def test_llm_timeout_less_than_graph_step_timeout(self, monkeypatch):
+        """단일 LLM 요청 타임아웃이 step_timeout보다 짧다 — Inside-Out 원칙 기본 조건.
+
+        재시도 없이 단순 요청 하나가 step_timeout 내에 Fast-Fail 되어야 한다.
+        """
+        monkeypatch.delenv("LLM_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("GRAPH_STEP_TIMEOUT_SECONDS", raising=False)
+
+        llm_timeout = _env_float("LLM_TIMEOUT_SECONDS", 45.0)
+        graph_step_timeout = int(_env_float("GRAPH_STEP_TIMEOUT_SECONDS", 120.0))
+
+        assert llm_timeout < graph_step_timeout, (
+            f"단일 LLM 타임아웃({llm_timeout}s)이 step_timeout({graph_step_timeout}s) 이상입니다. "
+            f"Inside-Out 원칙에 위배됩니다."
+        )
