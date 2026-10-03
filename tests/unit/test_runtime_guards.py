@@ -119,3 +119,24 @@ def test_db_pool_timeout_fast_fail():
             pool.getconn() # Pool이 고갈된 상태에서 추가 커넥션 요청 시 PoolTimeout 예외를 던짐
     finally:
         pool.close() # 테스트 후 풀을 닫는다.
+
+
+def test_graph_state_error_logs_capacity_and_rotation(monkeypatch):
+    """GraphState error_logs가 MAX_ERROR_LOGS를 초과할 경우 FIFO 방식으로 회전하여 상한을 유지하는지 검증한다."""
+    from src.models.state import GraphState, ErrorLog
+    import src.utils.config as cfg
+    import src.models.state as state_mod
+
+    # 임의의 작은 상한으로 monkeypatch
+    monkeypatch.setattr(cfg, "MAX_ERROR_LOGS", 3)
+    monkeypatch.setattr(state_mod, "MAX_ERROR_LOGS", 3)
+
+    logs: list[ErrorLog] = [
+        {"timestamp": "2026-10-03T12:00:00+09:00", "node": "search", "error_type": "SE-101", "message": f"err {i}"}
+        for i in range(5)
+    ]
+
+    state = GraphState(original_query="테스트 질의", error_logs=logs)
+    assert len(state.error_logs) == 3
+    # 가장 오래된 err 0, err 1은 잘리고 최신 err 2, err 3, err 4만 남아야 함
+    assert [log["message"] for log in state.error_logs] == ["err 2", "err 3", "err 4"]

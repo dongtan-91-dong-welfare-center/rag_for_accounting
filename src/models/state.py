@@ -1,7 +1,8 @@
 # FUNC-009: LangGraph 파이프라인 전체 노드가 공유하는 상태 객체
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Literal, TypedDict
 from src.models.schemas import RewrittenQuery, RetrievedChunk, RerankingResult, EvaluationResult, FinalResponse
+from src.utils.config import MAX_ERROR_LOGS
 
 class ErrorLog(TypedDict):
     """
@@ -51,7 +52,13 @@ class GraphState(BaseModel):
     generation_score:     float                  = 0.0    # [generate 노드] LLM 생성 자가 검증 점수
 
     # 에러 추적 및 부가 정보
-    # 참고: error_logs를 노드가 실행될 때마다 기존 로그에 누적 추가하기 위해 데코레이터에서 직접 list.append()를 수행하거나,
-    # LangGraph의 Annotated[list, add_messages] 패턴을 도입할 수 있습니다.
-    error_logs:           list[ErrorLog]         = []     # 예외 발생 시 누적
+    error_logs:           list[ErrorLog]         = []     # 예외 발생 시 누적 (MAX_ERROR_LOGS 상한 유지)
     metadata:             dict                   = {}     # 예: {"search_mode": "hybrid"}
+
+    @field_validator("error_logs")
+    @classmethod
+    def cap_error_logs(cls, v: list[ErrorLog]) -> list[ErrorLog]:
+        """MAX_ERROR_LOGS 상한을 초과하는 경우 가장 오래된 항목을 밀어내고 최신 항목만 유지한다(FIFO)."""
+        if len(v) > MAX_ERROR_LOGS:
+            return v[-MAX_ERROR_LOGS:]
+        return v
