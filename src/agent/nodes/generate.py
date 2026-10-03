@@ -24,100 +24,96 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _assemble_context(
+    reranked_chunks: list[RerankingResult],
+) -> tuple[str, dict[int, RerankingResult]]:
+    """rerank_score 임계값을 만족하는 청크들을 모아 토큰 한도 내에서 프롬프트 컨텍스트와 매핑을 조립한다."""
+    context_chunks = []
+    chunk_map = {}
+    for idx, r_chunk in enumerate(reranked_chunks, start=1):
+        if r_chunk.rerank_score >= config.RERANK_THRESHOLD:
+            chunk_text = f"[{idx}] {r_chunk.chunk.content}"
+            candidate_str = "\n\n".join(context_chunks + [chunk_text])
+            estimated_tokens = len(candidate_str) // 2
+
+            if estimated_tokens > MAX_CONTEXT_TOKENS:
+                if not context_chunks:
+                    raise ContextLengthExceededError(
+                        f"첫 번째 청크만으로도 컨텍스트 길이 한도({MAX_CONTEXT_TOKENS} 토큰)를 초과했습니다."
+                    )
+                break
+
+            context_chunks.append(chunk_text)
+            chunk_map[idx] = r_chunk
+
+    return "\n\n".join(context_chunks), chunk_map
+
+
+def _execute_generator_llm(prompt: str) -> LLMInternalResponse:
+    """PydanticAI LLM을 실행하고 파싱 및 네트워크 오류를 도메인 예외로 래핑한다."""
+    generator_agent = Agent(f"openai-chat:{OPENAI_MODEL}", output_type=LLMInternalResponse)
+    try:
+        result = generator_agent.run_sync(prompt)
+        return result.output
+    except (pydantic.ValidationError, UnexpectedModelBehavior) as e:
+        raise LLMResponseFormatError(f"LLM 응답 파싱 실패: {e}")
+    except httpx.RequestError as e:
+        raise LLMAPIConnectionError(f"LLM API 연결 오류: {e}", node="generate")
+
+
+def _build_final_response(
+    llm_response: LLMInternalResponse,
+    chunk_map: dict[int, RerankingResult],
+) -> dict:
+    """답변에서 인용구를 추출하고 신뢰도 스코어를 계산하여 FinalResponse dict를 생성한다."""
+    extracted_citations, final_answer = extract_citations_from_text(llm_response.answer, chunk_map)
+
+    if not extracted_citations and llm_response.is_answerable:
+        raise LLMResponseFormatError("답변 가능 상태임에도 인용 근거가 없습니다.")
+
+    retrieval_score = (
+        sum(r.rerank_score for r in chunk_map.values()) / len(chunk_map)
+        if chunk_map else 0.0
+    )
+    generation_score = max(0.0, min(1.0, llm_response.llm_self_score))
+    final_confidence = (retrieval_score * 0.4) + (generation_score * 0.6)
+
+    return {
+        "final_response": FinalResponse(
+            answer=final_answer,
+            citations=extracted_citations,
+            is_answerable=llm_response.is_answerable,
+            confidence_score=final_confidence,
+        ),
+        "retrieval_score": retrieval_score,
+        "generation_score": generation_score,
+    }
+
+
 def generate_response(state: GraphState) -> dict:
     """
     reranked_chunks와 GENERATION_PROMPT를 이용해 최종 답변을 생성한다.
     - 인용 근거를 포함한 FinalResponse를 만들어 state.final_response에 저장하고, 신뢰도 계산에 쓴 retrieval_score·generation_score도 함께 반환한다
     """
-    # PydanticAI 에이전트 초기화
-    # 접두사를 "openai-chat:"으로 고정한다. pydantic-ai v2.0부터 "openai:"는 Responses API로
-    # 해석되도록 바뀌어 DeprecationWarning이 발생하므로, 현행 Chat Completions 동작을 명시적으로 유지한다.
-    generator_agent = Agent(f"openai-chat:{OPENAI_MODEL}", output_type=LLMInternalResponse)
-
-    # 검색 결과가 없으면 답변 불가능 처리
     if not state.reranked_chunks:
         return {"final_response": build_unanswerable_response(state.original_query)}
 
     try:
-        # 컨텍스트 조립: 청크를 하나씩 추가하며 토큰 한도 초과 시 트런케이션
-        # 토큰 추정: len(str) * 0.5 (o200k_base 기준 한국어 1 토큰 ≈ 2~3 글자)
-        context_chunks = []
-        chunk_map = {}
-        for idx, r_chunk in enumerate(state.reranked_chunks, start=1):
-            if r_chunk.rerank_score >= config.RERANK_THRESHOLD:
-                chunk_text = f"[{idx}] {r_chunk.chunk.content}"     # [1] 문서 내용, [2] 문서 내용
-                candidate_str = "\n\n".join(context_chunks + [chunk_text])  # "[1] ...\n\n[2] ..."
-                estimated_tokens = len(candidate_str) // 2  # 토큰 추정 (o200k_base 기준 한국어 1 토큰 ≈ 2~3 글자)
-
-                if estimated_tokens > MAX_CONTEXT_TOKENS:
-                    if not context_chunks:
-                        # 첫 번째 청크만으로 한도 초과 — 극단적 예외
-                        raise ContextLengthExceededError(
-                            f"첫 번째 청크만으로도 컨텍스트 길이 한도({MAX_CONTEXT_TOKENS} 토큰)를 초과했습니다."
-                        )
-                    break  # 이전 청크까지만 사용 (트런케이션)
-
-                context_chunks.append(chunk_text)
-                chunk_map[idx] = r_chunk
-
-        # 임계치를 초과하는 문서 청크가 없으면 답변 불가능 처리
-        if not context_chunks:
+        context_str, chunk_map = _assemble_context(state.reranked_chunks)
+        if not context_str:
             return {"final_response": build_unanswerable_response(state.original_query)}
 
-        context_str = "\n\n".join(context_chunks)
         prompt = GENERATION_PROMPT.format(query=state.original_query, context=context_str)
-
-        # PydanticAI 실행 — 파싱/네트워크 오류를 도메인 예외로 래핑
-        try:
-            result = generator_agent.run_sync(prompt)
-            llm_response: LLMInternalResponse = result.output
-        except (pydantic.ValidationError, UnexpectedModelBehavior) as e:
-            raise LLMResponseFormatError(f"LLM 응답 파싱 실패: {e}")
-        except httpx.RequestError as e:
-            raise LLMAPIConnectionError(f"LLM API 연결 오류: {e}", node="generate")
-
-        # 인용구 추출 및 citations 리스트 구성
-        extracted_citations, final_answer = extract_citations_from_text(llm_response.answer, chunk_map)
-
-        # 답변 가능 상태임에도 인용 근거가 없으면 프롬프트 지시 위반 (GN-401)
-        if not extracted_citations and llm_response.is_answerable:
-            raise LLMResponseFormatError(
-                "답변 가능 상태임에도 인용 근거가 없습니다."
-            )
-
-        # 검색 점수 계산 (사용된 청크의 rerank_score 평균)
-        retrieval_score = (
-            sum(r.rerank_score for r in chunk_map.values()) / len(chunk_map)
-            if chunk_map else 0.0
-        )
-
-        # 생성 점수: LLM 자체 평가 점수를 [0.0, 1.0] 범위로 클램핑
-        generation_score = max(0.0, min(1.0, llm_response.llm_self_score))
-
-        # 최종 신뢰도 (검색 0.4 + 생성 0.6)
-        final_confidence = (retrieval_score * 0.4) + (generation_score * 0.6)
-
-        return {
-            "final_response": FinalResponse(
-                answer=final_answer,
-                citations=extracted_citations,
-                is_answerable=llm_response.is_answerable,
-                confidence_score=final_confidence,
-            ),
-            "retrieval_score": retrieval_score,
-            "generation_score": generation_score,
-        }
+        llm_response = _execute_generator_llm(prompt)
+        return _build_final_response(llm_response, chunk_map)
 
     except AccountingRAGError as e:
-        # 도메인 에러: error_logs 기록 + 폴백 반환 (터미널 노드이므로 파이프라인 유지)
         new_logs = state.error_logs + [e.to_error_log()]
         return {
             "final_response": build_unanswerable_response(state.original_query),
             "error_logs": new_logs,
         }
     except Exception as e:
-        # 시스템 에러: 터미널 노드이므로 re-raise 없이 UNKNOWN 로그 적재 + 폴백 반환
-        # TODO: generate -> evaluate, evaluate -> generate 노드 결정 여부에 따라서 해당 설계는 바뀔 가능성 존재
         logger.error(f"[{type(e).__name__}] generate_response 노드 시스템 에러: {e}", exc_info=True)
         error_log = {
             "timestamp": datetime.now(KST).isoformat(),
