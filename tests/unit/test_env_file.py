@@ -295,3 +295,13 @@ class TestEnvExampleCompleteness:
 
 
 
+
+
+def test_embedding_server_comments_point_to_clients_package():
+    """임베딩 위임 설명이 개명 전 경로(src/client)를 가리키지 않아야 한다 (#151)."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    for rel in (".env.example", "src/utils/config.py"):
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "src/client를" not in text, rel
