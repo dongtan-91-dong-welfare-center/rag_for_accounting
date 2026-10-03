@@ -6,7 +6,7 @@ name: deploy
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -24,11 +24,9 @@ jobs:
       - name: Execute Remote Deploy via Tailscale SSH
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
           tailscale ssh \
-            -p "$DEPLOY_PORT" \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "set -euo pipefail && cd \"$DEPLOY_PATH\" && git fetch origin main && git reset --hard origin/main && ./deploy.sh && ./check.sh"

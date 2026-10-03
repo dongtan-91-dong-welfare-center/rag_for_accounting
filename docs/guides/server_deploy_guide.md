@@ -300,9 +300,8 @@ flowchart TD
 ```
 
 #### 2) 사전 설정 요구사항 (GitHub Repository Secrets)
-저장소 Secrets에 아래 5가지 항목이 등록되어 있어야 워크플로가 정상 동작합니다:
+저장소 Secrets에 아래 4가지 항목이 등록되어 있어야 워크플로가 정상 동작합니다:
 - `DEPLOY_HOST`: 운영 서버의 Tailscale IP 또는 MagicDNS 호스트명
-- `DEPLOY_PORT`: SSH 접속 포트 (기본값: `22`)
 - `DEPLOY_USER`: 운영 서버 접속 계정 (기본값: `root`)
 - `DEPLOY_PATH`: 운영 서버 내 저장소 절대 경로 (예: `/root/rag_for_accounting`)
 - `TAILSCALE_AUTHKEY`: `tag:ci` 권한 및 Ephemeral(일회성) 속성이 부여된 Tailscale Auth Key
