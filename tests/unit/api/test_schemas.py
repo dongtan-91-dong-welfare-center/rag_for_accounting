@@ -203,6 +203,21 @@ class TestErrorCode:
         res = to_api_response(_done_result(error_logs=[node_error]))
         assert res.error_code is None
 
+    def test_non_accounting_sets_error_code(self):
+        """is_accounting_query=False인 경우 error_code="NON_ACCOUNTING"으로 파생한다."""
+        result = _done_result(
+            is_accounting_query=False,
+            final_response=FinalResponse(
+                answer="죄송합니다. 회계 관련 질문을 해 주세요.",
+                citations=[],
+                is_answerable=False,
+                confidence_score=0.95,
+            ),
+        )
+        res = to_api_response(result)
+        assert res.error_code == "NON_ACCOUNTING"
+        assert res.is_answerable is False
+
 
 class TestInterruptedResponse:
     PAYLOAD = {
