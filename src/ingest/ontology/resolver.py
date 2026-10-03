@@ -22,6 +22,12 @@ _RANGE_FULL_RE = re.compile(
     r'(?:문단\s*)?(실|결)?(' + _PARA_CORE + r')'
     r'(?:\s*까지)?'
 )
+_SECTION_RANGE_RE = re.compile(
+    r'제\s*(\d+)\s*절'
+    r'\s*(?:[~∼]|내지|에서|부터)\s*'
+    r'(?:제\s*)?(\d+)\s*절'
+    r'(?:\s*까지)?'
+)
 
 
 def _para_prefix(p: str) -> str:
@@ -152,7 +158,28 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
 
         ref = edge.unresolved_target
 
-        # 시도 0: 범위 표기 감지 → 여러 엣지로 split. (~ ∼ 내지 에서~까지 부터~까지, 실/결 접두어 포함)
+        # 시도 0: 절 범위 표기 감지 → 여러 엣지로 split.
+        if _SECTION_RANGE_RE.search(ref):
+            m_sec = _SECTION_RANGE_RE.search(ref)
+            if m_sec:
+                s1, s2 = int(m_sec.group(1)), int(m_sec.group(2))
+                if s1 <= s2:
+                    for s_num in range(s1, s2 + 1):
+                        sec_key = f"제{s_num}절"
+                        target_id = lookup.get(sec_key)
+                        if target_id:
+                            resolved.append(edge.model_copy(update={
+                                "to_id": target_id,
+                                "unresolved_target": "",
+                                "to_paragraph": "",
+                            }))
+                        else:
+                            resolved.append(edge.model_copy(update={
+                                "unresolved_target": sec_key,
+                            }))
+                    continue
+
+        # 시도 0.5: 범위 표기 감지 → 여러 엣지로 split. (~ ∼ 내지 에서~까지 부터~까지, 실/결 접두어 포함)
         # 확장 실패 시 원문 그대로 유지하고 일반 처리 분기로 떨어지지 않게 한다
         # (시작값만 매핑되는 부분 매핑 노이즈 방지).
         if _RANGE_FULL_RE.search(ref):
@@ -267,12 +294,20 @@ def _complete_ranges(resolved, lookup, paragraphs_in_order):
     for e in resolved:
         if e.edge_type == "CONTAINS" or not e.source_text:
             continue
-        g = groups.setdefault((e.from_id, e.source_text), {"covered": set(), "template": e})
-        if e.to_id and e.to_paragraph:
-            g["covered"].add(e.to_paragraph)
+        g = groups.setdefault((e.from_id, e.source_text), {
+            "covered": set(),
+            "covered_sections": set(),
+            "template": e,
+        })
+        if e.to_id:
+            if e.to_paragraph:
+                g["covered"].add(e.to_paragraph)
+            else:
+                g["covered_sections"].add(e.to_id)
 
     added = []
     for (_from_id, source_text), g in groups.items():
+        # 문단 범위 보충
         for m in _RANGE_FULL_RE.finditer(source_text):
             members = _expand_match(m, paragraphs_in_order)
             if not members:
@@ -287,6 +322,23 @@ def _complete_ranges(resolved, lookup, paragraphs_in_order):
                 added.append(g["template"].model_copy(update={
                     "to_id": target_id,
                     "to_paragraph": p,
+                    "unresolved_target": "",
+                }))
+
+        # 절 범위 보충
+        for m in _SECTION_RANGE_RE.finditer(source_text):
+            s1, s2 = int(m.group(1)), int(m.group(2))
+            if s1 > s2:
+                continue
+            for s_num in range(s1, s2 + 1):
+                sec_key = f"제{s_num}절"
+                target_id = lookup.get(sec_key)
+                if not target_id or target_id in g["covered_sections"]:
+                    continue
+                g["covered_sections"].add(target_id)  # 같은 그룹 내 중복 추가 방지
+                added.append(g["template"].model_copy(update={
+                    "to_id": target_id,
+                    "to_paragraph": "",
                     "unresolved_target": "",
                 }))
     return added
