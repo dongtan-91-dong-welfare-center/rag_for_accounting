@@ -339,6 +339,8 @@ class CaseResult:
     diag: dict = field(default_factory=dict)
     error: str | None = None
     elapsed_sec: float | None = None  # NFR-001 소요 시간 (초 단위)
+    external_sec: float | None = None  # 외부 API (LLM/임베딩) 지연시간 (초 단위)
+    internal_sec: float | None = None  # 내부 파이프라인 (pgvector HNSW 검색, RRF 등) 지연시간 (초 단위)
 
 
 def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
@@ -424,6 +426,17 @@ def measure_case(case: BenchmarkCase, k: int) -> CaseResult:
         "elapsed_sec": res.elapsed_sec,
     }
 
+    # 세분화 계측 데이터(latency_breakdown) 추출
+    breakdown = state.get("metadata", {}).get("latency_breakdown") if isinstance(state.get("metadata"), dict) else None
+    if isinstance(breakdown, dict):
+        ext = breakdown.get("external_sec")
+        intl = breakdown.get("internal_sec")
+        if ext is not None:
+            res.external_sec = round(float(ext), 2)
+        if intl is not None:
+            res.internal_sec = round(float(intl), 2)
+        res.diag["latency_breakdown"] = breakdown
+
     # content_pass(내용 통과) 판정: 옵트인(CONTENT_JUDGE) 방식으로 동작하며, 검색축과 분리된 별도의 LLM 판정 축입니다.
     # expected_answer 신뢰성 전제
     if os.getenv("CONTENT_JUDGE"):
@@ -480,19 +493,44 @@ def aggregate(results: list[CaseResult], k: int) -> dict:
         }
 
     # 지연 시간 통계 (NFR-001): 에러 여부와 무관하게 유효한 소요 시간이 계측된 모든 측정 대상 케이스를 포함합니다.
-    latencies = sorted(
+    def _compute_stats(series: list[float]) -> dict:
+        s = sorted(series)
+        return {
+            "p50": round(_percentile(s, 50.0), 2),
+            "p90": round(_percentile(s, 90.0), 2),
+            "p95": round(_percentile(s, 95.0), 2),
+            "p99": round(_percentile(s, 99.0), 2),
+            "max": round(max(s), 2),
+            "min": round(min(s), 2),
+            "avg": round(sum(s) / len(s), 2),
+            "count": len(s),
+        }
+
+    total_latencies = [
         r.elapsed_sec for r in results
         if r.measurable and r.elapsed_sec is not None
-    )
-    if latencies:
-        summary["latency"] = {
-            "p50": round(_percentile(latencies, 50.0), 2),
-            "p95": round(_percentile(latencies, 95.0), 2),
-            "max": round(max(latencies), 2),
-            "min": round(min(latencies), 2),
-            "avg": round(sum(latencies) / len(latencies), 2),
-            "target_sec": TARGET_LATENCY_TOTAL_SEC,
+    ]
+    external_latencies = [
+        r.external_sec for r in results
+        if r.measurable and r.external_sec is not None
+    ]
+    internal_latencies = [
+        r.internal_sec for r in results
+        if r.measurable and r.internal_sec is not None
+    ]
+
+    if total_latencies:
+        total_stats = _compute_stats(total_latencies)
+        total_stats["target_sec"] = TARGET_LATENCY_TOTAL_SEC
+
+        summary["latency"] = total_stats
+        summary["latency_breakdown"] = {
+            "total": total_stats,
         }
+        if external_latencies:
+            summary["latency_breakdown"]["external"] = _compute_stats(external_latencies)
+        if internal_latencies:
+            summary["latency_breakdown"]["internal"] = _compute_stats(internal_latencies)
     return summary
 
 
@@ -530,20 +568,45 @@ def _report_header_lines(
 
 
 def _report_latency_lines(summary: dict) -> list[str]:
-    """NFR-001 지연 시간 요약(p50/p95/max/min/avg) 섹션을 만든다."""
+    """NFR-001 지연 시간 요약(p50/p90/p95/p99/max/min/avg) 및 내부/외부 분리 섹션을 만든다."""
     target_sec = TARGET_LATENCY_TOTAL_SEC
     lines = [f"## 지연 시간 요약 (NFR-001 목표 {target_sec:.1f}초)", ""]
     lat = summary.get("latency")
     if lat and isinstance(lat, dict):
+        p90_str = f"{lat['p90']:.2f}s" if "p90" in lat else "—"
+        p99_str = f"{lat['p99']:.2f}s" if "p99" in lat else "—"
         lines += [
             "| 지표 | 측정값(초) | 목표(초) | 여유 마진 |",
             "|------|------------|----------|-----------|",
             f"| 중위 지연 시간 (p50) | {lat['p50']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p50']:+.2f}s |",
+            f"| 90 백분위수 (p90) | {p90_str} | — | — |",
             f"| 95 백분위수 (p95) | {lat['p95']:.2f}s | {target_sec:.1f}s | {target_sec - lat['p95']:+.2f}s |",
+            f"| 99 백분위수 (p99) | {p99_str} | — | — |",
             f"| 최대 지연 시간 (Max) | {lat['max']:.2f}s | {target_sec:.1f}s | {target_sec - lat['max']:+.2f}s |",
             f"| 최소 지연 시간 (Min) | {lat['min']:.2f}s | — | — |",
             f"| 평균 지연 시간 (Avg) | {lat['avg']:.2f}s | — | — |",
         ]
+
+        # 내부 파이프라인 vs 외부 API 세분화 테이블
+        bk = summary.get("latency_breakdown")
+        if bk and isinstance(bk, dict) and ("external" in bk or "internal" in bk):
+            ext = bk.get("external")
+            intl = bk.get("internal")
+            lines += [
+                "",
+                "### 구간별 지연 시간 분리 (외부 API vs 내부 파이프라인)",
+                "",
+                "| 구간 | p50(초) | p90(초) | p95(초) | p99(초) | 평균(초) |",
+                "|------|---------|---------|---------|---------|----------|",
+            ]
+            if ext:
+                lines.append(
+                    f"| 외부 API (LLM/임베딩) | {ext['p50']:.2f}s | {ext['p90']:.2f}s | {ext['p95']:.2f}s | {ext['p99']:.2f}s | {ext['avg']:.2f}s |"
+                )
+            if intl:
+                lines.append(
+                    f"| 내부 파이프라인 (DB/RRF) | {intl['p50']:.2f}s | {intl['p90']:.2f}s | {intl['p95']:.2f}s | {intl['p99']:.2f}s | {intl['avg']:.2f}s |"
+                )
     else:
         lines.append("- 지연 시간 측정 데이터 없음")
     lines.append("")
@@ -622,11 +685,17 @@ def _report_miss_diagnosis_lines(results: list[CaseResult], k: int) -> list[str]
 
 def _report_slowest_row(r: CaseResult) -> str:
     """최악 지연 시간 진단 목록의 항목 하나를 만든다(에러·정상 두 경로)."""
+    breakdown_str = ""
+    if r.external_sec is not None or r.internal_sec is not None:
+        ext = f"{r.external_sec:.2f}s" if r.external_sec is not None else "—"
+        intl = f"{r.internal_sec:.2f}s" if r.internal_sec is not None else "—"
+        breakdown_str = f" [외부={ext}, 내부={intl}]"
+
     if r.error:
         clean_err = r.error.replace("\n", " ").strip()
-        return f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): 에러={clean_err}"
+        return f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s{breakdown_str}): 에러={clean_err}"
     return (
-        f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s): "
+        f"- **{r.case_id}** (제{r.chapter}장, 소요 {r.elapsed_sec:.2f}s{breakdown_str}): "
         f"전략={r.diag.get('strategy')}, CRAG={r.diag.get('rewrite_count')}, "
         f"인용={r.diag.get('n_citations')}건, 검색={r.diag.get('n_retrieved')}건"
     )
