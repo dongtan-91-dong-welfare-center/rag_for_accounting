@@ -611,6 +611,25 @@ function Result({
     );
   }
 
+  // 비회계 질의 조기종료는 회계 기준과 무관한 질의임을 화면에서 명확히 구분하여 안내한다.
+  if (response.error_code === "NON_ACCOUNTING") {
+    return (
+      <section style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="result-head">
+          <span className="result-kicker">K-ACCOUNTING 검토 결과</span>
+          <span className="pill warn">비회계 질의</span>
+          <span className="confidence">
+            분류 신뢰도 <strong>{(response.confidence * 100).toFixed(1)}%</strong>
+          </span>
+        </div>
+        <div className="answer-block">
+          <h3 className="section-title">안내</h3>
+          <p className="answer-text">{response.answer}</p>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="result-head">

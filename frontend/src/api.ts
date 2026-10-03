@@ -52,8 +52,8 @@ export interface QueryDoneResponse {
   answer: string;
   is_answerable: boolean;
   confidence: number;
-  /** 서버가 error_logs에서 파생한 폴백 구분자 — TIMEOUT·RECURSION_LIMIT 모두 재시도로 회복 가능. */
-  error_code: "TIMEOUT" | "RECURSION_LIMIT" | null;
+  /** 서버가 error_logs 또는 비회계 판단에서 파생한 구분자 — TIMEOUT·RECURSION_LIMIT·NON_ACCOUNTING. */
+  error_code: "TIMEOUT" | "RECURSION_LIMIT" | "NON_ACCOUNTING" | null;
   clauses: ClauseOut[];
   citations: CitationOut[];
 }
