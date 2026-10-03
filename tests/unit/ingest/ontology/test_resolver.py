@@ -300,3 +300,50 @@ def test_resolve_range_splits_into_multiple_edges():
     assert to_ids == ["gaap-ch6-s1-a", "gaap-ch6-s1-b"]
     assert all(e.unresolved_target == "" for e in resolved.edges)
     assert {e.to_paragraph for e in resolved.edges} == {"6.9", "6.10"}
+
+
+@pytest.mark.unit
+def test_resolve_section_range_splits_into_multiple_edges():
+    """unresolved_target에 절 범위가 올 때 각 Section 노드로 분할 해소되는지 검증합니다."""
+    graph = OntologyGraph(nodes=[
+        OntologyNode(id="gaap-ch6", node_type="Standard", chapter="6", name="제 6 장 금융자산·금융부채"),
+        OntologyNode(id="gaap-ch6-s1", node_type="Section", title="제 1 절 공통사항", order=1),
+        OntologyNode(id="gaap-ch6-s2", node_type="Section", title="제 2 절 유가증권", order=2),
+        OntologyNode(id="gaap-ch6-s3", node_type="Section", title="제 3 절 파생상품", order=3),
+        OntologyNode(id="gaap-ch6-s4", node_type="Section", title="제 4 절 기타", order=4),
+    ])
+    graph.edges = [OntologyEdge(
+        from_id="gaap-ch6-s1", to_id="",
+        edge_type="REFERENCES", unresolved_target="제2절~제4절",
+    )]
+    resolved = resolve_edges(graph)
+    to_ids = sorted(e.to_id for e in resolved.edges)
+    assert to_ids == ["gaap-ch6-s2", "gaap-ch6-s3", "gaap-ch6-s4"]
+    assert all(e.unresolved_target == "" for e in resolved.edges)
+    assert all(e.to_paragraph == "" for e in resolved.edges)
+
+
+@pytest.mark.unit
+def test_complete_ranges_supplements_missing_sections():
+    """source_text에 절 범위가 명시되고 LLM이 제2절만 추출한 경우, 제3절과 제4절이 엣지로 보충되는지 검증합니다."""
+    src_text = "제2절~제4절에서 정하지 않은 사항은 본 절을 따른다."
+    graph = OntologyGraph(nodes=[
+        OntologyNode(id="gaap-ch6", node_type="Standard", chapter="6", name="제 6 장 금융자산·금융부채"),
+        OntologyNode(id="gaap-ch6-s1", node_type="Section", title="제 1 절 공통사항", order=1),
+        OntologyNode(id="gaap-ch6-s2", node_type="Section", title="제 2 절 유가증권", order=2),
+        OntologyNode(id="gaap-ch6-s3", node_type="Section", title="제 3 절 파생상품", order=3),
+        OntologyNode(id="gaap-ch6-s4", node_type="Section", title="제 4 절 기타", order=4),
+    ])
+    graph.edges = [
+        OntologyEdge(
+            from_id="gaap-ch6-s1", to_id="",
+            edge_type="IS_DEFAULT_FOR", unresolved_target="제2절",
+            source_text=src_text,
+        ),
+    ]
+    resolved = resolve_edges(graph)
+    to_ids = sorted(e.to_id for e in resolved.edges)
+    assert to_ids == ["gaap-ch6-s2", "gaap-ch6-s3", "gaap-ch6-s4"]
+    assert all(e.edge_type == "IS_DEFAULT_FOR" for e in resolved.edges)
+    assert all(e.to_paragraph == "" for e in resolved.edges)
+
