@@ -1,0 +1,29 @@
+name: test
+
+'on':
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --extra ingest
+      - name: Lint with ruff
+        run: uv run ruff check src tests
+      - name: Run unit and system tests
+        run: uv run pytest -m "not benchmark"

@@ -23,7 +23,7 @@ class TestGitHubWorkflows:
         assert content is not None
 
         # 트리거 검증
-        on = content.get("on", {})
+        on = content.get("on") or content.get(True) or {}
         assert "push" in on and "pull_request" in on
         assert set(on["push"]["branches"]) == {"dev", "main"}
         assert set(on["pull_request"]["branches"]) == {"dev", "main"}
@@ -63,7 +63,7 @@ class TestGitHubWorkflows:
         assert content is not None
 
         # 태그 트리거 검증
-        on = content.get("on", {})
+        on = content.get("on") or content.get(True) or {}
         assert "push" in on and "tags" in on["push"]
         assert "v*.*.*" in on["push"]["tags"]
 
