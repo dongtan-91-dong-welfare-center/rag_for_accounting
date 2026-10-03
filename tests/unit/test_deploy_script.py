@@ -326,6 +326,8 @@ exit 0
 """
     bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": "#!/bin/sh\nexit 0\n"})
     env = _make_mock_env(bin_dir, isolate=True)
+    env.pop("APP_HOST_PORT", None)
+    env.pop("EMBEDDING_HOST_PORT", None)
 
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
     assert proc.returncode == 0

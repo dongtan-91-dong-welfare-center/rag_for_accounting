@@ -64,6 +64,43 @@ def make_bin(tmp_path: Path, files: dict[str, str]) -> Path:
     return bin_dir
 
 
+_SAFE_SYSTEM_BIN: Path | None = None
+
+
+def _get_safe_system_bin() -> str:
+    """
+    docker, podman 등 컨테이너 런타임 바이너리가 제외된 시스템 기본 도구 심볼릭 링크 디렉터리를 반환합니다.
+    호스트 OS(예: CI 리눅스 러너)에 설치된 실제 docker/podman이 격리 테스트 환경으로 누출되는 것을 방지합니다.
+    """
+    global _SAFE_SYSTEM_BIN
+    if _SAFE_SYSTEM_BIN is not None and _SAFE_SYSTEM_BIN.exists():
+        return to_posix_path(_SAFE_SYSTEM_BIN)
+
+    target_dir = Path("/tmp") / f"safe_sys_bin_{os.getuid() if hasattr(os, 'getuid') else 0}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    blocked = {"docker", "podman", "podman-compose", "docker-compose"}
+
+    for sys_path in ["/bin", "/usr/bin"]:
+        p = Path(sys_path)
+        if not p.is_dir():
+            continue
+        try:
+            for item in p.iterdir():
+                if item.name in blocked or item.name.startswith("docker-") or item.name.startswith("podman-"):
+                    continue
+                dest = target_dir / item.name
+                if not dest.exists():
+                    try:
+                        dest.symlink_to(item)
+                    except (OSError, NotImplementedError):
+                        pass
+        except OSError:
+            pass
+
+    _SAFE_SYSTEM_BIN = target_dir
+    return to_posix_path(target_dir)
+
+
 def make_mock_env(
     bin_dir: Path,
     *,
@@ -85,7 +122,10 @@ def make_mock_env(
     if isolate:
         # 테스트 환경을 깨끗하게 격리하면서도 스크립트 실행에 필요한 필수 쉘 명령어만 최소한으로 제공
         if include_system_paths:
-            env["PATH"] = f"{posix_bin}:/bin:/usr/bin"
+            if os.name == "nt":
+                env["PATH"] = f"{posix_bin}:/bin:/usr/bin"
+            else:
+                env["PATH"] = f"{posix_bin}:{_get_safe_system_bin()}"
         else:
             env["PATH"] = posix_bin
     else:
