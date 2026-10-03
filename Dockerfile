@@ -64,9 +64,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # --mount=type=cache 옵션으로 uv 패키지 캐시 디렉터리(/root/.cache/uv)를 마운트하여 의존성 재다운로드 비용을 절감합니다.
+# --no-install-project 옵션은 프로젝트 자체(src 패키지)의 빌드를 건너뜁니다. 이 시점에는 소스가 복사되지 않았고, 실행은 /app 기준 경로로 src를 직접 불러오기 때문입니다.
 # --frozen 플래그로 uv.lock과의 일치성을 강제하고, --no-dev 옵션으로 프로덕션에 불필요한 개발 종속성을 배제합니다.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --no-install-project
 
 # 애플리케이션 백엔드 소스 코드를 /app/src 디렉터리로 복사합니다.
 COPY src/ ./src/
