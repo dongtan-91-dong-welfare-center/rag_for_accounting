@@ -34,6 +34,7 @@ class ClauseOut(BaseModel):
     page_start: int | None = None  # 원본 PDF 페이지 범위(#196) — 미백필/미매칭이면 None(뷰어 버튼 미표시)
     page_end: int | None = None
     paras: list[str] = []          # 문단번호 칩(#260) — 공용 규칙(clause_paras) 추출, 원형 보존
+    is_cited: bool = False         # 답변 인용 여부(✓/◌ 교차표시)
 
 
 class CitationOut(BaseModel):
@@ -128,13 +129,18 @@ def to_api_response(result: dict) -> WorkflowResponse:
         extra = item.chunk.metadata.model_extra or {}
         pages_by_chunk[item.chunk.chunk_id] = (extra.get("page_start"), extra.get("page_end"))
 
+    cited_chunk_ids = {c.chunk_id for c in response.citations}
+
     return QueryDoneResponse(
         thread_id=thread_id,
         answer=response.answer,
         is_answerable=response.is_answerable,
         confidence=response.confidence_score,
         error_code=_derive_error_code(result.get("error_logs", [])),
-        clauses=[ClauseOut(**asdict(row)) for row in build_clause_rows(result.get("reranked_chunks"))],
+        clauses=[
+            ClauseOut(**asdict(row))
+            for row in build_clause_rows(result.get("reranked_chunks"), cited_chunk_ids=cited_chunk_ids)
+        ],
         citations=[
             CitationOut(
                 document_id=c.document_id,
