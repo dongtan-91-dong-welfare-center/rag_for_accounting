@@ -298,6 +298,7 @@ exit 0
 """
     bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": curl_stub})
     env = _make_mock_env(bin_dir, isolate=True)
+    env["DEPLOY_EMBEDDING_WAIT_SECONDS"] = "0"
 
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
     assert proc.returncode == 1

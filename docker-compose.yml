@@ -50,14 +50,16 @@ services:
       - "${EMBEDDING_BIND_ADDR:-127.0.0.1}:${EMBEDDING_HOST_PORT:-8080}:80"
     volumes:
       - tei_cache:/data
-    # 웜업(CPU에서 약 2분)이 끝나야 /health가 열린다. 
+    # 웜업(amd64 네이티브 CPU에서 약 2분, arm64 에뮬레이션에서는 약 9분)이 끝나야 /health가 열린다.
+    # start_period와 retries는 .env의 TEI_HEALTH_START_PERIOD, TEI_HEALTH_RETRIES로 조정할 수 있다.
+    # 기본값은 180초 + 60회 x 10초로 최대 약 13분까지 대기한다.
     # 이 체크가 없으면 app이 먼저 떠서 웜업 동안 들어온 질의가 임베딩 실패(Connection refused)로 "근거 부족" 응답을 만든다.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 10s
       timeout: 5s
-      retries: 30
-      start_period: 180s
+      retries: "${TEI_HEALTH_RETRIES:-60}"
+      start_period: "${TEI_HEALTH_START_PERIOD:-180s}"
     restart: unless-stopped
 
   app:
