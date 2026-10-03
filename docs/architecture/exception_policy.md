@@ -106,3 +106,16 @@ graph TD
      - `SE-102` (DB 쿼리/커넥션 풀/DDL 일시 오류), `CM-002` (임베딩 일시 통신 장애): `is_retryable=True`. 일시적 네트워크/DB 장애이므로 동일 청크에 대한 재적재 가능.
    - 부분 적재 후 `result.get_retryable_chunks()`를 호출하여 재적재가 필요한 dead-letter 청크들만 선별해 복구 작업을 수행할 수 있습니다.
 
+---
+
+## 6. HIL 체크포인터 외부 저장소 장애 대응 정책 (#299)
+
+1. **상태 정합성 보장 원칙**:
+   - HIL(Human-in-the-Loop) 체크포인터는 PostgreSQL(`PostgresSaver`)을 단일 정본으로 사용합니다.
+   - 외부 저장소(PostgreSQL) 연결 실패나 일시적 장애 발생 시 임의의 로컬 인메모리 폴백(`MemorySaver`)으로 전환하지 않습니다.
+   - 근거: 다중 워커 환경에서 특정 워커만 인메모리로 폴백할 경우 워커 간 세션 상태 불일치 및 사용자 피드백 유실이 발생하므로, 장애 상태를 명확히 노출하고 격리하는 것이 안전합니다.
+2. **API 계층 Fast-Fail 및 503(Service Unavailable) 반환**:
+   - `/resume` 엔드포인트에서 세션 조회(`thread_exists`) 또는 세션 재개(`resume_workflow`) 중 `psycopg.Error`(커넥션 풀 고갈, 연결 단절, 타임아웃 등)가 발생하면 즉시 `HTTPException(status_code=503, detail="...")`을 반환합니다.
+   - 클라이언트는 세션이 영구 소실된 것(404 Not Found)과 데이터베이스 일시 장애(503 Service Unavailable)를 명확히 구분하여 인지할 수 있으며, 데이터베이스 복구 후 동일 `thread_id`로 재시도할 수 있습니다.
+
+
