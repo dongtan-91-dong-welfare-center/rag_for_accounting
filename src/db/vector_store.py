@@ -147,6 +147,51 @@ def _upsert_batch(collection: str, batch: list[RetrievedChunk], vectors: list[li
         raise DatabaseQueryError(f"배치 upsert 실패: {e}", node="index")
 
 
+def _filter_token_limit_chunks(
+    batch: list[RetrievedChunk],
+) -> tuple[list[RetrievedChunk], list[SkippedChunk]]:
+    """IX-201: 토큰 한도 초과 청크는 잘린 벡터가 저장되지 않도록 사전에 걸러 스킵 목록으로 분리한다."""
+    valid_chunks = []
+    skipped = []
+    for chunk in batch:
+        token_count = count_tokens(chunk.content)
+        if token_count > EMBEDDING_MAX_TOKENS:
+            error = EmbeddingTokenLimitError(
+                f"청크 토큰 한도 초과로 스킵: chunk_id={chunk.chunk_id}, "
+                f"tokens={token_count} > {EMBEDDING_MAX_TOKENS}"
+            )
+            logger.warning(f"[{error.error_type}] {error.message}")
+            skipped.append(SkippedChunk(
+                chunk_id=chunk.chunk_id, error_type=error.error_type, reason=error.message
+            ))
+        else:
+            valid_chunks.append(chunk)
+    return valid_chunks, skipped
+
+
+def _index_single_batch(
+    collection: str,
+    valid_chunks: list[RetrievedChunk],
+    start: int,
+    batch_len: int,
+) -> tuple[int, list[SkippedChunk]]:
+    """단일 배치의 유효 청크들을 임베딩 및 upsert하고 성공 건수와 실패 누락 청크를 반환한다."""
+    if not valid_chunks:
+        return 0, []
+
+    try:
+        vectors = embed_texts([chunk.content for chunk in valid_chunks], node="index")
+        _upsert_batch(collection, valid_chunks, vectors)
+        return len(valid_chunks), []
+    except AccountingRAGError as e:
+        logger.error(f"[{e.error_type}] 배치 인덱싱 실패 (chunks[{start}:{start + batch_len}]): {e.message}")
+        skipped = [
+            SkippedChunk(chunk_id=c.chunk_id, error_type=e.error_type, reason=e.message)
+            for c in valid_chunks
+        ]
+        return 0, skipped
+
+
 def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingResult:
     """
     청크 리스트를 pgvector에 저장한다.
@@ -183,38 +228,15 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
     skipped: list[SkippedChunk] = []
     for start in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[start:start + BATCH_SIZE]
-        valid_chunks = []
         try:
-            # IX-201: 토큰 한도 초과 청크는 잘린 벡터가 저장되지 않도록 사전에 걸러 스킵한다
-            for chunk in batch:
-                token_count = count_tokens(chunk.content)
-                if token_count > EMBEDDING_MAX_TOKENS:
-                    error = EmbeddingTokenLimitError(
-                        f"청크 토큰 한도 초과로 스킵: chunk_id={chunk.chunk_id}, "
-                        f"tokens={token_count} > {EMBEDDING_MAX_TOKENS}"
-                    )
-                    logger.warning(f"[{error.error_type}] {error.message}")
-                    skipped.append(SkippedChunk(
-                        chunk_id=chunk.chunk_id, error_type=error.error_type, reason=error.message
-                    ))
-                else:
-                    valid_chunks.append(chunk)
+            valid_chunks, token_skipped = _filter_token_limit_chunks(batch)
+            skipped.extend(token_skipped)
 
-            if not valid_chunks:
-                continue
-
-            vectors = embed_texts([chunk.content for chunk in valid_chunks], node="index")
-            _upsert_batch(collection, valid_chunks, vectors)
-            success_count += len(valid_chunks)
-        except AccountingRAGError as e:
-            # CM-002(임베딩)·SE-102(DB) 등 배치 단위 실패 — 부분 커밋 정책에 따라 다음 배치 계속
-            logger.error(f"[{e.error_type}] 배치 인덱싱 실패 (chunks[{start}:{start + len(batch)}]): {e.message}")
-            # 해당 배치의 valid_chunks(IX-201로 이미 걸러진 청크 제외)를 누락으로 기록
-            skipped.extend(
-                SkippedChunk(chunk_id=c.chunk_id, error_type=e.error_type, reason=e.message)
-                for c in valid_chunks
+            batch_success, batch_skipped = _index_single_batch(
+                collection, valid_chunks, start, len(batch)
             )
-            continue
+            success_count += batch_success
+            skipped.extend(batch_skipped)
         finally:
             # 배치마다 해제 힙을 OS에 반환해 누적 RSS 증가를 완화한다
             _release_heap()
