@@ -49,9 +49,9 @@ SPARSE_FUSION_WEIGHT: float = _env_float("SPARSE_FUSION_WEIGHT", 0.1)
 
 # 타임아웃 SSoT 및 계층 구조
 # 시스템 전체 타임아웃 계층 원칙:
-#   Layer 1 (개별 I/O Fast-Fail): SEARCH_TIMEOUT_SECONDS (10s), DB_POOL_TIMEOUT_SECONDS (10s) < LLM_TIMEOUT_SECONDS (45s)
+#   Layer 1 (개별 I/O Fast-Fail): SEARCH_TIMEOUT_SECONDS (10s), DB_POOL_TIMEOUT_SECONDS (10s), EMBEDDING_QUERY_TIMEOUT_SECONDS (10s) < LLM_TIMEOUT_SECONDS (45s)
 #   Layer 2 (노드 워크플로우): GRAPH_STEP_TIMEOUT_SECONDS (60s)
-#   Layer 3 (서브시스템/서버): EMBEDDING_SERVER_TIMEOUT_SECONDS (120s)
+#   Layer 3 (서브시스템/오프라인 배치): EMBEDDING_BATCH_TIMEOUT_SECONDS (120s)
 # 안쪽(개별 I/O) 타임아웃이 바깥쪽(LangGraph step_timeout)보다 짧아야 개별 에러(SE-101, SE-102, CM-002)가 명확히 포착되며,
 # 바깥쪽 step_timeout이 먼저 터져 고아 HTTP/DB 요청이 백그라운드에서 자원을 누수하는 현상을 차단합니다.
 # LangSmith/운영 실측 데이터 수집 전 정상적인 긴 답변 생성이 타임아웃되는 오발동을 막기 위해 여유 마진을 부여합니다.
@@ -93,7 +93,9 @@ CHUNK_MAX_TOKENS: int = 2048
 # EMBEDDING_SERVER_URL 설정 시 embed_texts/count_tokens가 src/client를 통해 해당 서버로 HTTP 위임하고,
 # 미설정(기본)이면 프로세스 내 로드(현행 동작). 리랭커는 USE_RERANKER 기본 off라 서빙 대상이 아니다.
 EMBEDDING_SERVER_URL: str = os.getenv("EMBEDDING_SERVER_URL", "").strip().rstrip("/")
-EMBEDDING_SERVER_TIMEOUT_SECONDS: float = _env_float("EMBEDDING_SERVER_TIMEOUT_SECONDS", 120.0)
+EMBEDDING_QUERY_TIMEOUT_SECONDS: float = _env_float("EMBEDDING_QUERY_TIMEOUT_SECONDS", 10.0)
+EMBEDDING_BATCH_TIMEOUT_SECONDS: float = _env_float("EMBEDDING_BATCH_TIMEOUT_SECONDS", 120.0)
+EMBEDDING_SERVER_TIMEOUT_SECONDS: float = _env_float("EMBEDDING_SERVER_TIMEOUT_SECONDS", EMBEDDING_BATCH_TIMEOUT_SECONDS)
 
 # 임베딩 실행 자원 설정 — 대량 적재 시 CPU 포화·메모리 누적 OOM 완화용. 모두 env로 override.
 #   - EMBEDDING_DEVICE: "auto"면 _get_model()이 cuda → mps → cpu 순으로 가용 디바이스를 고른다.

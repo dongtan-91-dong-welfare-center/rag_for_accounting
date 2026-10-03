@@ -113,7 +113,7 @@ class TestEmbeddingDispatch:
 
         # Assert
         assert result == [[0.5]]
-        mock_remote.assert_called_once_with(["질의"])
+        mock_remote.assert_called_once_with(["질의"], timeout=config.EMBEDDING_QUERY_TIMEOUT_SECONDS)
         mock_local.assert_not_called()
 
     def test_embed_texts_uses_local_model_when_url_unset(self):
@@ -154,7 +154,7 @@ class TestEmbeddingDispatch:
 
         # Assert
         assert tokens == 42
-        mock_remote.assert_called_once_with("본문")
+        mock_remote.assert_called_once_with("본문", timeout=config.EMBEDDING_BATCH_TIMEOUT_SECONDS)
         mock_local.assert_not_called()
 
     def test_tei_http_422_embed_raises_llm_api_connection_error(self):
