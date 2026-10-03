@@ -397,8 +397,48 @@ class TestHybridSearchIntegration:
         
         with pytest.raises(NoContextFoundError) as exc_info:
             search_chunks("query", top_k=5)
-            
+
         assert "검색 결과가 존재하지 않습니다" in str(exc_info.value)   # 검색 결과 0건
+
+
+@pytest.mark.unit
+class TestIncludeSparseFlag:
+    """include_sparse=False — HyDE 가상 답변처럼 Sparse에서 제외해야 하는 질의 경로 검증(#292 Phase 1 H2)"""
+
+    @patch("src.retrieval.searcher.dense_search")
+    @patch("src.retrieval.searcher.sparse_search")
+    def test_include_sparse_false_skips_sparse_search_call(self, mock_sparse, mock_dense, mock_embed):
+        """include_sparse=False면 sparse_search 자체를 호출하지 않고 Dense 결과만 반환한다"""
+        mock_dense.return_value = [
+            RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=1.0, metadata={}),
+        ]
+
+        results = search_chunks("가상 답변 문장", top_k=5, include_sparse=False)
+
+        mock_sparse.assert_not_called()
+        assert [r.chunk_id for r in results] == ["1"]
+
+    @patch("src.retrieval.searcher.dense_search")
+    @patch("src.retrieval.searcher.sparse_search")
+    def test_include_sparse_true_still_calls_sparse_search(self, mock_sparse, mock_dense, mock_embed):
+        """기본값(include_sparse=True)은 기존과 동일하게 Sparse도 호출한다(회귀 방지)"""
+        mock_dense.return_value = [RetrievedChunk(chunk_id="1", document_id="D1", content="c1", score=1.0, metadata={})]
+        mock_sparse.return_value = []
+
+        search_chunks("질의", top_k=5)
+
+        mock_sparse.assert_called_once()
+
+    @patch("src.retrieval.searcher.dense_search")
+    @patch("src.retrieval.searcher.sparse_search")
+    def test_include_sparse_false_dense_failure_raises_SE102(self, mock_sparse, mock_dense, mock_embed):
+        """Sparse를 의도적으로 생략한 상태에서 Dense마저 실패하면 재시도 가능한 SE-102로 분류된다"""
+        mock_dense.side_effect = DatabaseQueryError("DB 커넥션 오류")
+
+        with pytest.raises(DatabaseQueryError):
+            search_chunks("가상 답변 문장", top_k=5, include_sparse=False)
+
+        mock_sparse.assert_not_called()
 
 
 @pytest.mark.unit
