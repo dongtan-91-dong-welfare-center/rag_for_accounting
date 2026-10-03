@@ -32,6 +32,8 @@ ingest = [
     "pdfminer-six>=20260107",
     "pikepdf>=10.7.2",
     "pyhwp>=0.1b15",
+    # 정본 마크다운 생성기(scripts/llm_parse.py)가 PDF 페이지를 PNG로 렌더할 때 쓴다. 코퍼스 생성 전용이다.
+    "pymupdf>=1.24.0",
 ]
 local-embedding = [
     "sentence-transformers>=3.0.0",
