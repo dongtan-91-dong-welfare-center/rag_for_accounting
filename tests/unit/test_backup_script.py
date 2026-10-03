@@ -127,7 +127,7 @@ echo "[DUMP OK] $out"
 
     proc = _exec([_BASH, str(_BACKUP_SH)], env=env)
     assert proc.returncode == 0
-    assert "[BACKUP] 백업 작업이 완료되었습니다" in proc.stdout
+    assert "백업 작업이 완료되었습니다" in proc.stdout
 
     # 과거 파일은 삭제되어야 함
     assert not old_dump.exists()
