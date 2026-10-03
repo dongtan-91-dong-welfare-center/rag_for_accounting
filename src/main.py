@@ -23,7 +23,10 @@
   uv run python -m src.main query "리스 회계처리" --standard GAAP
 """
 import argparse
+import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -93,8 +96,40 @@ def _index_graph(
     return result.model_dump()
 
 
+def _split_batches(items: list, size: int) -> list[list]:
+    """목록을 size개씩 나눈다. 마지막 묶음은 더 짧을 수 있다."""
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _collect_targets(args) -> list[tuple[object, str | None]] | None:
+    """적재 대상 그래프 목록을 (graph, source_path) 형태로 모은다. 대상이 없으면 None."""
+    if args.pdf or args.md:
+        graph, source_path = _build_graph_from_source(args)
+        return [(graph, source_path)]
+
+    if args.ontology_files:
+        json_files = [Path(f) for f in args.ontology_files]
+    else:
+        ontology_dir = Path(args.ontology_dir)
+        json_files = sorted(ontology_dir.glob("*.json"))
+        if not json_files:
+            logger.error(f"온톨로지 JSON을 찾지 못했습니다: {ontology_dir}")
+            return None
+        logger.info(f"온톨로지 JSON {len(json_files)}개 적재 시작: {ontology_dir}")
+    return [(_load_graph_from_json(jf), str(jf)) for jf in json_files]
+
+
+def _print_ingest_summary(summaries: list[dict], collection: str) -> int:
+    total_chunks = sum(r["chunk_count"] for r in summaries)
+    print(f"\n적재 완료: 문서 {len(summaries)}건, 총 {total_chunks}청크 → 테이블 '{collection}'")
+    return total_chunks
+
+
 def run_ingest(args) -> int:
     """적재 경로 실행. 성공 시 0, 적재된 청크가 하나도 없으면 1을 반환한다."""
+    if args.docs_per_restart:
+        return _run_ingest_with_restarts(args)
+
     collection = args.collection
     init_pool()
     try:
@@ -106,22 +141,10 @@ def run_ingest(args) -> int:
             logger.info(f"컬렉션 초기화: {collection}")
             delete_collection(collection)
 
-        # 적재 대상 그래프 목록을 (graph, source_path) 형태로 모은다.
-        targets: list[tuple[object, str | None]] = []
-        if args.pdf or args.md:
-            graph, source_path = _build_graph_from_source(args)
-            targets.append((graph, source_path))
-        else:
-            ontology_dir = Path(args.ontology_dir)
-            json_files = sorted(ontology_dir.glob("*.json"))
-            if not json_files:
-                logger.error(f"온톨로지 JSON을 찾지 못했습니다: {ontology_dir}")
-                return 1
-            logger.info(f"온톨로지 JSON {len(json_files)}개 적재 시작: {ontology_dir}")
-            for jf in json_files:
-                targets.append((_load_graph_from_json(jf), str(jf)))
+        targets = _collect_targets(args)
+        if targets is None:
+            return 1
 
-        total_chunks = 0
         summaries: list[dict] = []
         for graph, source_path in targets:
             result = _index_graph(
@@ -131,19 +154,90 @@ def run_ingest(args) -> int:
                 clause_level=args.clause_level,
                 max_tokens=args.max_tokens,
             )
-            total_chunks += result["chunk_count"]
             summaries.append(result)
             print(
                 f"  - {result['document_id'] or source_path}: "
                 f"{result['chunk_count']}청크 ({result['status']})"
             )
 
-        print(
-            f"\n적재 완료: 문서 {len(summaries)}건, 총 {total_chunks}청크 → 테이블 '{collection}'"
-        )
+        total_chunks = _print_ingest_summary(summaries, collection)
+        if args.summary_file:
+            Path(args.summary_file).write_text(json.dumps(summaries, ensure_ascii=False), encoding="utf-8")
         return 0 if total_chunks > 0 else 1
     finally:
         close_pool()
+
+
+def _child_command(args, files: list[str], summary_path: str) -> list[str]:
+    """자식 프로세스가 실행할 ingest 명령을 만든다. --reset과 --docs-per-restart는 넘기지 않는다."""
+    cmd = [
+        sys.executable, "-m", "src.main", "ingest",
+        "--collection", args.collection,
+        "--max-tokens", str(args.max_tokens),
+    ]
+    if args.clause_level:
+        cmd.append("--clause-level")
+    return cmd + ["--ontology-files", *files, "--summary-file", summary_path]
+
+
+def _run_batch(args, batch: list[Path], tmp_dir: str, index: int) -> list[dict] | None:
+    """문서 묶음 하나를 자식 프로세스로 적재한다. 실패하면 None을 돌려준다."""
+    summary_path = str(Path(tmp_dir) / f"batch_{index}.json")
+    proc = subprocess.run(_child_command(args, [str(f) for f in batch], summary_path), check=False)
+    if proc.returncode != 0 or not Path(summary_path).exists():
+        return None
+    return json.loads(Path(summary_path).read_text(encoding="utf-8"))
+
+
+def _run_ingest_with_restarts(args) -> int:
+    """
+    문서 N개(--docs-per-restart)마다 적재 프로세스를 새로 띄워 누적 메모리를 0에서 다시 시작하게 한다(#150).
+
+    근거: 임베딩 모델을 프로세스 안에서 돌리면 적재가 길어질수록 RSS가 누적되어 OOM이 난다(#117은 증가 속도만 늦춘다).
+    부모는 모델을 로드하지 않고 분할·집계만 맡는다. 자식은 멱등 upsert(ON CONFLICT)로 적재하므로
+    일부 묶음이 실패해도 같은 명령을 다시 실행하면 누락분이 채워진다.
+    """
+    if args.pdf or args.md:
+        logger.error("--docs-per-restart는 온톨로지 JSON 디렉터리 적재에서만 사용할 수 있습니다.")
+        return 1
+
+    files = sorted(Path(f) for f in args.ontology_files) if args.ontology_files else sorted(
+        Path(args.ontology_dir).glob("*.json")
+    )
+    if not files:
+        logger.error(f"온톨로지 JSON을 찾지 못했습니다: {args.ontology_dir}")
+        return 1
+
+    if args.reset:
+        # 컬렉션 초기화는 부모가 한 번만 한다. 자식이 각자 초기화하면 앞 묶음의 적재분이 지워진다.
+        from src.db.vector_store import delete_collection
+
+        init_pool()
+        try:
+            logger.info(f"컬렉션 초기화: {args.collection}")
+            delete_collection(args.collection)
+        finally:
+            close_pool()
+
+    batches = _split_batches(files, args.docs_per_restart)
+    summaries: list[dict] = []
+    failed: list[Path] = []
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for i, batch in enumerate(batches):
+            print(f"[묶음 {i + 1}/{len(batches)}] 문서 {len(batch)}건 적재용 프로세스를 새로 시작합니다.", flush=True)
+            result = _run_batch(args, batch, tmp_dir, i)
+            if result is None:
+                failed.extend(batch)
+                print(f"  묶음 {i + 1} 실패: 이어서 다음 묶음을 진행합니다.", flush=True)
+            else:
+                summaries.extend(result)
+
+    _print_ingest_summary(summaries, args.collection)
+    if failed:
+        print(f"실패한 문서 {len(failed)}건: {', '.join(f.name for f in failed)}")
+        print("같은 명령을 다시 실행하면 멱등 upsert로 누락분이 채워집니다.")
+        return 1
+    return 0
 
 
 # ───────────────────────────── query 경로 ─────────────────────────────
@@ -283,6 +377,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=CHUNK_MAX_TOKENS,
         help=f"청크 1개의 토큰 상한 (기본: {CHUNK_MAX_TOKENS})",
     )
+    p_ingest.add_argument(
+        "--docs-per-restart",
+        type=int,
+        default=0,
+        metavar="N",
+        help="문서 N개마다 적재 프로세스를 새로 띄워 누적 메모리를 비운다(기본 0=끔, 온톨로지 디렉터리 적재 전용)",
+    )
+    # 부모 프로세스가 자식에게 작업 범위와 결과 전달 경로를 넘기는 내부용 인자다.
+    p_ingest.add_argument("--ontology-files", nargs="+", help=argparse.SUPPRESS)
+    p_ingest.add_argument("--summary-file", help=argparse.SUPPRESS)
     p_ingest.set_defaults(func=run_ingest)
 
     # query
