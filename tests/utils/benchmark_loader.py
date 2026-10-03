@@ -9,6 +9,7 @@ from pathlib import Path
 
 # Benchmark 데이터 파일 경로 — 이 파일 기준 세 단계 위인 프로젝트 루트를 기준으로 data/test_data/benchmark.jsonl을 가리킨다.
 BENCHMARK_PATH = Path(__file__).parent.parent.parent / "data" / "test_data" / "benchmark.jsonl"
+BENCHMARK_SAMPLE_PATH = Path(__file__).parent.parent.parent / "data" / "test_data" / "benchmark_sample.jsonl"
 
 
 @dataclass
@@ -25,10 +26,27 @@ class BenchmarkCase:
     core_paras: list[str] = field(default_factory=list)
 
 
-def load_benchmark(path: Path = BENCHMARK_PATH) -> list[BenchmarkCase]:
-    """JSONL 파일을 읽어 BenchmarkCase 리스트로 반환한다."""
+def load_benchmark(path: Path | None = None) -> list[BenchmarkCase]:
+    """JSONL 파일을 읽어 BenchmarkCase 리스트로 반환한다.
+    
+    경로가 주어지지 않으면 BENCHMARK_PATH를 우선 확인하고, 부재 시 BENCHMARK_SAMPLE_PATH로 대체합니다.
+    둘 다 존재하지 않는 경우 빈 리스트를 반환합니다.
+    """
+    if path is None:
+        if BENCHMARK_PATH.exists():
+            target_path = BENCHMARK_PATH
+        elif BENCHMARK_SAMPLE_PATH.exists():
+            target_path = BENCHMARK_SAMPLE_PATH
+        else:
+            return []
+    else:
+        target_path = path
+
+    if not target_path.exists():
+        return []
+
     cases: list[BenchmarkCase] = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(target_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

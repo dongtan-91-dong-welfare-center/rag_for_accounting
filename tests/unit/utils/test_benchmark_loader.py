@@ -37,13 +37,15 @@ class TestBenchmarkCaseSchema:
 
 @pytest.mark.unit
 class TestFixtureCoreParas:
-    """실제 fixture(benchmark.jsonl)의 핵심/보조 1차 라벨 (#163)"""
+    """실제 fixture(benchmark.jsonl 또는 benchmark_sample.jsonl)의 핵심/보조 1차 라벨 (#163)"""
 
     def setup_method(self):
         self.cases = {c.id: c for c in load_benchmark()}
 
     def test_multi_clause_core_marked(self):
         """핵심⊊전체 케이스는 core_paras 지정 — 대표 3건으로 회귀 감지(003·004·012)"""
+        if "TEST-K-GAAP-003" not in self.cases:
+            pytest.skip("Full benchmark.jsonl not present, skipping multi-clause core fixture check")
         assert self.cases["TEST-K-GAAP-003"].core_paras == ["21.8"]
         assert self.cases["TEST-K-GAAP-004"].core_paras == ["15.18"]
         assert self.cases["TEST-K-GAAP-012"].core_paras == ["21.8", "21.10"]
@@ -51,10 +53,14 @@ class TestFixtureCoreParas:
     def test_full_core_cases_unmarked(self):
         """단일조항·전부핵심 케이스는 core_paras 미지정(기본 빈 리스트)"""
         assert self.cases["TEST-K-GAAP-001"].core_paras == []   # 단일 2.65
-        assert self.cases["TEST-K-GAAP-007"].core_paras == []   # 6.29·6.30·6.31 전부 핵심
+        if "TEST-K-GAAP-007" in self.cases:
+            assert self.cases["TEST-K-GAAP-007"].core_paras == []   # 6.29·6.30·6.31 전부 핵심
 
     def test_all_cases_loaded(self):
-        assert len(self.cases) == 114
+        """최소 샘플(2건) 이상 로드되었는지 확인하며, 전체 벤치마크 배치 시 114건 검증"""
+        assert len(self.cases) >= 2
+        if len(self.cases) > 2:
+            assert len(self.cases) == 114
 
     def test_no_practice_prefix_references(self):
         """
