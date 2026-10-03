@@ -78,3 +78,15 @@ export function answerSegments(
   if (cursor < answer.length) segments.push({ kind: "text", text: answer.slice(cursor) });
   return segments;
 }
+
+/** 조항 카드의 인용 마커. 인용된 조항은 ✓, 검색되었으나 답변에 쓰이지 않은 조항은 ◌로 표시한다. */
+export function citedMarker(isCited: boolean): { symbol: string; label: string } {
+  return isCited
+    ? { symbol: "✓", label: "답변에 인용됨" }
+    : { symbol: "◌", label: "검색되었으나 답변에 인용되지 않음" };
+}
+
+/** 미인용 조항이 하나라도 있으면 true. 이때만 ◌ 의미를 풀이하는 안내 문구를 보여준다. */
+export function hasUncited(clauses: { is_cited: boolean }[]): boolean {
+  return clauses.some((c) => !c.is_cited);
+}
