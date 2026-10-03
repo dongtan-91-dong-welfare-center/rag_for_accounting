@@ -21,7 +21,7 @@ def test_timeout_hierarchy_invariants():
     """
     Inside-Out 타임아웃 계층 불변식을 검증한다.
     개별 I/O 타임아웃 (DB 검색 10s, DB 풀 10s, LLM 45s, 쿼리 임베딩 10s)은 반드시
-    상위 LangGraph 노드 타임아웃(60s)보다 작아야 한다.
+    상위 LangGraph 노드 타임아웃(120s)보다 작아야 한다.
     """
     assert SEARCH_TIMEOUT_SECONDS < GRAPH_STEP_TIMEOUT_SECONDS, (
         f"SEARCH_TIMEOUT_SECONDS({SEARCH_TIMEOUT_SECONDS}) >= GRAPH_STEP_TIMEOUT_SECONDS({GRAPH_STEP_TIMEOUT_SECONDS})"

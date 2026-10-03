@@ -96,7 +96,7 @@ rewrite
 | HIL 조건 | 전략이 `decompose` 또는 `stepback`이고 아직 승인되지 않은 경우 |
 | HIL 한도 | `MAX_HIL_COUNT=5` |
 | CRAG 재작성 한도 | `MAX_REWRITE_COUNT=3` |
-| 노드 타임아웃 | `GRAPH_STEP_TIMEOUT_SECONDS=60`초 |
+| 노드 타임아웃 | `GRAPH_STEP_TIMEOUT_SECONDS=120`초 |
 | 리랭커 | `USE_RERANKER=false` 기본값. 켜면 `BAAI/bge-reranker-v2-m3`를 사용한다. |
 
 `evaluate`가 근거 부족을 판단하거나 rerank 임계값 미달로 `needs_reretrieval=True`가 세워지면 rewrite로 되돌아간다. 한도를 넘으면 현재 근거로 답변 생성 단계에 진입하거나 폴백 응답을 반환한다. 노드별 예외 분류 체계와 계층적 타임아웃 상세 규약은 [예외 처리 및 런타임 타임아웃 정책](architecture/exception_policy.md)을 참조한다.

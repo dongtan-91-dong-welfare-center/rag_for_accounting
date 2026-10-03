@@ -39,7 +39,7 @@ graph TD
     end
 
     subgraph Layer2["Layer 2: LangGraph Node Workflow (60s)"]
-        NODE["GRAPH_STEP_TIMEOUT_SECONDS (60.0s)"]
+        NODE["GRAPH_STEP_TIMEOUT_SECONDS (120.0s)"]
     end
 
     subgraph Layer1["Layer 1: Individual I/O Operations (10s ~ 45s)"]
@@ -63,11 +63,12 @@ graph TD
    - `EMBEDDING_QUERY_TIMEOUT_SECONDS` (기본값: 10.0초): 런타임 질의 임베딩(`search` 노드) 통신 상한. 초과 시 `LLMAPIConnectionError(CM-002, node="search")` 발생.
    - `LLM_TIMEOUT_SECONDS` (기본값: 45.0초): OpenAI Client HTTP 요청 타임아웃. 초과 시 `LLMAPIConnectionError(CM-002)` 파생.
 2. **Layer 2: LangGraph Node Workflow**
-   - `GRAPH_STEP_TIMEOUT_SECONDS` (기본값: 60.0초): LangGraph 노드 1개 단위 실행 상한.
+   - `GRAPH_STEP_TIMEOUT_SECONDS` (기본값: 120.0초): LangGraph 노드 1개 단위 실행 상한.
+     - 근거: SDK 재시도 1회를 포함한 최악 시나리오가 노드 상한보다 짧아야 하므로 `LLM_TIMEOUT_SECONDS * (1 + LLM_MAX_RETRIES) + backoff_buffer < GRAPH_STEP_TIMEOUT_SECONDS`(45 * 2 + 5 = 95 < 120)를 유지합니다. `backoff_buffer`는 약 5초로 추정한 값이며 실측(#38) 이후 재조정합니다.
 3. **Layer 3: External Remote Subsystem (Batch)**
    - `EMBEDDING_BATCH_TIMEOUT_SECONDS` (기본값: 120.0초): 오프라인 대량 청크 인덱싱 배치 임베딩 통신 상한 (역호환용 `EMBEDDING_SERVER_TIMEOUT_SECONDS` 제공).
 
-> **안전 마진 및 선순위 이점**: LangSmith/운영 실측 데이터 수집 전 긴 회계 답변 생성이 억울하게 취소되지 않도록 45s/60s의 여유 버퍼를 부여합니다. Layer 1의 I/O 타임아웃(10초~45초)이 Layer 2 노드 타임아웃(60초)보다 먼저 발생하므로, 임베딩이나 OpenAI API 요청이 멈춘 상태로 장시간 지속되면서 토큰 비용과 커넥션을 소모하는 고아 요청 현상을 차단합니다.
+> **안전 마진 및 선순위 이점**: LangSmith/운영 실측 데이터 수집 전 긴 회계 답변 생성이 억울하게 취소되지 않도록 45s/120s의 여유 버퍼를 부여합니다. Layer 1의 I/O 타임아웃(10초~45초)이 Layer 2 노드 타임아웃(120초)보다 먼저 발생하므로, 임베딩이나 OpenAI API 요청이 멈춘 상태로 장시간 지속되면서 토큰 비용과 커넥션을 소모하는 고아 요청 현상을 차단합니다.
 
 ---
 
