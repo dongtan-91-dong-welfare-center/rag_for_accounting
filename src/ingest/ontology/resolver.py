@@ -57,6 +57,34 @@ def _expand_range_target(target: str, paragraphs_in_order: list[str]) -> list[st
     return _expand_match(m, paragraphs_in_order)
 
 
+def _expand_section_range(target: str, lookup: dict[str, str], current_chapter: str = "") -> list[str] | None:
+    """절 범위 표기 target을 그래프의 Section 노드 키 목록으로 확장.
+
+    예: "제2절~제4절" → ["제2절", "제3절", "제4절"]
+        "제2절 내지 제4절", "제2절~4절", "제2절에서 제4절까지" 지원.
+    타 장 참조("제8장 제2절~제4절")가 명시되어 있고 현재 장과 다르면 None 반환 (오연결 방지).
+    역순("제4절~제2절")이거나 범위 내의 시작/끝 절이 lookup에 없으면 None 반환.
+    """
+    m_chap = _CHAPTER_RE.search(target)
+    if m_chap:
+        ref_chap = m_chap.group(1)
+        if current_chapter and ref_chap != current_chapter:
+            return None
+
+    m = _SECTION_RANGE_RE.search(target)
+    if not m:
+        return None
+    s1, s2 = int(m.group(1)), int(m.group(2))
+    if s1 > s2:
+        return None
+
+    sections = [f"제{s}절" for s in range(s1, s2 + 1)]
+    if not sections or sections[0] not in lookup or sections[-1] not in lookup:
+        return None
+
+    return sections
+
+
 def _expand_match(m: re.Match, paragraphs_in_order: list[str]) -> list[str] | None:
     """_RANGE_FULL_RE 매치 하나를 그래프 paragraphs에 맞춰 개별 번호 목록으로 확장한다."""
     p1, n1, p2, n2 = m.group(1), m.group(2), m.group(3), m.group(4)
@@ -144,9 +172,11 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
     # 타 장(Standard) 참조용 결정적 id prefix. 현재 장 Standard id(예: "gaap-ch6")에서
     # 끝 숫자를 떼어 "gaap-ch"를 얻는다. "제N장"은 노드가 없어도 f"{prefix}{N}"으로 연결한다.
     chapter_id_prefix = ""
+    current_chapter = ""
     for node in graph.nodes:
         if node.node_type == "Standard":
             chapter_id_prefix = re.sub(r'\d+$', '', node.id)
+            current_chapter = node.chapter
             break
     resolved = []
 
@@ -159,25 +189,26 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
         ref = edge.unresolved_target
 
         # 시도 0: 절 범위 표기 감지 → 여러 엣지로 split.
+        # 확장 실패 시 원문 그대로 유지하고 일반 처리 분기로 떨어지지 않게 한다
+        # (시작값만 매핑되는 부분 매핑 노이즈 방지).
         if _SECTION_RANGE_RE.search(ref):
-            m_sec = _SECTION_RANGE_RE.search(ref)
-            if m_sec:
-                s1, s2 = int(m_sec.group(1)), int(m_sec.group(2))
-                if s1 <= s2:
-                    for s_num in range(s1, s2 + 1):
-                        sec_key = f"제{s_num}절"
-                        target_id = lookup.get(sec_key)
-                        if target_id:
-                            resolved.append(edge.model_copy(update={
-                                "to_id": target_id,
-                                "unresolved_target": "",
-                                "to_paragraph": "",
-                            }))
-                        else:
-                            resolved.append(edge.model_copy(update={
-                                "unresolved_target": sec_key,
-                            }))
-                    continue
+            expanded_secs = _expand_section_range(ref, lookup, current_chapter)
+            if expanded_secs:
+                for sec_key in expanded_secs:
+                    target_id = lookup.get(sec_key)
+                    if target_id:
+                        resolved.append(edge.model_copy(update={
+                            "to_id": target_id,
+                            "unresolved_target": "",
+                            "to_paragraph": "",
+                        }))
+                    else:
+                        resolved.append(edge.model_copy(update={
+                            "unresolved_target": sec_key,
+                        }))
+            else:
+                resolved.append(edge)
+            continue
 
         # 시도 0.5: 범위 표기 감지 → 여러 엣지로 split. (~ ∼ 내지 에서~까지 부터~까지, 실/결 접두어 포함)
         # 확장 실패 시 원문 그대로 유지하고 일반 처리 분기로 떨어지지 않게 한다
@@ -262,7 +293,7 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
 
     # source_text 기반 범위 완성: LLM이 범위를 끝점으로 쪼개거나 접두어를 누락해도
     # 원문의 범위 표현을 직접 파싱해 누락된 구간 멤버를 결정적으로 보충한다.
-    resolved.extend(_complete_ranges(resolved, lookup, paragraphs_in_order))
+    resolved.extend(_complete_ranges(resolved, lookup, paragraphs_in_order, current_chapter))
 
     # 외부 대상 없이 조건·예외만 있는 HAS_CONDITION은 "이 조항에 조건/예외가 있다"는
     # 메타데이터로 보존한다. to_id를 from_id로 채워 자기루프 엣지로 만든다
@@ -283,7 +314,7 @@ def resolve_edges(graph: OntologyGraph) -> OntologyGraph:
     return graph
 
 
-def _complete_ranges(resolved, lookup, paragraphs_in_order):
+def _complete_ranges(resolved, lookup, paragraphs_in_order, current_chapter: str = ""):
     """source_text의 범위 표현(키워드 고정 규칙)을 직접 파싱해 누락된 범위 멤버 엣지를 보충한다.
 
     같은 (from_id, source_text) 그룹에서 이미 연결된 to_paragraph를 제외한 나머지 구간 멤버를
@@ -327,8 +358,13 @@ def _complete_ranges(resolved, lookup, paragraphs_in_order):
 
         # 절 범위 보충
         for m in _SECTION_RANGE_RE.finditer(source_text):
+            m_chap = _CHAPTER_RE.search(source_text)
+            if m_chap and current_chapter and m_chap.group(1) != current_chapter:
+                continue
             s1, s2 = int(m.group(1)), int(m.group(2))
             if s1 > s2:
+                continue
+            if f"제{s1}절" not in lookup or f"제{s2}절" not in lookup:
                 continue
             for s_num in range(s1, s2 + 1):
                 sec_key = f"제{s_num}절"
