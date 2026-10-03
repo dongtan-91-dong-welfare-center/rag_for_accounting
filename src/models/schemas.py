@@ -117,3 +117,19 @@ class EvaluationResult(BaseModel):
     reasoning: str
     # Pseudo validator:
     # 동일한 validator 적용: confidence ∈ [0, 1]
+
+
+class ContextCheckResult(BaseModel):
+    """
+    청크 문맥 보존 여부 점검 결과: context_harness 하나의 검사 케이스 출력
+
+    chunk_id     : 검사 대상 청크 식별자
+    check_type   : 검사 종류: "sentence_boundary" 또는 "clause_number_gap"
+    passed       : True이면 문맥이 온전히 보존됨, False이면 단절 또는 이상 감지
+    detail       : 판정 근거 텍스트 (docs/benchmark/ 형식과 동일하게 케이스별 근거 포함)
+    """
+
+    chunk_id: str
+    check_type: Literal["sentence_boundary", "clause_number_gap"]
+    passed: bool
+    detail: str
