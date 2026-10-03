@@ -20,7 +20,8 @@ import type {
   StandardFilter,
   WorkflowResponse,
 } from "./api";
-import { checkPdfAvailable, documentPdfUrl, postQuery, postResume } from "./api";
+import { checkPdfAvailable, documentPdfUrl, postFeedback, postQuery, postResume } from "./api";
+import type { FeedbackRating } from "./api";
 import { answerSegments, citedMarker, hasUncited, humanNodeTitle, paraChips } from "./clauseDisplay";
 
 const STANDARD_OPTIONS: { value: StandardFilter; label: string }[] = [
@@ -655,8 +656,8 @@ function Result({
           onOpenRef={(i) => onOpenCitation(response.citations[i])}
         />
       </div>
-
       <ClauseList clauses={response.clauses} />
+      <FeedbackBar threadId={response.thread_id} />
     </section>
   );
 }
@@ -700,5 +701,61 @@ function ClauseList({ clauses }: { clauses: ClauseOut[] }) {
         })}
       </ol>
     </details>
+  );
+}
+
+/** 답변 평가(#300) — 좋아요/아쉬워요 선택 후 아쉬운 경우 사유를 선택적으로 남긴다. */
+function FeedbackBar({ threadId }: { threadId: string }) {
+  const [rating, setRating] = useState<FeedbackRating | null>(null);
+  const [reason, setReason] = useState("");
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  const submit = async (r: FeedbackRating, why?: string) => {
+    setState("saving");
+    try {
+      await postFeedback(threadId, r, why);
+      setState("saved");
+    } catch {
+      setState("error");
+    }
+  };
+
+  if (state === "saved") {
+    return <p className="notice">평가해 주셔서 감사합니다.</p>;
+  }
+  return (
+    <div className="feedback-bar" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span>이 답변이 도움이 되었나요?</span>
+        <button
+          type="button"
+          disabled={state === "saving"}
+          onClick={() => {
+            setRating("up");
+            void submit("up");
+          }}
+        >
+          도움이 됨
+        </button>
+        <button type="button" disabled={state === "saving"} onClick={() => setRating("down")}>
+          아쉬움
+        </button>
+      </div>
+      {rating === "down" && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={reason}
+            maxLength={2000}
+            placeholder="아쉬운 점을 적어 주세요 (선택)"
+            onChange={(e) => setReason(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <button type="button" disabled={state === "saving"} onClick={() => void submit("down", reason.trim())}>
+            보내기
+          </button>
+        </div>
+      )}
+      {state === "error" && <p className="notice warning">평가를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.</p>}
+    </div>
   );
 }

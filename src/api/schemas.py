@@ -51,6 +51,12 @@ class CitationOut(BaseModel):
     paras: list[str] = []
 
 
+class FeedbackResponse(BaseModel):
+    """POST /feedback 응답(#300) — 저장 성공만 알린다."""
+
+    status: Literal["saved"] = "saved"
+
+
 class InterruptOption(BaseModel):
     """HIL 결정 선택지 — /resume의 action으로 되돌아온다."""
 

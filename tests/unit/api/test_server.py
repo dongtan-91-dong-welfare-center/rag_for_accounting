@@ -378,3 +378,31 @@ class TestReadinessChecks:
         monkeypatch.setattr("src.api.server.get_pool", lambda: Pool())
         server._check_database()
         assert executed == ["SELECT 1"]
+
+
+class TestFeedback:
+    """POST /feedback — 답변 평가 저장(#300)."""
+
+    def test_saves_feedback(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("src.api.server.save_feedback", lambda **kw: captured.update(kw))
+        r = client.post("/feedback", json={"thread_id": "t1", "rating": "down", "reason": " 조항 오류 "})
+        assert r.status_code == 200
+        assert r.json() == {"status": "saved"}
+        assert captured == {"thread_id": "t1", "rating": "down", "reason": "조항 오류"}
+
+    def test_invalid_rating_is_422(self, client):
+        r = client.post("/feedback", json={"thread_id": "t1", "rating": "meh"})
+        assert r.status_code == 422
+
+    def test_reason_too_long_is_422(self, client):
+        r = client.post("/feedback", json={"thread_id": "t1", "rating": "up", "reason": "가" * 2001})
+        assert r.status_code == 422
+
+    def test_db_failure_is_503(self, client, monkeypatch):
+        def boom(**kw):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr("src.api.server.save_feedback", boom)
+        r = client.post("/feedback", json={"thread_id": "t1", "rating": "up"})
+        assert r.status_code == 503
