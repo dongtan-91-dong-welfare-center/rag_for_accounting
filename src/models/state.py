@@ -1,7 +1,14 @@
 # FUNC-009: LangGraph 파이프라인 전체 노드가 공유하는 상태 객체
 from pydantic import BaseModel, field_validator
 from typing import Literal, TypedDict
-from src.models.schemas import RewrittenQuery, RetrievedChunk, RerankingResult, EvaluationResult, FinalResponse
+from src.models.schemas import (
+    RewrittenQuery,
+    RetrievedChunk,
+    RerankingResult,
+    EvaluationResult,
+    FinalResponse,
+    QueryScopeCategory,
+)
 from src.utils.config import MAX_ERROR_LOGS
 
 class ErrorLog(TypedDict):
@@ -27,6 +34,7 @@ class GraphState(BaseModel):
 
     # 의도 분류
     is_accounting_query:  bool                   = True   # 회계 질의 여부. 비회계면 route_after_rewrite가 early_exit로 분기
+    query_scope:          QueryScopeCategory     = "accounting"  # 질의 범위 세부 분류 ("accounting" | "out_of_scope_adjacent" | "completely_unrelated")
     classification_confidence: float             = 0.0    # [rewrite 노드] LLM이 보고한 회계/비회계 분류 신뢰도(0.0~1.0). early_exit가 FinalResponse.confidence_score로 전달
 
     # 질의 재작성 및 검색 관련

@@ -2,6 +2,8 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Literal
 
+QueryScopeCategory = Literal["accounting", "out_of_scope_adjacent", "completely_unrelated"]
+
 class Citation(BaseModel):
     """인용 근거 — 답변 생성 시 참조한 문서 출처 정보"""
     document_id: str

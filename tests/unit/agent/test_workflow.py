@@ -299,7 +299,7 @@ class TestEarlyExitRouting:
         """비회계 질의는 search/rerank/evaluate/generate를 거치지 않고 즉시 종료된다 (E2E)"""
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(False, "bypass", 0.9),
+            return_value=(False, "bypass", 0.9, "completely_unrelated"),
         ):
             final_state = workflow_app.invoke(initial_state)
 

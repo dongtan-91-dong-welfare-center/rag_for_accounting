@@ -70,8 +70,13 @@ def _strip_markdown(content: str | None) -> str:
     return re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
 
 
-def classify_and_select(query: str, error_logs: list[ErrorLog] | None = None) -> tuple[bool, str, float]:
-    """회계 여부·검색 전략·분류 신뢰도를 단일 LLM 호출로 판단한다. 실패 시 (True, 'hyde', 0.0)로 폴백."""
+def classify_and_select(
+    query: str, error_logs: list[ErrorLog] | None = None
+) -> tuple[bool, str, float, str]:
+    """회계 여부·검색 전략·분류 신뢰도·범위 세부 범주를 단일 LLM 호출로 판단한다.
+
+    실패 시 (True, 'hyde', 0.0, 'accounting')로 폴백.
+    """
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
@@ -82,16 +87,18 @@ def classify_and_select(query: str, error_logs: list[ErrorLog] | None = None) ->
         data = json.loads(_strip_markdown(resp.choices[0].message.content)) # LLM의 json 출력물을 딕셔너리로 변환
         raw = data.get("is_accounting", True)
         # LLM이 boolean 대신 문자열 "True"/"False"를 반환하는 경우 명시적 변환
-        # str(raw).lower() == "true" → "true"면 True, 아니면 False 반환
         is_accounting = raw if isinstance(raw, bool) else str(raw).lower() == "true"
         strategy = data.get("strategy", "hyde")
-        # LLM이 보고한 분류 신뢰도. 비회계 조기 종료 시 FinalResponse.confidence_score로 전달되어
-        # 운영 단계에서 분류 경계가 모호한(낮은 신뢰도) 케이스를 추출·분석하는 데 활용된다.
+        # query_scope 추출: 지정되지 않은 경우 is_accounting 여부로 유추
+        scope = data.get("query_scope")
+        if scope not in {"accounting", "out_of_scope_adjacent", "completely_unrelated"}:
+            scope = "accounting" if is_accounting else "completely_unrelated"
+        # LLM이 보고한 분류 신뢰도.
         confidence = _coerce_confidence(data.get("confidence"))
-        return is_accounting, strategy, confidence
+        return is_accounting, strategy, confidence, scope
     except Exception as e:
         _record_llm_failure("classify_and_select", e, error_logs)
-        return True, "hyde", 0.0
+        return True, "hyde", 0.0, "accounting"
 
 
 def _coerce_confidence(raw) -> float:
@@ -197,9 +204,10 @@ def rewrite_query(state: GraphState) -> GraphState:
     state.human_feedback = None
 
     try:
-        is_accounting, strategy, confidence = classify_and_select(state.original_query, state.error_logs)
+        is_accounting, strategy, confidence, scope = classify_and_select(state.original_query, state.error_logs)
         state.is_accounting_query = is_accounting
         state.classification_confidence = confidence
+        state.query_scope = scope
 
         if not is_accounting:
             state.rewritten_query = RewrittenQuery(
@@ -211,9 +219,17 @@ def rewrite_query(state: GraphState) -> GraphState:
 
         # 분류기가 _STRATEGY_FN에 없는 전략(프롬프트가 허용하는 'bypass' 등)을 반환할 수 있으므로 암묵적 KeyError에 의존하지 않고 명시적으로 검증한다.
         # 미정의 전략은 아래 outer except가 bypass로 강등한다.
+        # 정규화: 전략 문자열 앞뒤 공백 제거
+        strategy = strategy.strip() if isinstance(strategy, str) else strategy
+        if not strategy:
+            strategy = "bypass"
         if strategy not in _STRATEGY_FN:
             raise ValueError(f"분류기가 미정의 전략을 반환: {strategy!r}")
         queries = _STRATEGY_FN[strategy](state.original_query, state.standard_filter, feedback, state.error_logs)
+        # hyde 전략이 단일 가상 답변만 반환한 경우 원문을 선두에 추가하여 최소 2개를 보장한다.
+        # apply_hyde 폴백(LLM 실패) 시에는 이미 원문이 포함되어 있으므로 중복 추가하지 않는다.
+        if strategy == "hyde" and len(queries) == 1 and queries[0] != state.original_query:
+            queries.insert(0, state.original_query)
         state.rewritten_query = RewrittenQuery(
             original_query=state.original_query,
             strategy=strategy,
