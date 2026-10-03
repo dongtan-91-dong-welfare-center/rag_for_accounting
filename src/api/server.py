@@ -28,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
+import psycopg
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
@@ -230,14 +231,32 @@ def query(req: QueryRequest) -> WorkflowResponse:
 
 @app.post("/resume", response_model=WorkflowResponse)
 def resume(req: ResumeRequest) -> WorkflowResponse:
-    """HIL 중단 재개 — 재중단 가능(MAX_HIL_COUNT까지), 미존재 thread_id는 404."""
-    if not thread_exists(req.thread_id):
+    """HIL 중단 재개 — 재중단 가능(MAX_HIL_COUNT까지), 미존재 thread_id는 404, DB 장애 시 503."""
+    try:
+        exists = thread_exists(req.thread_id)
+    except psycopg.Error as e:
+        logger.error(f"HIL 세션 확인 중 DB 오류 발생: thread_id={req.thread_id}, {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="데이터베이스 연결 장애로 세션을 조회할 수 없습니다.",
+        ) from e
+
+    if not exists:
         raise HTTPException(status_code=404, detail=f"unknown thread_id: {req.thread_id}")
+
     decision: dict = {"action": req.action}
     if req.feedback is not None:
         decision["feedback"] = req.feedback
     start = time.perf_counter()
-    result = resume_workflow(req.thread_id, decision)
+    try:
+        result = resume_workflow(req.thread_id, decision)
+    except psycopg.Error as e:
+        logger.error(f"HIL 세션 재개 중 DB 오류 발생: thread_id={req.thread_id}, {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="데이터베이스 연결 장애로 세션을 재개할 수 없습니다.",
+        ) from e
+
     response = to_api_response(result)
     _record_interaction(
         endpoint="resume",
