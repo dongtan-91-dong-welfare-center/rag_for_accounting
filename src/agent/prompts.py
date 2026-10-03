@@ -41,27 +41,32 @@ true로 판정하는 경우는 다음과 같다:
 }}
 """
 
-CLASSIFY_STRATEGY_PROMPT: str = """당신은 사용자 질의를 분석하여 회계·감사 관련 여부와 검색 전략을 동시에 판단하는 전문가입니다.
+CLASSIFY_STRATEGY_PROMPT: str = """당신은 사용자 질의를 분석하여 회계·감사 관련 여부, 범위 세부 범주, 검색 전략을 동시에 판단하는 전문가입니다.
 
 질의: {query}
 
 반드시 JSON으로만 답하세요:
-{{"is_accounting": true | false, "strategy": "hyde" | "decompose" | "stepback" | "bypass", "confidence": 0.0 ~ 1.0}}
+{{"is_accounting": true | false, "query_scope": "accounting" | "out_of_scope_adjacent" | "completely_unrelated", "strategy": "hyde" | "decompose" | "stepback" | "bypass", "confidence": 0.0 ~ 1.0}}
 
 [confidence 작성 규칙]
-- is_accounting 판단(회계/비회계 분류)에 대한 스스로의 확신 정도를 0.0~1.0으로 기록합니다.
+- is_accounting 및 query_scope 판단에 대한 스스로의 확신 정도를 0.0~1.0으로 기록합니다.
 - 명백하게 회계/비회계로 구분되는 질의는 1.0에 가깝게, 경계가 모호한 질의는 0.5~0.7 수준으로 보수적으로 기록합니다.
 
-[is_accounting 판단 기준]
-회계 관련 (true):
+[query_scope 및 is_accounting 판단 기준]
+1. 회계기준서 범위 내 (is_accounting=true, query_scope="accounting"):
 - 재무제표: 재무상태표, 손익계산서, 현금흐름표, 자본변동표, 주석
-- 회계기준: K-IFRS, K-GAAP, 한국채택국제회계기준, 일반기업회계기준
-- 자산·부채: 유형자산, 무형자산, 유동자산, 비유동자산, 금융자산, 유동부채, 비유동부채, 충당부채, 사채, 리스부채
-- 손익: 수익인식, 비용, 매출, 손상차손, 감가상각, 대손상각, 공정가치 평가
-- 자본: 자본금, 주식발행초과금, 이익잉여금, 기타포괄손익
-- 감사: 외부감사, 내부통제, 감사보고서, 감사의견, 핵심감사사항(KAM)
-- 결합: 사업결합, 연결재무제표, 지분법, 종속기업·관계기업
-비회계 (false): 인사말, 날씨, 일반 상식, 코딩, 요리, 법률(민법·상법 일반), 세무·세법
+- 회계기준: K-IFRS, K-GAAP, 한국채택국제회계기준, 일반기업회계기준 조항 및 회계처리 원칙
+- 자산·부채·자본: 유형자산, 무형자산, 유동/비유동자산, 금융자산, 부채, 충당부채, 자본금, 잉여금 등
+- 손익: 수익인식, 비용, 손상차손, 감가상각, 공정가치 평가
+- 감사 및 결합: 외부감사, 내부통제, 감사보고서 기준, 사업결합, 연결재무제표, 지분법
+
+2. 회계 인접 분야이나 기준서 검색 스코프 밖 (is_accounting=false, query_scope="out_of_scope_adjacent"):
+- 세무 신고 및 세법: 부가가치세 신고 실무, 원천징수, 연말정산 절차, 법인세 세무조정 서식 작성 등
+- 개별 기업 감사보고서 해석: 특정 기업의 고유 감사보고서 의견이나 공시 사실관계 직접 해석
+- 단순 경리/행정 실무: 영수증 처리 규정, 단순 전표 결재선, 4대 보험 행정
+
+3. 완전히 무관한 질의 (is_accounting=false, query_scope="completely_unrelated"):
+- 인사말, 날씨, 일반 상식, 프로그래밍/코딩, 요리, 여행, 일반 법률(민법·형법 일반) 등
 
 [strategy 선택 기준] — is_accounting=false면 "bypass"를 선택하고, is_accounting=true면 아래 세 가지 중 하나를 선택한다.
 - "bypass"  : is_accounting=false인 경우

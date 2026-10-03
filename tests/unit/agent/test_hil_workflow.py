@@ -112,7 +112,7 @@ class TestHILInterruptResume:
         """decompose 전략으로 분류되도록 강제하여 워크플로우를 invoke"""
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, "decompose", 0.8),
+            return_value=(True, "decompose", 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": ["유형자산 감가상각은?", "무형자산 상각은?"]}
@@ -153,7 +153,7 @@ class TestHILInterruptResume:
         # 루프백 시 rewrite가 다시 호출되므로 classify/client를 동일하게 패치
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, "decompose", 0.8),
+            return_value=(True, "decompose", 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": ["유형자산 감가상각은?", "무형자산 상각은?"]}
@@ -174,7 +174,7 @@ class TestHILInterruptResume:
 
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, "decompose", 0.8),
+            return_value=(True, "decompose", 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": ["유형자산 감가상각은?", "무형자산 상각은?"]}
@@ -231,7 +231,7 @@ class TestRunResumeWorkflow:
         """실제 그래프에서 decompose 질의가 interrupt되면 thread_id와 __interrupt__를 함께 반환한다"""
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, "decompose", 0.8),
+            return_value=(True, "decompose", 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             mock_client.chat.completions.create.return_value = _mock_resp(
                 {"sub_queries": ["a", "b"]}
@@ -275,7 +275,7 @@ class TestHILDisabledGraph:
         """
         with patch(
             "src.agent.nodes.rewrite.classify_and_select",
-            return_value=(True, strategy, 0.8),
+            return_value=(True, strategy, 0.8, "accounting"),
         ), patch("src.agent.nodes.rewrite.client") as mock_client:
             # decompose(sub_queries)·stepback(abstract_query) 양쪽 키를 모두 담아 전략 무관 대응
             mock_client.chat.completions.create.return_value = _mock_resp({
