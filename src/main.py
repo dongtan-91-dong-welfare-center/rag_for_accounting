@@ -31,7 +31,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src.db.connection import close_pool, init_pool
+from src.db.connection import close_checkpointer_pool, close_pool, init_pool
 from src.utils.config import CHUNK_MAX_TOKENS, CHUNKS_TABLE
 from src.utils.logger import get_logger
 
@@ -333,6 +333,7 @@ def run_query(args) -> int:
         return 0
     finally:
         close_pool()
+        close_checkpointer_pool()
 
 
 # ───────────────────────────── CLI 구성 ─────────────────────────────
