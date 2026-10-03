@@ -87,13 +87,20 @@ def classify_and_select(
         data = json.loads(_strip_markdown(resp.choices[0].message.content)) # LLM의 json 출력물을 딕셔너리로 변환
         raw = data.get("is_accounting", True)
         # LLM이 boolean 대신 문자열 "True"/"False"를 반환하는 경우 명시적 변환
+        # str(raw).lower() == "true" → "true"면 True, 아니면 False 반환
         is_accounting = raw if isinstance(raw, bool) else str(raw).lower() == "true"
         strategy = data.get("strategy", "hyde")
         # query_scope 추출: 지정되지 않은 경우 is_accounting 여부로 유추
         scope = data.get("query_scope")
         if scope not in {"accounting", "out_of_scope_adjacent", "completely_unrelated"}:
             scope = "accounting" if is_accounting else "completely_unrelated"
-        # LLM이 보고한 분류 신뢰도.
+        # is_accounting과 query_scope가 모순되면 is_accounting을 기준으로 정규화한다.
+        if is_accounting and scope != "accounting":
+            scope = "accounting"
+        elif not is_accounting and scope == "accounting":
+            scope = "completely_unrelated"
+        # LLM이 보고한 분류 신뢰도. 비회계 조기 종료 시 FinalResponse.confidence_score로 전달되어
+        # 운영 단계에서 분류 경계가 모호한(낮은 신뢰도) 케이스를 추출·분석하는 데 활용된다.
         confidence = _coerce_confidence(data.get("confidence"))
         return is_accounting, strategy, confidence, scope
     except Exception as e:
