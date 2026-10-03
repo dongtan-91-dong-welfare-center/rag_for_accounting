@@ -205,6 +205,32 @@ class TestCRAGLoopPath:
         )
         assert route_after_evaluate(state) == "rewrite" # 라우팅이 rewrite인지 확인
 
+    def test_route_after_evaluate_reretrieval_takes_precedence_over_all_signals(self):
+        """
+        needs_reretrieval=True는 evaluation.needs_external=False나 evaluate 노드 에러 등
+        다른 어떤 상태 플래그보다 최우선순위로 평가되어 rewrite로 라우팅되어야 한다.
+        (단, rewrite_count < MAX_REWRITE_COUNT 조건 내)
+        """
+        # evaluation은 정상(needs_external=False)이라고 주장하더라도 리랭커의 needs_reretrieval이 1순위
+        state_with_conflicting_eval = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            needs_reretrieval=True,
+            evaluation=EvaluationResult(
+                is_relevant=True,
+                needs_external=False,
+                confidence=0.95,
+                reasoning="검색된 문서로 충분합니다."
+            ),
+            rewrite_count=1,
+            error_logs=[{
+                "timestamp": "2026-05-17T10:00:00+09:00",
+                "node": "evaluate",
+                "error_type": "EV-301",
+                "message": "평가 경고",
+            }],
+        )
+        assert route_after_evaluate(state_with_conflicting_eval) == "rewrite"
+
     def test_route_after_evaluate_with_none_evaluation(self):
         """evaluation=None 엣지 케이스에서 에러 없이 generate를 반환하는지 검증
         (needs_reretrieval=False, error_logs=[], evaluation=None 조합)"""
