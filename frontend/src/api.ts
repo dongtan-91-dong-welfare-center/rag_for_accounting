@@ -111,6 +111,19 @@ export function postResume(
   return post("/resume", body);
 }
 
+export type FeedbackRating = "up" | "down";
+
+/** 답변 평가 저장(#300) — thread_id는 /query 응답의 값을 사용한다. */
+export function postFeedback(
+  threadId: string,
+  rating: FeedbackRating,
+  reason?: string,
+): Promise<{ status: "saved" }> {
+  const body: Record<string, unknown> = { thread_id: threadId, rating };
+  if (reason) body.reason = reason;
+  return post("/feedback", body);
+}
+
 /** 원문 PDF 서빙 경로 — 브라우저 내장 뷰어의 #page=N 으로 해당 페이지를 연다. */
 export function documentPdfUrl(documentId: string, page?: number): string {
   const hash = page ? `#page=${page}` : "";
