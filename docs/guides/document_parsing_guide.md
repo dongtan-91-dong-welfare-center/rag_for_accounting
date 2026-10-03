@@ -33,4 +33,23 @@
 | 원문 자체가 짧음 | 제24장 p5 (목록 파편 38자) |
 | 인접 페이지에 병합 | 일반기업회계기준_시행일_및_경과규정 p11 |
 
+---
 
+## 4. 정본 생성 절차와 사용 모델
+
+정본(`data/llm_parsed/*.md`)은 `scripts/llm_parse.py`로 생성한다. PDF를 페이지별 이미지로 렌더하고, 비전 LLM에 이미지와 heading 규약 프롬프트를 보내 마크다운으로 변환한 뒤, 페이지 마커(§1)를 끼워 한 파일로 병합한다. 페이지별 결과는 `data/llm_parsed/pages/<문서명>/`에 캐시하므로 중단 후 재실행하면 이어서 진행한다.
+
+```bash
+uv sync --extra ingest
+uv run python scripts/llm_parse.py <PDF 경로> [--pages 1-10] [--base-url ...] [--model ...] [--force]
+```
+
+| 항목 | 값 |
+|---|---|
+| 기본 모델 | `qwen3.6-35b` (스크립트의 `DEFAULT_MODEL`) |
+| 기본 엔드포인트 | `http://localhost:8000/v1` (OpenAI 호환 `chat/completions`) |
+| 렌더 해상도 | 250 dpi |
+
+`근거:` 정본을 만든 도구와 모델이 코드로 남아 있어야, 기준서가 개정되었을 때 정본을 다시 만들고 파싱 품질 문제가 발견되었을 때 프롬프트를 고쳐 재생성할 수 있다.
+
+로컬 자체 호스팅 LLM 서버를 전제로 하며, 호환되는 서버라면 `--base-url`과 `--model`로 바꿀 수 있다. API 기반 대체 경로는 제공하지 않는다.
