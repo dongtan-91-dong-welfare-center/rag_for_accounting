@@ -78,7 +78,6 @@ max-complexity = 10
 "src/ingest/ontology/review_auditor.py" = ["C901"]
 "src/ingest/parse/cluster_merge.py" = ["C901"]
 "src/ingest/parse/layout_config.py" = ["C901"]
-"tests/utils/benchmark_metrics.py" = ["C901"]
 
 [tool.pyright]
 include = ["src"]
