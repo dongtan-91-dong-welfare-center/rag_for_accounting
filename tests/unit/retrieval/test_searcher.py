@@ -217,6 +217,72 @@ class TestWeightedRRF:
         with pytest.raises(ValueError, match="weights 길이"):
             reciprocal_rank_fusion([dense, []], weights=[1.0])
 
+    def test_rrf_asymmetric_list_order_invariance(self):
+        """
+        리스트 전달 순서와 가중치 순서가 쌍으로 함께 바뀌면 각 청크의 최종 RRF 점수는 변함없이 동일해야 한다.
+        (합산 누적의 교환법칙 및 가중치 매핑 불변식 검증)
+        """
+        c1 = self._chunk("1")
+        c2 = self._chunk("2")
+        c3 = self._chunk("3")
+
+        dense = [c1, c2]
+        sparse = [c2, c3]
+
+        w_dense = 1.0
+        w_sparse = config.SPARSE_FUSION_WEIGHT
+
+        fused_order1 = reciprocal_rank_fusion([dense, sparse], weights=[w_dense, w_sparse])
+        fused_order2 = reciprocal_rank_fusion([sparse, dense], weights=[w_sparse, w_dense])
+
+        scores_order1 = {c.chunk_id: c.score for c in fused_order1}
+        scores_order2 = {c.chunk_id: c.score for c in fused_order2}
+
+        assert scores_order1["1"] == pytest.approx(scores_order2["1"])
+        assert scores_order1["2"] == pytest.approx(scores_order2["2"])
+        assert scores_order1["3"] == pytest.approx(scores_order2["3"])
+
+    def test_rrf_tie_breaking_order_stability(self):
+        """
+        RRF 점수가 완전히 동점일 때 앞쪽 리스트에 먼저 등장한 청크가 우선순위를 갖는 안정 정렬 계약을 보증한다.
+        (searcher.py의 '동점 시 앞쪽 리스트의 순서가 유지된다' 계약 검증)
+        """
+        c_first = self._chunk("chunk_first")
+        c_second = self._chunk("chunk_second")
+
+        list_a = [c_first]
+        list_b = [c_second]
+
+        # 동일 가중치에서 각각 1순위이므로 RRF 점수는 1.0 / (k + 1)로 완전 동점
+        fused_ab = reciprocal_rank_fusion([list_a, list_b], weights=[1.0, 1.0])
+        fused_ba = reciprocal_rank_fusion([list_b, list_a], weights=[1.0, 1.0])
+
+        assert fused_ab[0].chunk_id == "chunk_first"
+        assert fused_ab[1].chunk_id == "chunk_second"
+        assert fused_ab[0].score == pytest.approx(fused_ab[1].score)
+
+        assert fused_ba[0].chunk_id == "chunk_second"
+        assert fused_ba[1].chunk_id == "chunk_first"
+        assert fused_ba[0].score == pytest.approx(fused_ba[1].score)
+
+    def test_rrf_with_empty_intermediate_list(self):
+        """
+        중간에 빈 리스트([dense, [], sparse])가 포함되어도 가중치 매핑 인덱스가 밀리지 않고 올바르게 할당된다.
+        """
+        k = config.RRF_K
+        dense = [self._chunk("d1")]
+        empty: list = []
+        sparse = [self._chunk("s1")]
+
+        weights = [1.0, 0.5, 0.2]
+        fused = reciprocal_rank_fusion([dense, empty, sparse], weights=weights)
+
+        by_id = {c.chunk_id: c.score for c in fused}
+        assert by_id["d1"] == pytest.approx(1.0 / (k + 1))
+        assert by_id["s1"] == pytest.approx(0.2 / (k + 1))
+        assert len(fused) == 2
+
+
 
 @pytest.mark.unit
 class TestSparseSearchMorph:
