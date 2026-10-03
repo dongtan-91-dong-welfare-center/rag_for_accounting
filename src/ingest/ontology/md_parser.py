@@ -8,6 +8,8 @@ _SECTION_RE = re.compile(r'제\s*(\d+)\s*절')
 _PARA_RE = re.compile(r'^(?:실|결)?(?:\d+\.(?:[A-Z]\d+|\d+)(?:의\d+)?)|^사례\s*\d+')
 # H3·H4 헤딩 및 본문 줄 끝의 참조 어노테이션. 예: "기타 (문단 6.28)", "...이다. (문단 10.8∼10.9)"
 # 범위 표기(∼~)는 resolver에서 그래프의 실제 paragraphs를 보고 확장한다.
+# 파서가 쪽마다 붙이는 마커. "이 줄부터 N쪽 내용"을 뜻한다(#297).
+_PAGE_MARKER_RE = re.compile(r'^<!--\s*page\s+(\d+)\s*-->$')
 _PARA_ANNOT_RE = re.compile(r'\(문단\s*([^)]+)\)\s*$')
 
 
@@ -64,6 +66,7 @@ def parse_markdown(
     # 서브섹션끼리만이 아니라 Section·Standard id까지 통틀어 비교한다. 재등장 시 suffix(-2, -3).
     heading_ref_targets: list[str] = []  # 현재 H3 헤딩 어노테이션에서 추출한 참조 원문
     heading_ref_source: str = ""         # 어노테이션이 포함된 원래 H3 헤딩 텍스트 (source_text 용)
+    current_page: int | None = None      # 마커로 추적하는 현재 쪽. 새 노드의 start_page가 된다.
     current_para_id: str = ""            # H4에서 추출된 현재 문단 번호. 본문 어노테이션 엣지의 paragraph 필드에 사용.
 
     def flush_subsection() -> None:
@@ -115,6 +118,11 @@ def parse_markdown(
     for line in text.split('\n'):
         stripped = line.strip()
 
+        # 쪽 마커: 현재 쪽만 갱신하고, 줄 자체는 아래 일반 텍스트 경로로 흘려 content에 보존한다(청킹 단계에서 제거).
+        m_page = _PAGE_MARKER_RE.match(stripped)
+        if m_page:
+            current_page = int(m_page.group(1))
+
         # H1: Standard (# 제N장)
         if stripped.startswith('# ') and not stripped.startswith('## '):
             heading = stripped[2:].strip()
@@ -165,7 +173,7 @@ def parse_markdown(
                 order = child_order[standard_id]
                 current_section = OntologyNode(
                     id=sec_id, node_type="Section",
-                    title=heading, order=order,
+                    title=heading, order=order, start_page=current_page,
                 )
                 graph.nodes.append(current_section)
                 graph.edges.append(OntologyEdge(
@@ -214,6 +222,7 @@ def parse_markdown(
                 node_type="Subsection",
                 title=heading,
                 order=child_order[parent_id],
+                start_page=current_page,
             )
             continue
 
