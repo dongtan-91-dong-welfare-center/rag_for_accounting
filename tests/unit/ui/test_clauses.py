@@ -107,3 +107,12 @@ def test_page_range_defaults_to_none_when_absent():
     """백필 전(또는 미매칭) 청크는 페이지가 None — 뷰어 버튼 미표시로 강등된다."""
     row = build_clause_rows([_rr("a", 0.5)])[0]
     assert (row.page_start, row.page_end) == (None, None)
+
+
+def test_is_cited_flag_mapping():
+    """cited_chunk_ids에 포함된 청크는 is_cited=True, 아닌 것은 False로 표시된다."""
+    rr1 = _rr("chunk_1", 0.9)
+    rr2 = _rr("chunk_2", 0.8)
+    rows = build_clause_rows([rr1, rr2], cited_chunk_ids={"chunk_1"})
+    assert rows[0].is_cited is True
+    assert rows[1].is_cited is False

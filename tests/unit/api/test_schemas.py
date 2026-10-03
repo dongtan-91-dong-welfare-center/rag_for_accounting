@@ -79,13 +79,14 @@ class TestDoneResponse:
         assert res.error_code is None
 
     def test_clauses_follow_build_clause_rows_contract(self):
-        """clauses[]는 build_clause_rows 재사용 — 1-based rank·chunk.score 노출"""
+        """clauses[]는 build_clause_rows 재사용 — 1-based rank·chunk.score 노출 및 is_cited 인용 교차표시"""
         res = to_api_response(_done_result())
         assert [c.rank for c in res.clauses] == [1, 2]
         assert res.clauses[0].score == 0.9
         assert res.clauses[0].chapter == "6"
         assert res.clauses[0].node_id == "gaap-ch6-s1"
         assert res.clauses[0].content == "조항 본문"
+        assert res.clauses[0].is_cited is False
 
     def test_citations_are_mapped(self):
         res = to_api_response(_done_result())

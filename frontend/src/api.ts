@@ -17,6 +17,8 @@ export interface ClauseOut {
   page_end: number | null;
   /** 문단번호 칩 — 서버 공용 규칙 추출·원형 보존(가지번호 유지). 번호가 없는 청크는 빈 배열. */
   paras: string[];
+  /** 답변 인용 여부(✓/◌ 교차표시). */
+  is_cited: boolean;
 }
 
 export interface CitationOut {
