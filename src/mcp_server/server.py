@@ -33,5 +33,10 @@ def resume_query(thread_id: str, action: str, feedback: str | None = None) -> di
     return to_api_response(resume_workflow(thread_id, decision)).model_dump()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """콘솔 스크립트 진입점. stdio 전송으로 MCP 서버를 실행한다."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()
