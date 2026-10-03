@@ -861,3 +861,57 @@ a:hover {
   color: var(--mute);
   text-align: center;
 }
+/* 검색 조항 카드 — 답변 인용 여부(✓/◌) 교차표시(#340). */
+.clause-list > summary {
+  cursor: pointer;
+}
+
+.clause-list-note {
+  margin: 8px 0;
+}
+
+.clause-cards {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clause-card {
+  padding: 8px 10px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.clause-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.cited-mark.cited {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.cited-mark.uncited {
+  color: var(--mute);
+}
+
+.clause-rank,
+.clause-score {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--mute);
+}
+
+.clause-title {
+  flex: 1;
+  color: var(--navy);
+}

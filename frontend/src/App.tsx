@@ -13,6 +13,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
   CitationOut,
+  ClauseOut,
   QueryDoneResponse,
   QueryInterruptedResponse,
   ResumeAction,
@@ -20,7 +21,7 @@ import type {
   WorkflowResponse,
 } from "./api";
 import { checkPdfAvailable, documentPdfUrl, postQuery, postResume } from "./api";
-import { answerSegments, humanNodeTitle, paraChips } from "./clauseDisplay";
+import { answerSegments, citedMarker, hasUncited, humanNodeTitle, paraChips } from "./clauseDisplay";
 
 const STANDARD_OPTIONS: { value: StandardFilter; label: string }[] = [
   { value: "ALL", label: "전체 기준" },
@@ -654,6 +655,50 @@ function Result({
           onOpenRef={(i) => onOpenCitation(response.citations[i])}
         />
       </div>
+
+      <ClauseList clauses={response.clauses} />
     </section>
+  );
+}
+
+/**
+ * 검색된 조항 카드 목록. 답변 중심 레이아웃을 유지하려고 기본은 접어 두고,
+ * 각 카드에 답변 인용 여부(✓/◌)를 교차표시한다(#340).
+ */
+function ClauseList({ clauses }: { clauses: ClauseOut[] }) {
+  if (clauses.length === 0) return null;
+  return (
+    <details className="clause-list">
+      <summary className="section-title">검색된 조항 ({clauses.length})</summary>
+      {hasUncited(clauses) && (
+        <p className="notice clause-list-note">
+          ◌ 표시 조항은 검색되었으나 답변에는 인용되지 않았습니다.
+        </p>
+      )}
+      <ol className="clause-cards">
+        {clauses.map((c) => {
+          const m = citedMarker(c.is_cited);
+          const title = humanNodeTitle(c.node_id, c.document_id);
+          return (
+            <li key={`${c.document_id}-${c.node_id}-${c.rank}`} className="clause-card">
+              <div className="clause-card-head">
+                <span
+                  className={`cited-mark ${c.is_cited ? "cited" : "uncited"}`}
+                  role="img"
+                  aria-label={m.label}
+                  title={m.label}
+                >
+                  {m.symbol}
+                </span>
+                <span className="clause-rank">#{c.rank}</span>
+                {title && <span className="clause-title">{title}</span>}
+                <span className="clause-score">{c.score.toFixed(3)}</span>
+              </div>
+              <ParaChips paras={c.paras} />
+            </li>
+          );
+        })}
+      </ol>
+    </details>
   );
 }
