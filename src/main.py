@@ -336,15 +336,43 @@ def run_query(args) -> int:
         close_checkpointer_pool()
 
 
+# ───────────────────────────── migrate 경로 ─────────────────────────────
+
+
+def run_migrate(args) -> int:
+    """데이터베이스 마이그레이션을 실행한다."""
+    from src.db.migrator import run_migrations
+
+    try:
+        applied = run_migrations()
+        if applied:
+            print(f"마이그레이션 완료: 총 {len(applied)}개 적용됨")
+            for m in applied:
+                print(f"  - {m.name} (version {m.version})")
+        else:
+            print("적용할 신규 마이그레이션이 없습니다 (최신 상태).")
+        return 0
+    except Exception as e:
+        logger.error(f"마이그레이션 실행 실패: {e}")
+        print(f"오류: 마이그레이션 실행 중 실패하였습니다: {e}", file=sys.stderr)
+        return 1
+    finally:
+        close_pool()
+
+
 # ───────────────────────────── CLI 구성 ─────────────────────────────
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rag-for-accounting",
-        description="회계 기준서 RAG — 적재(ingest)/질의(query) 진입점",
+        description="회계 기준서 RAG — 적재(ingest)/질의(query)/마이그레이션(migrate) 진입점",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # migrate
+    p_migrate = sub.add_parser("migrate", help="데이터베이스 마이그레이션 실행")
+    p_migrate.set_defaults(func=run_migrate)
 
     # ingest
     p_ingest = sub.add_parser("ingest", help="문서를 청킹·임베딩하여 pgvector에 적재")
