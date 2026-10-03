@@ -41,6 +41,14 @@ echo "[1/3] Building and starting containers"
 # 런타임별 Compose 옵션 설정
 # Docker: 기본 백그라운드 실행 및 재빌드
 # Podman: podman-compose는 빌드 후 기존 컨테이너를 재사용하는 문제가 있어 --force-recreate를 필수로 추가
+# 근거: app이 embedding의 service_healthy를 기다리므로 up은 웜업이 끝날 때까지 출력 없이 멈춘 것처럼 보입니다.
+# 특히 arm64 호스트에서는 amd64 이미지를 에뮬레이션하여 웜업이 약 9분까지 걸릴 수 있습니다.
+case "$(uname -m)" in
+  arm64|aarch64)
+    echo "안내: arm64 호스트에서는 임베딩 서버(TEI)가 에뮬레이션으로 실행되어 웜업에 약 10분이 걸릴 수 있습니다."
+    echo "      출력이 멈춘 것처럼 보여도 중단하지 말고 기다려주세요."
+    ;;
+esac
 "${COMPOSE[@]}" up "${COMPOSE_UP_FLAGS[@]}"
 
 echo "[2/3] Waiting for embedding and app servers"

@@ -109,12 +109,22 @@ for dep in "$DB_CONTAINER" "$EMBEDDING_CONTAINER"; do
 done
 
 # 임베딩 서버(TEI)의 모델 웜업이 완료되었는지 헬스체크 엔드포인트를 호출하여 검증합니다.
-# 소켓 블로킹 및 무한 대기를 방지하기 위해 연결 타임아웃 2초, 최대 전송 시간 5초를 지정합니다.
-if ! curl -fsS --connect-timeout 2 --max-time 5 "$EMBEDDING_URL/health" >/dev/null 2>&1; then
-  echo "오류: 임베딩 서버($EMBEDDING_URL)가 정상 응답하지 않습니다." >&2
-  echo "TEI 웜업이 완료될 때까지 대기하거나 ./install.sh를 통해 스택 상태를 확인해주세요." >&2
-  exit 1
-fi
+# 근거: arm64 호스트에서는 amd64 이미지가 에뮬레이션으로 실행되어 웜업이 약 9분까지 걸릴 수 있으므로,
+# 단발 호출로 즉시 실패시키지 않고 DEPLOY_EMBEDDING_WAIT_SECONDS(기본 600초) 동안 5초 간격으로 재시도합니다.
+# 소켓 블로킹 방지를 위해 호출당 연결 타임아웃 2초, 최대 전송 시간 5초를 지정합니다.
+EMBEDDING_WAIT_SECONDS="${DEPLOY_EMBEDDING_WAIT_SECONDS:-600}"
+embedding_waited=0
+until curl -fsS --connect-timeout 2 --max-time 5 "$EMBEDDING_URL/health" >/dev/null 2>&1; do
+  if [ "$embedding_waited" -ge "$EMBEDDING_WAIT_SECONDS" ]; then
+    echo "오류: 임베딩 서버($EMBEDDING_URL)가 정상 응답하지 않습니다 (${EMBEDDING_WAIT_SECONDS}초 대기 후 중단)." >&2
+    echo "TEI 웜업이 완료될 때까지 대기하거나 ./install.sh를 통해 스택 상태를 확인해주세요." >&2
+    echo "웜업이 더 오래 걸리는 환경에서는 DEPLOY_EMBEDDING_WAIT_SECONDS 값을 늘려 다시 실행해주세요." >&2
+    exit 1
+  fi
+  [ "$embedding_waited" -eq 0 ] && echo "임베딩 서버 웜업을 기다리는 중입니다 (최대 ${EMBEDDING_WAIT_SECONDS}초)."
+  sleep 5
+  embedding_waited=$((embedding_waited + 5))
+done
 
 # ==============================================================================
 # [5] app 서비스 증분 빌드 및 컨테이너 교체

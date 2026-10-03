@@ -84,6 +84,12 @@ class TestDockerComposeConfig:
         client_idx = command.index("--max-client-batch-size")
         assert command[client_idx + 1] == "${TEI_MAX_CLIENT_BATCH_SIZE:-8}"
 
+    def test_embedding_healthcheck_wait_is_parameterized(self, compose_data):
+        """arm64 에뮬레이션 웜업(약 9분)을 수용하도록 헬스체크 대기시간이 환경변수로 조정 가능해야 합니다."""
+        hc = compose_data["services"]["embedding"]["healthcheck"]
+        assert hc["start_period"] == "${TEI_HEALTH_START_PERIOD:-180s}"
+        assert hc["retries"] == "${TEI_HEALTH_RETRIES:-60}"
+
     def test_embedding_command_excludes_auto_truncate(self, compose_data):
         """--auto-truncate 옵션은 적재 토큰 상한 규약(IX-201) 위반 및 품질 저하 은폐 방지를 위해 배제되어야 합니다."""
         command = compose_data["services"]["embedding"]["command"]
