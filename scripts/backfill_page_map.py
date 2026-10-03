@@ -142,9 +142,16 @@ def main() -> int:
     args = parser.parse_args()
 
     # Docling 모델 로드는 무겁다 — converter 1개를 전 문서에 재사용한다.
-    from docling.document_converter import DocumentConverter
+    # macOS(Apple Silicon)에서 RT-DETR v2의 float64 임베딩 연산이 MPS 백엔드와 충돌하므로 CPU 디바이스를 강제한다.
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import AcceleratorDevice, AcceleratorOptions, PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    converter = DocumentConverter()
+    acc = AcceleratorOptions(device=AcceleratorDevice.CPU)
+    pipe = PdfPipelineOptions(accelerator_options=acc)
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipe)}
+    )
 
     init_pool()
     try:
