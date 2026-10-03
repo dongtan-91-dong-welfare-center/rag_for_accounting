@@ -85,6 +85,34 @@ class TestCheckRelevance:
         )
         assert check_relevance(chunk, "영업권 손상차손") is False   # content가 공백만 포함
 
+    def test_check_relevance_exact_threshold_boundary(self):
+        """
+        rerank_score가 정확히 RERANK_THRESHOLD와 같을 때 True,
+        미세하게 미달(RERANK_THRESHOLD - 0.001)할 때 False를 반환하는 경계값 불변식을 검증한다.
+        """
+        chunk_exact = RerankingResult(
+            chunk=RetrievedChunk(chunk_id="c1", document_id="D1", content="유효 본문 내용", score=0.8, metadata={}),
+            rerank_score=RERANK_THRESHOLD,
+        )
+        assert check_relevance(chunk_exact, "영업권") is True
+
+        chunk_below = RerankingResult(
+            chunk=RetrievedChunk(chunk_id="c2", document_id="D1", content="유효 본문 내용", score=0.8, metadata={}),
+            rerank_score=RERANK_THRESHOLD - 0.001,
+        )
+        assert check_relevance(chunk_below, "영업권") is False
+
+    def test_check_relevance_whitespace_and_newline_returns_false(self):
+        """
+        rerank_score가 1.0으로 매우 높아도 content가 개행과 탭으로만 구성된 경우
+        strip() 검증에 의해 관련 없음으로 엄격하게 걸러지는지 검증한다.
+        """
+        chunk = RerankingResult(
+            chunk=RetrievedChunk(chunk_id="c3", document_id="D1", content="\n\t  \r\n  ", score=1.0, metadata={}),
+            rerank_score=1.0,
+        )
+        assert check_relevance(chunk, "영업권 손상차손") is False
+
 
 @pytest.mark.unit
 class TestCheckExternalReference:
@@ -508,6 +536,27 @@ class TestValidateVerdict:
         )
         with pytest.raises(InconsistentVerdictError):
             validate_verdict(eval_result)
+
+    def test_confidence_threshold_exact_boundary(self):
+        """
+        is_relevant=True일 때 confidence == 0.30은 정상 통과하고,
+        0.29는 InconsistentVerdictError를 발생시키는 경계값 불변식을 검증한다.
+        """
+        # 0.30: 최소 허용 경계값으로 예외 없이 정상 통과
+        eval_valid = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.30,
+            reasoning="충분한 근거가 포함되어 있습니다."
+        )
+        validate_verdict(eval_valid)
+
+        # 0.29: 임계값 미달로 즉시 예외 발생
+        eval_invalid = EvaluationResult(
+            is_relevant=True, needs_external=False, confidence=0.29,
+            reasoning="충분한 근거가 포함되어 있습니다."
+        )
+        with pytest.raises(InconsistentVerdictError):
+            validate_verdict(eval_invalid)
+
 
     def test_needs_external_without_reference_phrase_raises_error(self):
         """needs_external=True, is_relevant=True이고 외부 참조 근거 없으면 InconsistentVerdictError 발생"""
