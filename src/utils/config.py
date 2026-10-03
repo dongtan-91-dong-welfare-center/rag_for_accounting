@@ -34,6 +34,11 @@ LOG_FORMAT: str = os.getenv("LOG_FORMAT", "text").strip().lower()  # "text" | "j
 USE_RERANKER: bool = _env_bool("USE_RERANKER", False)           # 리랭킹 모델 활성화 여부
 RERANK_THRESHOLD: float = _env_float("RERANK_THRESHOLD", 0.5)   # FUNC-006: 재정렬 후 필터링 임계값 (기본값: 중간 신뢰도)
 RERANK_MODEL: str = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")  # FUNC-006: Cross-Encoder 모델 식별자
+# Tracing & Observability — LangSmith / OpenTelemetry
+# LANGSMITH_TRACING=true 및 LANGSMITH_API_KEY 설정 시 PydanticAI / LangGraph 트레이싱이 활성화된다.
+LANGSMITH_TRACING_ENABLED: bool = _env_bool("LANGSMITH_TRACING", False) or _env_bool("LANGCHAIN_TRACING_V2", False)
+LANGSMITH_ENDPOINT: str = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com:443/v1/traces")
+
 VECTOR_COLLECTION_NAME: str = "rag_for_accounting"  # FUNC-003: pgvector 컬렉션명
 OPENAI_MODEL: str = "gpt-5.4-mini"   # FUNC-007, 008, 009: LLM 모델 식별자
 

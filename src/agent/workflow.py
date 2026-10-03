@@ -29,6 +29,7 @@ from src.utils.exception import (
     LLMAPIConnectionError,
 )
 from src.utils.logger import get_logger
+from src.utils.tracing import init_tracing
 from src.models.state import GraphState, ErrorLog, cap_error_logs
 from src.models.schemas import (
     RetrievedChunk, FinalResponse, RerankingResult
@@ -580,6 +581,7 @@ def run_workflow(
     _run_config를 통해 RunnableConfig.metadata로 전달된다.
     트레이싱 비활성 시 무시된다.
     """
+    init_tracing()
     app = build_workflow(checkpointer=_get_checkpointer())
 
     # 노드별 타임아웃 설정 (LangGraph CompiledStateGraph 속성)
@@ -637,6 +639,7 @@ def resume_workflow(
     metadata는 run_workflow와 동일한 케이스 식별 정보를 재개 실행 트레이스에도 부착하기 위한 것으로,
     호출자가 run_workflow에 넘긴 값을 그대로 전달하면 한 케이스의 run/resume 트레이스가 동일 메타데이터를 공유한다.
     """
+    init_tracing()
     app = build_workflow(checkpointer=_get_checkpointer())
     app.step_timeout = GRAPH_STEP_TIMEOUT_SECONDS
 
