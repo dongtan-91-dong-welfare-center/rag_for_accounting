@@ -27,7 +27,7 @@ from src.utils.exception import (
     LLMAPIConnectionError,
 )
 from src.utils.logger import get_logger
-from src.models.state import GraphState, ErrorLog
+from src.models.state import GraphState, ErrorLog, cap_error_logs
 from src.models.schemas import (
     RetrievedChunk, FinalResponse, RerankingResult
 )
@@ -567,11 +567,16 @@ def run_workflow(
         # human_review에서 interrupt가 발생하면 반환 dict에 "__interrupt__" 키가 포함됩니다.
         result = app.invoke(initial_state, config=_run_config(thread_id, metadata))
         result["thread_id"] = thread_id
+        # field_validator는 그래프 마지막 노드 출력이 그대로 invoke()의 반환값이 되는 경로에서는
+        # 재검증되지 않으므로, 최종 반환 직전에 명시적으로 상한을 다시 적용한다.
+        if "error_logs" in result:
+            result["error_logs"] = cap_error_logs(result["error_logs"])
         return result
     except GraphRecursionError as e:
         # 재시도 소진 — TIMEOUT 폴백과 대칭으로 폴백 GraphState + error_logs를 반환한다.
         initial_state.final_response = _recursion_fallback_response()
-        initial_state.error_logs = initial_state.error_logs + [_recursion_error_log(e)]
+        # 속성 재할당은 field_validator를 재실행하지 않으므로 cap_error_logs를 직접 적용한다.
+        initial_state.error_logs = cap_error_logs(initial_state.error_logs + [_recursion_error_log(e)])
         # invoke() 결과와 동일한 직렬화 구조 유지를 위해, model_dump() 대신
         # Pydantic 인스턴스를 값으로 유지하는 dict comprehension 방식을 사용한다.
         fallback = {k: getattr(initial_state, k) for k in GraphState.model_fields}
@@ -581,7 +586,7 @@ def run_workflow(
         # 노드 실행이 step_timeout을 초과 — 구조화 반환 계약에 따라
         # GraphRecursionError와 동일하게 폴백 GraphState + error_logs를 반환한다.
         initial_state.final_response = _timeout_fallback_response()
-        initial_state.error_logs = initial_state.error_logs + [_timeout_error_log(e)]
+        initial_state.error_logs = cap_error_logs(initial_state.error_logs + [_timeout_error_log(e)])
         fallback = {k: getattr(initial_state, k) for k in GraphState.model_fields}
         fallback["thread_id"] = thread_id
         return fallback
@@ -610,13 +615,17 @@ def resume_workflow(
     try:
         result = app.invoke(Command(resume=resume_value), config=_run_config(thread_id, metadata))
         result["thread_id"] = thread_id
+        # field_validator는 그래프 마지막 노드 출력이 그대로 invoke()의 반환값이 되는 경로에서는
+        # 재검증되지 않으므로, 최종 반환 직전에 명시적으로 상한을 다시 적용한다.
+        if "error_logs" in result:
+            result["error_logs"] = cap_error_logs(result["error_logs"])
         return result
     except GraphRecursionError as e:
         # 재개 시점에는 initial_state가 없으므로 체크포인트에 보관된 현재 상태를 복원해 폴백을 구성한다.
         snapshot = app.get_state(_run_config(thread_id))
         fallback = dict(snapshot.values)
         fallback["final_response"] = _recursion_fallback_response()
-        fallback["error_logs"] = list(fallback.get("error_logs", [])) + [_recursion_error_log(e)]
+        fallback["error_logs"] = cap_error_logs(list(fallback.get("error_logs", [])) + [_recursion_error_log(e)])
         fallback["thread_id"] = thread_id
         return fallback
     except TimeoutError as e:
@@ -624,6 +633,6 @@ def resume_workflow(
         snapshot = app.get_state(_run_config(thread_id))
         fallback = dict(snapshot.values)
         fallback["final_response"] = _timeout_fallback_response()
-        fallback["error_logs"] = list(fallback.get("error_logs", [])) + [_timeout_error_log(e)]
+        fallback["error_logs"] = cap_error_logs(list(fallback.get("error_logs", [])) + [_timeout_error_log(e)])
         fallback["thread_id"] = thread_id
         return fallback

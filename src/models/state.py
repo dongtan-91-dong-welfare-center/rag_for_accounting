@@ -20,6 +20,17 @@ class ErrorLog(TypedDict):
     error_type: str   # 커스텀 에러 코드 (예: "CM-002", "SE-101") 또는 일반 예외 시 "UNKNOWN"
     message:    str   # 에러 상세 메시지
 
+def cap_error_logs(v: list[ErrorLog]) -> list[ErrorLog]:
+    """MAX_ERROR_LOGS 상한을 초과하는 경우 가장 오래된 항목을 밀어내고 최신 항목만 유지한다(FIFO).
+
+    GraphState의 field_validator와 workflow.py의 invoke() 최종 출력 가드가 동일 로직을 공유하도록
+    모듈 레벨 함수로 둔다(#192 후속: field_validator는 그래프 마지막 노드 출력이 그대로 invoke()의
+    반환값이 되는 경로와 속성 재할당 경로에서는 재검증되지 않는다).
+    """
+    if len(v) > MAX_ERROR_LOGS:
+        return v[-MAX_ERROR_LOGS:]
+    return v
+
 class GraphState(BaseModel):
     """
     LangGraph StateGraph의 공유 상태 (State) 객체.
@@ -65,8 +76,5 @@ class GraphState(BaseModel):
 
     @field_validator("error_logs")
     @classmethod
-    def cap_error_logs(cls, v: list[ErrorLog]) -> list[ErrorLog]:
-        """MAX_ERROR_LOGS 상한을 초과하는 경우 가장 오래된 항목을 밀어내고 최신 항목만 유지한다(FIFO)."""
-        if len(v) > MAX_ERROR_LOGS:
-            return v[-MAX_ERROR_LOGS:]
-        return v
+    def _cap_error_logs(cls, v: list[ErrorLog]) -> list[ErrorLog]:
+        return cap_error_logs(v)
