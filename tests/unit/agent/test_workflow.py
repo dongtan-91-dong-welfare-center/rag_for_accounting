@@ -295,6 +295,22 @@ class TestEarlyExitRouting:
         # 고정값이 아니라 rewrite가 기록한 실제 분류 신뢰도가 전달되어야 함
         assert fr.confidence_score == 0.88   # early_exit가 confidence_score를 설정하는지 확인
 
+    def test_early_exit_adjacent_scope_returns_specific_guidance(self):
+        """out_of_scope_adjacent 범주는 완전 무관 범주와 다른 안내 메시지를 반환한다 (#301)"""
+        state = GraphState(
+            original_query="부가가치세 신고는 어떻게 하나요?",
+            is_accounting_query=False,
+            classification_confidence=0.75,
+            query_scope="out_of_scope_adjacent",
+        )
+        result = early_exit(state)
+        fr = result["final_response"]
+        assert fr.is_answerable is False
+        # 인접 범주는 K-GAAP 범위 초과를 명시하는 메시지를 반환해야 함
+        assert "K-GAAP" in fr.answer or "검색 범위" in fr.answer
+        # 완전 무관 범주의 고정 문구와는 달라야 함
+        assert fr.answer != "죄송합니다. 회계 관련 질문을 해 주세요."
+
     def test_non_accounting_query_skips_pipeline_e2e(self, workflow_app, initial_state, mock_searcher):
         """비회계 질의는 search/rerank/evaluate/generate를 거치지 않고 즉시 종료된다 (E2E)"""
         with patch(

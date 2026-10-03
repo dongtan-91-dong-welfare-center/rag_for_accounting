@@ -102,9 +102,20 @@ def early_exit(state: GraphState) -> dict:
     confidence_score에는 rewrite 노드가 기록한 LLM 분류 신뢰도를 그대로 전달하여,
     운영 단계에서 분류 경계가 모호한 케이스를 추출·분석할 수 있도록 한다.
     """
+    # query_scope에 따라 안내 메시지를 달리하여 사용자가 왜 답을 얻을 수 없는지 구분하여 전달한다.
+    # - out_of_scope_adjacent: 회계·세무 인접이지만 K-GAAP 조항 검색 범위 밖임을 안내
+    # - completely_unrelated(기본): 회계와 무관한 질의임을 안내
+    if state.query_scope == "out_of_scope_adjacent":
+        answer = (
+            "죄송합니다. 해당 질문은 회계와 인접한 분야(세무 신고, 특정 기업 감사 의견 등)이지만 "
+            "본 시스템의 검색 범위(K-GAAP 조항)를 벗어납니다. "
+            "관련 전문가나 세무사·공인회계사에게 문의해 주세요."
+        )
+    else:
+        answer = "죄송합니다. 회계 관련 질문을 해 주세요."
     return {
         "final_response": FinalResponse(
-            answer="죄송합니다. 회계 관련 질문을 해 주세요.",
+            answer=answer,
             citations=[],
             is_answerable=False,
             confidence_score=state.classification_confidence,
