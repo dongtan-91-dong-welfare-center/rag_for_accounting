@@ -34,8 +34,8 @@
 
 ```mermaid
 graph TD
-    subgraph Layer3["Layer 3: Remote Subsystem (120s)"]
-        EMB["EMBEDDING_SERVER_TIMEOUT_SECONDS (120.0s)"]
+    subgraph Layer3["Layer 3: Remote Subsystem / Batch (120s)"]
+        EMB["EMBEDDING_BATCH_TIMEOUT_SECONDS (120.0s)<br/>(Offline Batch Indexing)"]
     end
 
     subgraph Layer2["Layer 2: LangGraph Node Workflow (60s)"]
@@ -45,11 +45,13 @@ graph TD
     subgraph Layer1["Layer 1: Individual I/O Operations (10s ~ 45s)"]
         DB_STMT["SEARCH_TIMEOUT_SECONDS (10.0s)<br/>(DB statement_timeout)"]
         DB_POOL["DB_POOL_TIMEOUT_SECONDS (10.0s)<br/>(DB getconn wait)"]
+        EMB_QUERY["EMBEDDING_QUERY_TIMEOUT_SECONDS (10.0s)<br/>(Runtime Query Embedding)"]
         LLM["LLM_TIMEOUT_SECONDS (45.0s)<br/>(OpenAI HTTP Request)"]
     end
 
     NODE --> DB_STMT
     NODE --> DB_POOL
+    NODE --> EMB_QUERY
     NODE --> LLM
 ```
 
@@ -58,13 +60,14 @@ graph TD
 1. **Layer 1: Individual I/O**
    - `SEARCH_TIMEOUT_SECONDS` (기본값: 10.0초): PostgreSQL `statement_timeout`으로 전달. 초과 시 `SearchTimeoutError(SE-101)` 발생.
    - `DB_POOL_TIMEOUT_SECONDS` (기본값: 10.0초): 커넥션 풀의 `getconn()` 대기 상한. 초과 시 `DatabaseQueryError(SE-102)` 파생.
+   - `EMBEDDING_QUERY_TIMEOUT_SECONDS` (기본값: 10.0초): 런타임 질의 임베딩(`search` 노드) 통신 상한. 초과 시 `LLMAPIConnectionError(CM-002, node="search")` 발생.
    - `LLM_TIMEOUT_SECONDS` (기본값: 45.0초): OpenAI Client HTTP 요청 타임아웃. 초과 시 `LLMAPIConnectionError(CM-002)` 파생.
 2. **Layer 2: LangGraph Node Workflow**
    - `GRAPH_STEP_TIMEOUT_SECONDS` (기본값: 60.0초): LangGraph 노드 1개 단위 실행 상한.
-3. **Layer 3: External Remote Subsystem**
-   - `EMBEDDING_SERVER_TIMEOUT_SECONDS` (기본값: 120.0초): 외부 TEI 임베딩 컨테이너 통신 상한.
+3. **Layer 3: External Remote Subsystem (Batch)**
+   - `EMBEDDING_BATCH_TIMEOUT_SECONDS` (기본값: 120.0초): 오프라인 대량 청크 인덱싱 배치 임베딩 통신 상한 (역호환용 `EMBEDDING_SERVER_TIMEOUT_SECONDS` 제공).
 
-> **안전 마진 및 선순위 이점**: LangSmith/운영 실측 데이터 수집 전 긴 회계 답변 생성이 억울하게 취소되지 않도록 45s/60s의 여유 버퍼를 부여합니다. Layer 1의 I/O 타임아웃(45초)이 Layer 2 노드 타임아웃(60초)보다 먼저 발생하므로, OpenAI API 요청이 멈춘 상태로 10분간 지속되면서 토큰 비용과 커넥션을 소모하는 고아 요청 현상을 차단합니다.
+> **안전 마진 및 선순위 이점**: LangSmith/운영 실측 데이터 수집 전 긴 회계 답변 생성이 억울하게 취소되지 않도록 45s/60s의 여유 버퍼를 부여합니다. Layer 1의 I/O 타임아웃(10초~45초)이 Layer 2 노드 타임아웃(60초)보다 먼저 발생하므로, 임베딩이나 OpenAI API 요청이 멈춘 상태로 장시간 지속되면서 토큰 비용과 커넥션을 소모하는 고아 요청 현상을 차단합니다.
 
 ---
 
