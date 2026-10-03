@@ -230,7 +230,7 @@ uv run python scripts/benchmark_baseline.py
 
 ## 📚 데이터 출처
 
-본 프로젝트에서 사용하는 회계기준 원문은 한국회계기준원이 공개한 자료를 사용자가 직접 내려받아 구성합니다.
+본 프로젝트에서 사용하는 회계기준 원문은 한국회계기준원이 공개한 자료를 사용자가 직접 내려받아 구성합니다. 필요한 35개 파일명과 배치 방법은 [data/raw_data/README.md](data/raw_data/README.md)를 참고하세요.
 
 > 출처: 한국회계기준원 http://www.kasb.or.kr Copyright ©KAI all rights reserved.
 

@@ -64,6 +64,16 @@ docs/benchmark/*.tmp
 docs/measurements/
 data/ontology
 data/md_data
+# data/ 루트에 LLM 파싱 산출물(가공된 회계기준 파생물)이 실수로 커밋되는 것을 막는다(#206).
+# data/raw_data/*는 아래 별도 규칙으로 다룬다.
+data/*.md
+
+# 대용량 이미지가 실수로 커밋되어 대규모 머지 충돌을 일으키는 사고(#239)를 막는다(#206).
+# 문서용 에셋(docs/assets)은 예외로 둔다.
+*.png
+*.jpg
+*.jpeg
+!docs/assets/**
 
 data/raw_data/*.pdf
 data/raw_data/*.md
