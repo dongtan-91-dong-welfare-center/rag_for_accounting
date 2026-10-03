@@ -513,3 +513,23 @@ class TestFeedbackInjection:
         strategy_call = mock_client.chat.completions.create.call_args_list[1] 
         assert self.FEEDBACK in strategy_call.kwargs["messages"][0]["content"]  # 두 번째 호출(전략 프롬프트)에 피드백이 포함되었는지 검증
         assert result.human_feedback is None    # 사용 후 초기화 (다음 루프 대비)
+
+
+class TestQueryScopeNormalization:
+    PATCH = "src.agent.nodes.rewrite.client"
+
+    def test_accounting_true_with_adjacent_scope_normalized(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": True, "query_scope": "out_of_scope_adjacent", "strategy": "hyde"}
+            )
+            *_, scope = classify_and_select("영업권 손상차손 인식 기준은?")
+        assert scope == "accounting"
+
+    def test_accounting_false_with_accounting_scope_normalized(self):
+        with patch(self.PATCH) as mock_client:
+            mock_client.chat.completions.create.return_value = _mock_resp(
+                {"is_accounting": False, "query_scope": "accounting", "strategy": "bypass"}
+            )
+            *_, scope = classify_and_select("오늘 날씨 어때?")
+        assert scope == "completely_unrelated"
