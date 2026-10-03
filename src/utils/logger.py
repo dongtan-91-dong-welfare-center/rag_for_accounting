@@ -1,54 +1,78 @@
+import json
 import logging
+import time
 from datetime import datetime
-from src.utils.config import KST
+from functools import wraps
+from src.utils.config import KST, LOG_FORMAT
 
 
 class _KSTFormatter(logging.Formatter):
-    """%(asctime)s를 한국 표준시(KST, UTC+9)로 출력하는 포매터"""
+    """%(asctime)s를 한국 표준시(KST, UTC+9)로 출력하는 일반 텍스트 포매터"""
     def formatTime(self, record, datefmt=None):
         dt = datetime.fromtimestamp(record.created, tz=KST)
         return dt.strftime(datefmt) if datefmt else dt.isoformat(timespec="seconds")
 
 
+class _JSONLinesFormatter(logging.Formatter):
+    """로그 레코드를 JSON Lines (NDJSON) 규격의 단일 행 JSON으로 직렬화하는 구조화 포매터"""
+    def format(self, record: logging.LogRecord) -> str:
+        dt = datetime.fromtimestamp(record.created, tz=KST)
+        log_entry = {
+            "timestamp": dt.isoformat(timespec="seconds"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        # extra로 전달된 커스텀 필드(예: trace_id, elapsed_sec, node 등)가 있으면 병합
+        standard_attrs = {
+            "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
+            "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
+            "created", "msecs", "relativeCreated", "thread", "threadName",
+            "processName", "process", "message"
+        }
+        for key, value in record.__dict__.items():
+            if key not in standard_attrs and not key.startswith("_"):
+                log_entry[key] = value
+
+        return json.dumps(log_entry, ensure_ascii=False)
+
+
 def get_logger(name: str) -> logging.Logger:
-    """표준 로거 반환. 핸들러가 없으면 StreamHandler를 자동 추가"""
-    # 동일한 이름의 로거를 재사용함으로써 핸들러 중복 등록을 방지
-    # 외부 로그 시스템과 연동할 때, 로거 이름을 지정하여 로그를 분류할 수 있음
+    """표준 로거 반환. 핸들러가 없으면 LOG_FORMAT 설정에 따라 StreamHandler를 자동 추가"""
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(_KSTFormatter(
-            "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-        ))
+        if LOG_FORMAT == "json":
+            handler.setFormatter(_JSONLinesFormatter())
+        else:
+            handler.setFormatter(_KSTFormatter(
+                "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+            ))
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
     return logger
 
+
 def log_execution_time(func):
-    """
-    TODO: 함수 실행 시간을 측정해 GraphState.metadata에 기록할 데코레이터
-    아직 미구현이라 호출하면 항상 NotImplementedError가 발생한다.
-    아래 Pseudo 주석은 구현할 때 참고할 설계 초안이다.
-    """
-    # Pseudo:
-    # @wraps(func)  # 내부 wrapper 함수의 메타데이터를 원래 함수의 것으로 복사
-    # async def wrapper(*args, **kwargs):   # 경우에 따라서는 비동기 처리 추가
-    # def wrapper(*args, **kwargs):
-    #     start = time.perf_counter()
-    #     try:
-    #         result = func(*args, **kwargs)
-    #         elapsed = time.perf_counter() - start
-    #
-    #         [GraphState가 첫 번째 인자인 경우에만 metadata 기록]
-    #         # LangGraph의 노드 함수는 기본적으로 def node_func(state: GraphState) 형태이므로 적용하기 매우 좋다.
-    #         if args and isinstance(args[0], GraphState):
-    #             state = args[0]
-    #             # 실행 시간뿐만 아니라 에러 정보, 토큰 사용량, 모델 버전 등을 기록하는 용도로 확장 가능
-    #             state.metadata.setdefault("execution_times", {})[func.__name__] = elapsed
-    #
-    #         return result
-    #     except Exception as e:
-    #         logger.error(f"[{func.__name__}] 실행 오류: {e}")
-    #         raise
-    # return wrapper
-    raise NotImplementedError
+    """함수 실행 시간을 측정하고 로거에 기록하며, 첫 번째 인자가 GraphState인 경우 metadata에 기록하는 데코레이터."""
+    logger = get_logger(func.__module__)
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        try:
+            result = func(*args, **kwargs)
+            elapsed = time.perf_counter() - start
+            # GraphState 객체이거나 metadata dict를 가진 객체일 경우 실행 시간 기록
+            if args:
+                first_arg = args[0]
+                if hasattr(first_arg, "metadata") and isinstance(first_arg.metadata, dict):
+                    first_arg.metadata.setdefault("execution_times", {})[func.__name__] = elapsed
+            return result
+        except Exception as e:
+            elapsed = time.perf_counter() - start
+            logger.error(f"[{func.__name__}] 실행 오류 (소요시간: {elapsed:.4f}s): {e}")
+            raise
+    return wrapper
