@@ -283,6 +283,37 @@ git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
 ./check.sh
 ```
 
+### 8-3. GitHub Actions 기반 자동 배포 (Tailscale SSH 연동 CD)
+
+`main` 브랜치에 변경 사항이 병합되면 `.github/workflows/deploy.yml` 워크플로가 트리거되어 운영 서버에 자동으로 최신 소스를 동기화하고 배포를 실행합니다.
+
+#### 1) 배포 아키텍처 및 보안 모델
+공인 IP를 통한 SSH 포트 개방 및 키 관리 위험을 제거하기 위해 **Tailscale SSH** 사설망 통신을 표준으로 적용합니다.
+
+```mermaid
+flowchart TD
+    A["GitHub Actions 러너 (Ubuntu)"] -->|TAILSCALE_AUTHKEY (tag:ci)| B["Tailscale 테일넷 조인"]
+    B -->|tailscale ssh (ACL: tag:ci -> tag:server root accept)| C["운영 서버 (Rocky Linux / Podman)"]
+    C --> D["git fetch origin main && git reset --hard origin/main"]
+    D --> E["./deploy.sh (정적 인프라 DB/TEI 유지, app 증분 재빌드)"]
+    E --> F["./check.sh (인프라 및 헬스체크 검증)"]
+```
+
+#### 2) 사전 설정 요구사항 (GitHub Repository Secrets)
+저장소 Secrets에 아래 5가지 항목이 등록되어 있어야 워크플로가 정상 동작합니다:
+- `DEPLOY_HOST`: 운영 서버의 Tailscale IP 또는 MagicDNS 호스트명
+- `DEPLOY_PORT`: SSH 접속 포트 (기본값: `22`)
+- `DEPLOY_USER`: 운영 서버 접속 계정 (기본값: `root`)
+- `DEPLOY_PATH`: 운영 서버 내 저장소 절대 경로 (예: `/root/rag_for_accounting`)
+- `TAILSCALE_AUTHKEY`: `tag:ci` 권한 및 Ephemeral(일회성) 속성이 부여된 Tailscale Auth Key
+
+#### 3) 파이프라인 실행 동작
+1. GitHub Actions 워크플로가 Ephemeral 노드로 테일넷에 임시 조인(`tag:ci`)합니다.
+2. Tailscale ACL 규칙(`tag:ci` → `tag:server`, `root` accept)에 따라 원격 서버에 비밀번호/키 파일 없이 무인 SSH로 접속합니다.
+3. 대상 디렉터리로 이동 후 Git 원격 최신 커밋을 강제 동기화(`git fetch origin main && git reset --hard origin/main`)하여 히스토리 정합성을 보장합니다.
+4. `./deploy.sh`를 실행하여 데이터베이스와 TEI 임베딩 컨테이너를 유지한 채 애플리케이션(`app`) 컨테이너만 증분 재빌드 및 교체합니다.
+5. `./check.sh`를 실행하여 모든 엔드포인트와 컨테이너가 정상 준비(`ready`) 상태인지 검증합니다.
+
 ---
 
 ## 9. 자주 발생하는 결함 및 문제 해결 (Troubleshooting)
