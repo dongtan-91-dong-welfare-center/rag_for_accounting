@@ -460,6 +460,27 @@ class TestRunWorkflow:
         assert result["error_logs"][-1]["node"] == "workflow" # 에러 발생 노드
         assert result["error_logs"][-1]["error_type"] == "TIMEOUT" # 에러 타입
 
+    @patch("src.agent.workflow.build_workflow")
+    def test_run_workflow_caps_error_logs_on_final_invoke_output(self, mock_build_workflow, monkeypatch):
+        """invoke()가 상한을 넘는 error_logs를 그대로 반환해도 field_validator를 거치지 않으므로,
+        run_workflow가 최종 반환 직전에 명시적으로 FIFO 상한을 재적용하는지 검증한다(#192 후속)."""
+        import src.models.state as state_mod
+
+        monkeypatch.setattr(state_mod, "MAX_ERROR_LOGS", 3)
+
+        oversized_logs = [
+            {"timestamp": "2026-10-03T12:00:00+09:00", "node": "search", "error_type": "SE-101", "message": f"err {i}"}
+            for i in range(5)
+        ]
+        mock_app = MagicMock()
+        mock_app.invoke.return_value = {"original_query": "영업권 손상차손 인식 기준은?", "error_logs": oversized_logs}
+        mock_build_workflow.return_value = mock_app
+
+        result = run_workflow("영업권 손상차손 인식 기준은?")
+
+        assert len(result["error_logs"]) == 3
+        assert [log["message"] for log in result["error_logs"]] == ["err 2", "err 3", "err 4"]
+
 
 @pytest.mark.unit
 class TestResumeWorkflow:
@@ -510,6 +531,32 @@ class TestResumeWorkflow:
         assert result["final_response"].is_answerable is False # 답변 불가
         assert result["error_logs"][-1]["node"] == "workflow" # 에러 발생 노드
         assert result["error_logs"][-1]["error_type"] == "RECURSION_LIMIT" # 에러 타입
+
+    @patch("src.agent.workflow.build_workflow")
+    def test_resume_workflow_caps_error_logs_on_timeout_fallback(self, mock_build_workflow, monkeypatch):
+        """체크포인트에 이미 상한만큼 쌓인 error_logs에 타임아웃 폴백이 한 건을 더해도,
+        속성 재할당은 field_validator를 재실행하지 않으므로 resume_workflow가 명시적으로
+        FIFO 상한을 재적용하는지 검증한다(#192 후속)."""
+        import src.models.state as state_mod
+
+        monkeypatch.setattr(state_mod, "MAX_ERROR_LOGS", 3)
+
+        existing_logs = [
+            {"timestamp": "2026-10-03T12:00:00+09:00", "node": "search", "error_type": "SE-101", "message": f"err {i}"}
+            for i in range(3)
+        ]
+        mock_app = MagicMock()
+        mock_app.invoke.side_effect = TimeoutError("시간 초과")
+        mock_app.get_state.return_value = MagicMock(
+            values={"original_query": "영업권 손상차손 인식 기준은?", "error_logs": existing_logs}
+        )
+        mock_build_workflow.return_value = mock_app
+
+        result = resume_workflow("tid-192", {"action": "approve"})
+
+        assert len(result["error_logs"]) == 3
+        assert result["error_logs"][-1]["error_type"] == "TIMEOUT" # 가장 최신 항목은 보존
+        assert result["error_logs"][0]["message"] == "err 1" # 가장 오래된 err 0은 밀려남
 
 
 @pytest.mark.unit
