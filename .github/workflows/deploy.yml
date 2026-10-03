@@ -1,0 +1,32 @@
+name: deploy
+
+'on':
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tailscale Connect
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          tags: tag:ci
+
+      - name: Execute Remote Deploy via Tailscale SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          tailscale ssh \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "set -euo pipefail && cd \"$DEPLOY_PATH\" && git fetch origin main && if [ -n \"\$(git status --porcelain --untracked-files=no)\" ]; then echo \"서버 체크아웃에 커밋되지 않은 변경이 있어 배포를 중단합니다.\" >&2; git status --short --untracked-files=no >&2; exit 1; fi && git reset --hard origin/main && ./deploy.sh && ./check.sh"

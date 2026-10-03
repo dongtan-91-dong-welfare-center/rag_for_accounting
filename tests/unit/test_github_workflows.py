@@ -88,6 +88,52 @@ class TestGitHubWorkflows:
         release_with = release_step.get("with", {})
         assert release_with.get("generate_release_notes") is True
 
+    def test_deploy_workflow_structure_and_security(self):
+        """deploy.yml 워크플로의 main 브랜치 트리거, 최소 권한, Tailscale 액션 SHA 핀 및 원격 명령을 검증합니다."""
+        deploy_yml = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
+        assert deploy_yml.exists(), "deploy.yml 파일이 존재해야 합니다."
+
+        content = yaml.safe_load(deploy_yml.read_text(encoding="utf-8"))
+        assert content is not None
+
+        # 트리거 검증
+        on = content.get("on") or content.get(True) or {}
+        assert "push" in on
+        assert set(on["push"]["branches"]) == {"main"}
+
+        # 최소 권한 원칙 검증
+        permissions = content.get("permissions", {})
+        assert permissions.get("contents") == "read", "deploy.yml은 contents: read 권한만 가져야 합니다."
+
+        # 동시성 제어 검증: 배포 도중 중단되어 서버가 불완전해지지 않도록 직렬 실행한다
+        concurrency = content.get("concurrency", {})
+        assert concurrency.get("cancel-in-progress") is False
+
+        # Job 및 스텝 검증
+        jobs = content.get("jobs", {})
+        assert "deploy" in jobs
+        steps = jobs["deploy"]["steps"]
+
+        sha_pattern = re.compile(r"^[a-zA-Z0-9_\-\./]+@[0-9a-f]{40}$")
+        for step in steps:
+            if "uses" in step:
+                assert sha_pattern.match(step["uses"]), f"액션은 40자리 커밋 SHA로 고정되어야 합니다: {step['uses']}"
+
+        tailscale_step = next(s for s in steps if "tailscale/github-action@" in s.get("uses", ""))
+        tailscale_with = tailscale_step.get("with", {})
+        assert "TAILSCALE_AUTHKEY" in str(tailscale_with.get("authkey", ""))
+        assert "tag:ci" in str(tailscale_with.get("tags", ""))
+
+        ssh_step = next(s for s in steps if "tailscale ssh" in s.get("run", ""))
+        ssh_run = ssh_step.get("run", "")
+        assert "git fetch origin main" in ssh_run
+        assert "git reset --hard origin/main" in ssh_run
+        # 서버의 로컬 수정이 경고 없이 사라지지 않도록 reset 이전에 변경 검사가 선행되어야 한다
+        assert "git status --porcelain" in ssh_run
+        assert ssh_run.index("git status --porcelain") < ssh_run.index("git reset --hard")
+        assert "./deploy.sh" in ssh_run
+        assert "./check.sh" in ssh_run
+
 
 @pytest.mark.unit
 class TestIssueAndPRTemplates:
