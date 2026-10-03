@@ -105,9 +105,9 @@ class TestGitHubWorkflows:
         permissions = content.get("permissions", {})
         assert permissions.get("contents") == "read", "deploy.yml은 contents: read 권한만 가져야 합니다."
 
-        # 동시성 제어 검증
+        # 동시성 제어 검증: 배포 도중 중단되어 서버가 불완전해지지 않도록 직렬 실행한다
         concurrency = content.get("concurrency", {})
-        assert concurrency.get("cancel-in-progress") is True
+        assert concurrency.get("cancel-in-progress") is False
 
         # Job 및 스텝 검증
         jobs = content.get("jobs", {})
