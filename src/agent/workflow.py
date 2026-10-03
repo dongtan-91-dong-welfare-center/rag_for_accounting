@@ -79,7 +79,7 @@ def rewrite(state: GraphState) -> dict:
     # 실제 모듈을 통해 상태 변화 수행 (in-place mutation)
     # updated_state는 사실상 state와 동일한 객체입니다.
     updated_state = _rewrite_impl(state)
-    
+
     # TODO: _rewrite_impl과 handle_node_errors 간의 이중 예외 처리 중복 해결 필요
     return {
         "rewrite_count": updated_state.rewrite_count,
@@ -218,11 +218,18 @@ def search(state: GraphState) -> dict:
     if state.standard_filter != "ALL":
         metadata_filter = {"standard_type": state.standard_filter}
 
+    # hyde 전략의 두 번째 쿼리는 LLM이 지어낸 가상 답변이라,
+    # 비도메인 명사류가 Sparse의 ts_rank_cd 점수를 노이즈로 오염시킨다.
+    # Dense에는 그대로 넣되 Sparse에서만 제외한다.
+    # 원문(0번) 및 decompose·stepback의 서브쿼리는 실제 질의이므로 그대로 둔다.
+    is_hyde = state.rewritten_query is not None and state.rewritten_query.strategy == "hyde"
+
     try:
         # 복수 쿼리에 대해 검색 후 병합·중복 제거
         all_chunks: dict[str, RetrievedChunk] = {}
-        for q in search_queries:
-            results = _search_impl(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter)
+        for idx, q in enumerate(search_queries):
+            include_sparse = not (is_hyde and idx == 1)
+            results = _search_impl(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter, include_sparse=include_sparse)
             for chunk in results:
                 if chunk.chunk_id not in all_chunks or chunk.score > all_chunks[chunk.chunk_id].score:
                     all_chunks[chunk.chunk_id] = chunk
@@ -358,7 +365,7 @@ def route_after_evaluate(state: GraphState) -> str:
     무시된 채 잘못된 답변 생성으로 직행하는 버그가 발생한다.
     """
     # TODO: evaluation이 None일 경우의 예외 처리에 대해 재검토 요망.
-    # 현재 단계에서는 유닛 테스트와의 충돌 방지 및 파이프라인의 안전한 종료를 위해 
+    # 현재 단계에서는 유닛 테스트와의 충돌 방지 및 파이프라인의 안전한 종료를 위해
     # ValueError 발생 대신 generate로 안전하게 우회하도록 유지합니다.
 
     # 1순위: 어느 노드에서든 재검색이 확정된 상태라면, 다른 안전장치보다 먼저 rewrite를 고려한다.
@@ -549,7 +556,7 @@ def run_workflow(
     resume_workflow에 전달하여 재개할 수 있다.
 
     metadata는 LangSmith 트레이스에 부착할 케이스 식별 정보(예: {"case_id", "gold"})로,
-    _run_config를 통해 RunnableConfig.metadata로 전달된다. 
+    _run_config를 통해 RunnableConfig.metadata로 전달된다.
     트레이싱 비활성 시 무시된다.
     """
     app = build_workflow(checkpointer=_CHECKPOINTER)

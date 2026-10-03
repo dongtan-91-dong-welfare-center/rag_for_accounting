@@ -71,12 +71,13 @@ API 응답 스키마의 정본은 `src/api/schemas.py`다. 내부 `GraphState` �
 | 단계 | 현행 구현 |
 |---|---|
 | Dense | KURE-v1 질의 임베딩과 pgvector cosine distance를 사용한다. |
-| Sparse | PostgreSQL `to_tsvector('simple', content)` + `plainto_tsquery('simple', query)` + `ts_rank_cd`를 사용한다. |
+| Sparse | 질의를 형태소 명사류로 쪼개 사전토큰화 컬럼 `content_morph`에 `to_tsvector('simple', content_morph)` + `websearch_to_tsquery('simple', ...)`(OR 연결) + `ts_rank_cd`로 매칭한다. |
 | 병합 | Dense/Sparse 결과를 가중 RRF(RRF_K=60, SPARSE_FUSION_WEIGHT=0.1)로 병합한다. |
 | 장애 처리 | 한쪽 검색이 실패하면 다른 쪽 단독 결과로 진행한다. 양쪽 모두 실패하면 DB 오류로 처리한다. |
 | 재탐색 | 결과가 0건이면 `top_k * 2`로 한 번 더 검색한다. |
+| HyDE 가상 답변 제외 | hyde 전략의 가상 답변 쿼리는 Dense에는 포함하되 Sparse에서는 제외한다(`include_sparse=False`). 비도메인 명사류가 `ts_rank_cd` 점수를 노이즈로 오염시키는 것을 막는다. |
 
-2026-07-11 회의에서 언급된 형태소 분석기 기반 sparse 검색과 동의어 사전은 현행 구현이 아니다. 현재 sparse는 PostgreSQL `simple` 설정이라 한국어 형태소 분석이나 IDF 기반 BM25를 제공하지 않는다. 이 차이는 검색 개선 이슈를 만들 때 반드시 구분한다.
+ts_rank_cd에는 IDF(흔한 단어를 자동으로 덜 세는 가중치)가 없다. 품사 화이트리스트가 유일한 노이즈 방어선이고, 남는 회귀는 병합 가중(`SPARSE_FUSION_WEIGHT`)이 억제한다.
 
 ## 6. 워크플로 제어
 

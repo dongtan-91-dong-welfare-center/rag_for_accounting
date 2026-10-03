@@ -406,6 +406,41 @@ class TestSearchNode:
         with pytest.raises(RuntimeError, match="예상치 못한 시스템 오류"):
             search(self._make_state())
 
+    @patch("src.agent.workflow._search_impl")
+    def test_hyde_virtual_answer_excludes_sparse(self, mock_search):
+        """hyde 전략의 2번째 쿼리(가상 답변)는 include_sparse=False로, 원문은 True로 호출된다(#292 Phase 1 H2)"""
+        from src.models.schemas import RewrittenQuery
+
+        mock_search.return_value = []
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            rewritten_query=RewrittenQuery(original_query="영업권 손상차손 인식 기준은?", strategy="hyde", search_queries=["영업권 손상차손 인식 기준은?", "영업권은 손상차손을 인식..."]),
+            error_logs=[],
+        )
+
+        search(state)
+
+        assert mock_search.call_count == 2
+        assert mock_search.call_args_list[0].kwargs["include_sparse"] is True   # 원문
+        assert mock_search.call_args_list[1].kwargs["include_sparse"] is False  # HyDE 가상 답변
+
+    @patch("src.agent.workflow._search_impl")
+    def test_decompose_subqueries_keep_sparse(self, mock_search):
+        """decompose 전략의 서브쿼리는 실제 질의이므로 Sparse를 그대로 포함한다"""
+        from src.models.schemas import RewrittenQuery
+
+        mock_search.return_value = []
+        state = GraphState(
+            original_query="리스와 금융자산 회계처리 차이는?",
+            rewritten_query=RewrittenQuery(original_query="리스와 금융자산 회계처리 차이는?", strategy="decompose", search_queries=["리스와 금융자산 회계처리 차이는?", "리스 회계처리", "금융자산 회계처리"]),
+            error_logs=[],
+        )
+
+        search(state)
+
+        assert mock_search.call_count == 3
+        assert all(call.kwargs["include_sparse"] is True for call in mock_search.call_args_list)
+
 
 @pytest.mark.unit
 class TestRunWorkflow:
