@@ -27,6 +27,7 @@ def _env_float(name: str, default: float) -> float:
 MAX_REWRITE_COUNT: int = 3          # FUNC-004: CRAG 루프(평가 임계치 미달 재검색) 최대 반복 횟수
 MAX_HIL_COUNT: int = 5              # 워크플로우: Human-in-the-Loop 재작성 요청 최대 반복 횟수 (CRAG 루프와 분리)
 TOP_K_RETRIEVAL: int = 10           # FUNC-005: 1차 검색 반환 청크 수
+MAX_ERROR_LOGS: int = int(os.getenv("MAX_ERROR_LOGS", "50"))  # GraphState error_logs 최대 보존 건수 (FIFO 회전 상한)
 LOG_FORMAT: str = os.getenv("LOG_FORMAT", "text").strip().lower()  # "text" | "json" (구조화 로깅 포맷)
 
 # Reranking Configuration — .env로 토글 가능. 기본은 OFF.

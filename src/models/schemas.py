@@ -46,16 +46,24 @@ class SkippedChunk(BaseModel):
     error_type: str   # "IX-201" | "SE-102" | "CM-002" ... (docs/func_interfaces.md 카탈로그)
     reason: str       # 로그 문구와 동일한 상세 메시지
 
+    @property
+    def is_retryable(self) -> bool:
+        """일시적 장애(DB 통신 오류, 임베딩 API 장애 등)로 인한 누락인 경우 재시도 가능으로 판별한다.
+
+        IX-201(토큰 초과)은 텍스트 분할 없이는 단순 재시도해도 동일하게 실패하므로 False이다.
+        """
+        return self.error_type in {"SE-102", "CM-002"}
+
 class IndexingResult(BaseModel):
     """인덱싱 결과 — pgvector 저장 완료 여부 (FUNC-003 출력)"""
     document_id: str
     chunk_count: int                                                 # 성공 적재 건수
     status: Literal["success", "partial", "failed"]
     skipped_chunks: list[SkippedChunk] = Field(default_factory=list)  # 누락 청크 추적
-    # @field_validator("chunk_count")
-    # def count_positive(cls, v):
-    #     assert v >= 0
-    #     return v
+
+    def get_retryable_chunks(self) -> list[SkippedChunk]:
+        """부분 실패 중 재적재(재시도)가 가능한 dead-letter 청크 목록을 반환한다."""
+        return [chunk for chunk in self.skipped_chunks if chunk.is_retryable]
 
 class RewrittenQuery(BaseModel):
     """재작성 질의 — rewrite 노드 출력. search_queries를 search 노드에 전달한다."""

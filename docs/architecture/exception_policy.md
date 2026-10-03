@@ -90,3 +90,18 @@ graph TD
    - 각 노드 내부 예외는 `handle_node_errors` 데코레이터에 의해 캐치되어 `state.error_logs`에 기록되고 워크플로우 실행이 지속됩니다.
 2. **워크플로우 레벨 완전 타임아웃/재귀 폴백**:
    - 노드 타임아웃이나 최대 재귀 깊이 초과 발생 시, 시스템은 예외를 무작정 터뜨리지 않고 폴백 응답 및 `error_code="TIMEOUT"` 또는 `"RECURSION_LIMIT"`을 전달합니다.
+
+---
+
+## 5. 에러 로그 가드 및 부분 실패 복구 신호 (#192)
+
+1. **`GraphState.error_logs` 무한 증가 가드**:
+   - 파이프라인 전역 설정값 `MAX_ERROR_LOGS`(기본값: 50건, SSoT: `src/utils/config.py`)를 초과하는 경우, FIFO 방식으로 가장 오래된 에러 로그를 밀어내고 최신 N개만 유지합니다.
+   - 단일 세션 내 반복적인 재시도나 노드 예외 발생 시에도 상태 객체의 메모리 누적을 구조적으로 차단합니다. (체크포인트 스냅샷의 전체 생명주기 관리는 #209 체크포인터 정책을 따릅니다)
+2. **`index_documents` 부분 실패 dead-letter 및 재적재 훅**:
+   - 대량 문서 적재 시 발생하는 세 가지 부분 실패 경로(토큰 초과, 배치 실패, 컬렉션 DDL 실패)를 `SkippedChunk` 및 `IndexingResult`로 추적합니다.
+   - 재적재 가능 여부(`is_retryable`):
+     - `IX-201` (토큰 초과): `is_retryable=False`. 문서 전처리 및 청킹 분할 없이는 재시도 불가.
+     - `SE-102` (DB 쿼리/커넥션 풀/DDL 일시 오류), `CM-002` (임베딩 일시 통신 장애): `is_retryable=True`. 일시적 네트워크/DB 장애이므로 동일 청크에 대한 재적재 가능.
+   - 부분 적재 후 `result.get_retryable_chunks()`를 호출하여 재적재가 필요한 dead-letter 청크들만 선별해 복구 작업을 수행할 수 있습니다.
+
