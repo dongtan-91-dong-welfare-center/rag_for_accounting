@@ -9,6 +9,7 @@ from src.retrieval.reranker import rerank_chunks, compute_relevance_scores
 from src.agent.workflow import rerank
 from src.models.schemas import RetrievedChunk, RerankingResult
 from src.models.state import GraphState
+from src.utils import config
 from src.utils.exception import RerankFailureError, ScoreThresholdError
 
 
@@ -220,6 +221,81 @@ class TestRerankNode:
         assert len(result["reranked_chunks"]) == len(sample_chunks)  # reranked_chunks의 길이가 1차 검색 결과와 같은지 확인
         assert "needs_reretrieval" in result  # needs_reretrieval이 존재하는지 확안
         assert result["needs_reretrieval"] is False  # needs_reretrieval이 False인지 확안
+
+    @patch('src.agent.workflow.config.USE_RERANKER', True)
+    @patch('src.retrieval.reranker.compute_relevance_scores')
+    def test_rerank_exact_threshold_boundary(self, mock_compute, sample_chunks):
+        """
+        최고점이 정확히 RERANK_THRESHOLD와 같을 때 ScoreThresholdError 없이
+        needs_reretrieval=False 및 전체 청크가 반환되는지 경계값 불변식을 검증한다.
+        """
+        # 최고점은 정확히 RERANK_THRESHOLD, 나머지는 낮은 점수
+        mock_compute.return_value = [config.RERANK_THRESHOLD, config.RERANK_THRESHOLD - 0.2, 0.1]
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            retrieved_chunks=sample_chunks,
+            error_logs=[]
+        )
+
+        result = rerank(state)
+
+        assert result["needs_reretrieval"] is False
+        assert len(result["reranked_chunks"]) == len(sample_chunks)
+        assert result["reranked_chunks"][0].rerank_score == pytest.approx(config.RERANK_THRESHOLD)
+        assert len(result.get("error_logs", [])) == 0
+
+    @patch('src.agent.workflow.config.USE_RERANKER', True)
+    @patch('src.retrieval.reranker.compute_relevance_scores')
+    def test_rerank_partial_pass_preserves_all_chunks(self, mock_compute, sample_chunks):
+        """
+        최고점만 RERANK_THRESHOLD 이상이고 나머지 하위 청크들의 점수가 임계값 미만일 때,
+        rerank 노드는 청크를 임의로 탈락시키지 않고 입력 청크 전체를 내림차순 정렬하여 반환해야 한다.
+        (개별 청크 필터링은 후속 evaluate 노드의 check_relevance 책임임을 검증)
+        """
+        mock_compute.return_value = [config.RERANK_THRESHOLD + 0.3, config.RERANK_THRESHOLD - 0.1, 0.05]
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            retrieved_chunks=sample_chunks,
+            error_logs=[]
+        )
+
+        result = rerank(state)
+
+        assert result["needs_reretrieval"] is False
+        assert len(result["reranked_chunks"]) == len(sample_chunks)
+        assert result["reranked_chunks"][0].rerank_score == pytest.approx(config.RERANK_THRESHOLD + 0.3)
+        assert result["reranked_chunks"][1].rerank_score == pytest.approx(config.RERANK_THRESHOLD - 0.1)
+        assert result["reranked_chunks"][2].rerank_score == pytest.approx(0.05)
+
+    @patch('src.agent.workflow.config.USE_RERANKER', True)
+    @patch('src.agent.workflow._rerank_impl', side_effect=RerankFailureError("리랭커 모델 서빙 응답 타임아웃"))
+    def test_rerank_model_failure_fallback_preserves_input_order(self, mock_rerank_impl):
+        """
+        RerankFailureError 발생 시 fallback 경로가 1차 검색 청크들의 순서(정렬 순서 및 청크 ID)를
+        하나도 왜곡하지 않고 그대로 RerankingResult 리스트로 보존하는지 검증한다.
+        (단일 청크가 아닌 3개 이상의 다중 청크로 순서 불변식 검증)
+        """
+        ordered_chunks = [
+            RetrievedChunk(chunk_id="c_top", document_id="doc1", content="내용1", score=0.85, metadata={}),
+            RetrievedChunk(chunk_id="c_mid", document_id="doc2", content="내용2", score=0.65, metadata={}),
+            RetrievedChunk(chunk_id="c_low", document_id="doc3", content="내용3", score=0.45, metadata={}),
+        ]
+        state = GraphState(
+            original_query="퇴직급여 회계처리",
+            retrieved_chunks=ordered_chunks,
+            error_logs=[]
+        )
+
+        result = rerank(state)
+
+        assert result["needs_reretrieval"] is False
+        assert len(result["reranked_chunks"]) == 3
+        # 순서 및 ID 보존 확인
+        assert [r.chunk.chunk_id for r in result["reranked_chunks"]] == ["c_top", "c_mid", "c_low"]
+        assert [r.rerank_score for r in result["reranked_chunks"]] == [0.85, 0.65, 0.45]
+        # 에러 로그 누적 확인
+        assert len(result["error_logs"]) == 1
+        assert result["error_logs"][0]["error_type"] == "RR-201"
 
 
 @pytest.mark.unit
