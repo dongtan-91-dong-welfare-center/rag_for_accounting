@@ -64,10 +64,14 @@ uv run python -m src.main ingest
 # 컬렉션 비우고 재적재
 uv run python -m src.main ingest --reset
 
+# 문서 3개마다 적재 프로세스를 새로 띄워 장시간 적재의 누적 메모리(OOM)를 끊는다(온톨로지 디렉터리 적재 전용)
+uv run python -m src.main ingest --docs-per-restart 3
+
 # 단일 PDF: 파싱→온톨로지→청킹→적재 전체 경로
 uv run python -m src.main ingest --pdf data/raw_data/제6장.pdf --standard-id gaap-ch6 --standard-type GAAP
 ```
 > `docker-compose.yml`의 PDF 마운트는 API PDF 서빙용이다. 현행 `PDF_DIR` 기본값은 `data/raw_data`이며, 문서 적재(`ingest`)는 `uv sync --extra ingest`를 설치한 쓰기 가능한 호스트 환경에서 실행하는 것을 전제로 한다.
+> `--docs-per-restart`는 로컬 임베딩(프로세스 안에서 모델을 로드하는 구성)에서 장시간 적재가 OOM으로 죽는 경우를 위한 옵션이다. 일부 묶음이 실패하면 부모가 실패 문서를 출력하고 종료 코드 1을 반환하며, 같은 명령을 다시 실행하면 멱등 upsert로 누락분이 채워진다. 원격 임베딩(`EMBEDDING_SERVER_URL`)에서는 모델이 앱 프로세스 밖에 있어 보통 필요하지 않다.
 ### 질의(query)
 ```bash
 uv run python -m src.main query "금융자산의 최초 인식 시점은?"
