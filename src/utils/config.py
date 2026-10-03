@@ -94,6 +94,8 @@ CHUNK_MAX_TOKENS: int = 2048
 # 임베딩 서빙 분리 설정 — KURE-v1을 기성 서빙 컨테이너(docker-compose `embedding`, TEI)로 분리 실행.
 # EMBEDDING_SERVER_URL 설정 시 embed_texts/count_tokens가 src/client를 통해 해당 서버로 HTTP 위임하고,
 # 미설정(기본)이면 프로세스 내 로드(현행 동작). 리랭커는 USE_RERANKER 기본 off라 서빙 대상이 아니다.
+# 준비성 프로브(/ready)가 DB와 임베딩 서버 각각에 허용하는 대기 시간(초). 헬스체크가 오래 매달리지 않게 짧게 둔다.
+READINESS_PROBE_TIMEOUT_SECONDS: float = 3.0
 EMBEDDING_SERVER_URL: str = os.getenv("EMBEDDING_SERVER_URL", "").strip().rstrip("/")
 EMBEDDING_QUERY_TIMEOUT_SECONDS: float = _env_float("EMBEDDING_QUERY_TIMEOUT_SECONDS", 10.0)
 EMBEDDING_BATCH_TIMEOUT_SECONDS: float = _env_float("EMBEDDING_BATCH_TIMEOUT_SECONDS", 120.0)

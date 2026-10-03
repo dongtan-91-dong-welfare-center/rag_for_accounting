@@ -109,6 +109,13 @@ else
   fail "app health endpoint는 ${APP_URL#http://}에서 연결 가능한 상태가 아닙니다."
 fi
 
+# /health는 프로세스 생존만 보므로, DB와 임베딩 서버까지 닿는지는 준비성 경로(/ready)로 따로 확인합니다.
+if curl -fsS "$APP_URL/ready" >/dev/null 2>&1; then
+  pass "app이 준비 상태입니다(DB와 임베딩 서버에 도달 가능)."
+else
+  warn "app이 준비 상태가 아닙니다. 기동 직후라면 잠시 뒤 다시 확인하고, 계속되면 curl $APP_URL/ready 응답의 checks를 확인합니다."
+fi
+
 if curl -fsS "$APP_URL/" >/dev/null 2>&1; then
   pass "React frontend는 app 컨테이너에서 제공됩니다."
 else

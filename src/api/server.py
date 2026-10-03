@@ -22,16 +22,17 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi import Path as PathParam
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
 from src.api.schemas import QueryDoneResponse, WorkflowResponse, to_api_response
-from src.db.connection import close_pool, init_pool
+from src.db.connection import close_pool, get_pool, init_pool
 from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.ingest.parse.page_map import resolve_pdf_path
-from src.utils.config import API_CORS_ORIGINS, PDF_DIR
+from src.utils.config import API_CORS_ORIGINS, EMBEDDING_SERVER_URL, PDF_DIR, READINESS_PROBE_TIMEOUT_SECONDS
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -147,7 +148,45 @@ class ResumeRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    """라이브니스: 프로세스가 응답하는지만 확인한다. 외부 의존성은 점검하지 않는다."""
     return {"status": "ok"}
+
+
+def _check_database() -> None:
+    """DB에 실제로 질의를 보낼 수 있는지 확인한다. 실패하면 예외를 던진다."""
+    with get_pool().connection(timeout=READINESS_PROBE_TIMEOUT_SECONDS) as conn:
+        conn.execute("SELECT 1")
+
+
+def _check_embedding() -> str:
+    """원격 임베딩 서버(TEI)의 /health 도달성을 확인한다. 로컬 임베딩 구성이면 점검 대상이 아니다."""
+    if not EMBEDDING_SERVER_URL:
+        return "skipped"
+    httpx.get(f"{EMBEDDING_SERVER_URL}/health", timeout=READINESS_PROBE_TIMEOUT_SECONDS).raise_for_status()
+    return "ok"
+
+
+def _run_check(check) -> str:
+    try:
+        return check() or "ok"
+    except Exception as e:  # noqa: BLE001 — 점검 실패는 상태 문자열로 보고하며 서버를 죽이지 않는다
+        return f"fail: {type(e).__name__}"
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """
+    준비성: 지금 질의를 받아도 되는지 확인한다. DB 또는 임베딩 서버에 닿지 않으면 503을 돌려준다.
+
+    /health(라이브니스)와 분리한 이유: DB 장애로 컨테이너를 재시작해도 해결되지 않으므로,
+    라이브니스까지 실패시키면 불필요한 재시작 루프가 생긴다.
+    """
+    checks = {"database": _run_check(_check_database), "embedding": _run_check(_check_embedding)}
+    ok = not any(v.startswith("fail") for v in checks.values())
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={"status": "ready" if ok else "not_ready", "checks": checks},
+    )
 
 
 @app.post("/query", response_model=WorkflowResponse)

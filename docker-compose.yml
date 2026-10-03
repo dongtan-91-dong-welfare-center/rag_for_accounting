@@ -90,6 +90,14 @@ services:
       # 웜업 중 질의가 임베딩 실패로 흐르는 순서 문제를 compose 수준에서 차단한다.
       embedding:
         condition: service_healthy
+    # 준비성 프로브: DB와 임베딩 서버에 실제로 닿을 때만 healthy가 된다(/health는 라이브니스라 의존성을 보지 않는다).
+    # slim 이미지에는 curl이 없으므로 파이썬 표준 라이브러리로 호출한다. 응답이 503이면 urlopen이 예외를 던져 비정상 종료한다.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/ready', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
     restart: unless-stopped
 
 volumes:

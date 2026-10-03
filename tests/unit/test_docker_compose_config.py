@@ -41,6 +41,18 @@ class TestDockerComposeConfig:
         assert "embedding" in services
         assert "app" in services
 
+    def test_app_healthcheck_probes_readiness_endpoint(self, compose_data):
+        """app 서비스는 /health가 아닌 준비성 경로(/ready)를 헬스체크로 사용해야 합니다. (#193)"""
+        healthcheck = compose_data["services"]["app"]["healthcheck"]
+        assert "/ready" in " ".join(healthcheck["test"])
+        assert healthcheck["start_period"]
+
+    def test_dockerfile_pins_uv_version(self):
+        """Dockerfile의 uv 이미지는 latest가 아닌 고정 버전이어야 합니다. (#193)"""
+        text = (_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        assert "astral-sh/uv:latest" not in text
+        assert re.search(r"astral-sh/uv:\d+\.\d+\.\d+", text)
+
     def test_embedding_command_flags_and_defaults(self, compose_data):
         """embedding 서비스의 command에 필수 플래그와 기본값이 올바르게 지정되어야 합니다."""
         command = compose_data["services"]["embedding"]["command"]

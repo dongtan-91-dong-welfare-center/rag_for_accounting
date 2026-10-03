@@ -44,7 +44,7 @@ flowchart TD
 |---|---|---|
 | CLI 적재 | `uv run python -m src.main ingest` | 온톨로지 JSON 또는 단일 PDF/Markdown을 청킹·임베딩해 `chunks` 테이블에 저장한다. |
 | CLI 질의 | `uv run python -m src.main query "..."` | 동일 LangGraph 워크플로를 터미널에서 실행한다. |
-| HTTP API | `src/api/server.py` | `/query`, `/resume`, `/documents/{document_id}/pdf`, `/health`를 제공한다. |
+| HTTP API | `src/api/server.py` | `/query`, `/resume`, `/documents/{document_id}/pdf`, `/health`(라이브니스), `/ready`(준비성: DB·임베딩 서버 도달성, 실패 시 503)를 제공한다. |
 | React UI | `frontend/` | FastAPI 앱 컨테이너가 빌드 산출물을 `:8000`에서 함께 서빙한다. |
 | MCP | `src/mcp_server/server.py` | `query_standards`, `resume_query` 도구로 동일 워크플로를 노출한다. |
 | Codex Skill | `src/skills/k-accounting/SKILL.md` | 회계 기준 질의를 감지해 MCP 도구 호출을 유도한다. |
