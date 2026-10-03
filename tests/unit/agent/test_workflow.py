@@ -1,6 +1,8 @@
 import pytest
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.state import CompiledStateGraph
 from unittest.mock import MagicMock, patch
+import src.agent.workflow as workflow_module
 from src.agent.workflow import (
     route_after_evaluate,
     route_after_rewrite,
@@ -14,6 +16,14 @@ from src.models.state import GraphState
 from src.utils.config import MAX_REWRITE_COUNT, GRAPH_STEP_TIMEOUT_SECONDS
 from src.models.schemas import EvaluationResult, FinalResponse
 from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContextFoundError, LLMAPIConnectionError
+
+@pytest.fixture(autouse=True)
+def mock_checkpointer(monkeypatch):
+    """PostgresSaver(#209)는 DB 풀이 필요하므로, 단위 테스트는 인메모리 MemorySaver로 대체한다.
+
+    _get_checkpointer()의 지연 초기화 싱글턴 자리를 미리 채워 get_checkpointer_pool() 호출 자체를 막는다.
+    """
+    monkeypatch.setattr(workflow_module, "_checkpointer", MemorySaver())
 
 @pytest.fixture(autouse=True)
 def mock_searcher():
@@ -406,6 +416,41 @@ class TestSearchNode:
         with pytest.raises(RuntimeError, match="예상치 못한 시스템 오류"):
             search(self._make_state())
 
+    @patch("src.agent.workflow._search_impl")
+    def test_hyde_virtual_answer_excludes_sparse(self, mock_search):
+        """hyde 전략의 2번째 쿼리(가상 답변)는 include_sparse=False로, 원문은 True로 호출된다(#292 Phase 1 H2)"""
+        from src.models.schemas import RewrittenQuery
+
+        mock_search.return_value = []
+        state = GraphState(
+            original_query="영업권 손상차손 인식 기준은?",
+            rewritten_query=RewrittenQuery(original_query="영업권 손상차손 인식 기준은?", strategy="hyde", search_queries=["영업권 손상차손 인식 기준은?", "영업권은 손상차손을 인식..."]),
+            error_logs=[],
+        )
+
+        search(state)
+
+        assert mock_search.call_count == 2
+        assert mock_search.call_args_list[0].kwargs["include_sparse"] is True   # 원문
+        assert mock_search.call_args_list[1].kwargs["include_sparse"] is False  # HyDE 가상 답변
+
+    @patch("src.agent.workflow._search_impl")
+    def test_decompose_subqueries_keep_sparse(self, mock_search):
+        """decompose 전략의 서브쿼리는 실제 질의이므로 Sparse를 그대로 포함한다"""
+        from src.models.schemas import RewrittenQuery
+
+        mock_search.return_value = []
+        state = GraphState(
+            original_query="리스와 금융자산 회계처리 차이는?",
+            rewritten_query=RewrittenQuery(original_query="리스와 금융자산 회계처리 차이는?", strategy="decompose", search_queries=["리스와 금융자산 회계처리 차이는?", "리스 회계처리", "금융자산 회계처리"]),
+            error_logs=[],
+        )
+
+        search(state)
+
+        assert mock_search.call_count == 3
+        assert all(call.kwargs["include_sparse"] is True for call in mock_search.call_args_list)
+
 
 @pytest.mark.unit
 class TestRunWorkflow:
@@ -557,6 +602,39 @@ class TestResumeWorkflow:
         assert len(result["error_logs"]) == 3
         assert result["error_logs"][-1]["error_type"] == "TIMEOUT" # 가장 최신 항목은 보존
         assert result["error_logs"][0]["message"] == "err 1" # 가장 오래된 err 0은 밀려남
+
+
+@pytest.mark.unit
+class TestGetCheckpointer:
+    """_get_checkpointer() 지연 초기화 단위 테스트(#209) — PostgresSaver 전환 검증"""
+
+    def test_lazily_constructs_postgres_saver_once(self, monkeypatch):
+        """최초 호출 시 get_checkpointer_pool()의 풀로 PostgresSaver를 생성하고 setup()을 호출하며,
+        이후 호출은 새로 만들지 않고 같은 인스턴스를 재사용한다(싱글턴)."""
+        monkeypatch.setattr(workflow_module, "_checkpointer", None)
+        fake_pool = object()
+        monkeypatch.setattr(workflow_module, "get_checkpointer_pool", lambda: fake_pool)
+
+        created = []
+
+        class FakeSaver:
+            def __init__(self, pool):
+                self.pool = pool
+                self.setup_called = False
+                created.append(self)
+
+            def setup(self):
+                self.setup_called = True
+
+        monkeypatch.setattr(workflow_module, "PostgresSaver", FakeSaver)
+
+        first = workflow_module._get_checkpointer()
+        second = workflow_module._get_checkpointer()
+
+        assert first is second            # 두 번째 호출은 재생성 없이 동일 인스턴스 반환
+        assert len(created) == 1          # PostgresSaver 생성은 1회만 발생
+        assert first.pool is fake_pool    # get_checkpointer_pool()의 풀을 그대로 주입
+        assert first.setup_called is True # setup()으로 checkpoints 테이블 보장
 
 
 @pytest.mark.unit

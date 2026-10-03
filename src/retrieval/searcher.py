@@ -35,7 +35,7 @@ def _build_where_clause(metadata_filter: dict | None) -> tuple[str, list]:
     # 메타데이터 필터링
     if not metadata_filter:
         return "", []
-    
+
     conditions = []   # 조건절 리스트(예: ["metadata->>%s = %s"])
     params = []       # 파라미터 리스트(예: ["period", "2024"], ["accounting_standard", "K-IFRS"])
     for key, value in metadata_filter.items():
@@ -45,7 +45,7 @@ def _build_where_clause(metadata_filter: dict | None) -> tuple[str, list]:
         params.extend([key, str(value)])          # 메타데이터의 key와 value를 파라미터로 전달
 
     # 예시: ("WHERE metadata->>%s = %s AND metadata->>%s = %s", ["period", "2024", "accounting_standard", "K-IFRS"])
-    return " WHERE " + " AND ".join(conditions), params 
+    return " WHERE " + " AND ".join(conditions), params
 
 
 def dense_search(query_embedding: list[float], top_k: int, metadata_filter: dict | None = None, collection: str = CHUNKS_TABLE) -> list[RetrievedChunk]:
@@ -127,16 +127,16 @@ def _execute_search_query(sql_query: str | sql.SQL | sql.Composed, params: list,
             with conn.cursor() as cur:
                 # 쿼리 타임아웃 설정
                 cur.execute(sql.SQL("SET LOCAL statement_timeout = {}").format(sql.Literal(f"{timeout_ms}ms")))
-                
+
                 # sql_query가 str 타입이면 sql.SQL로 변환, 아니면 그대로 사용
                 # cast: 문법상 str이지만 LiteralString 타입으로 취급하겠다는 의미
                 query_obj = sql.SQL(cast(LiteralString, sql_query)) if isinstance(sql_query, str) else sql_query
                 cur.execute(query_obj, params)
                 rows = cur.fetchall()
-                
+
                 for row in rows:
                     chunk_id, document_id, content, metadata, score = row
-                    
+
                     # metadata가 문자열(JSON)로 반환될 경우 dict로 파싱
                     if isinstance(metadata, str):
                         try:
@@ -165,7 +165,7 @@ def _execute_search_query(sql_query: str | sql.SQL | sql.Composed, params: list,
     except Exception as e:
         logger.error(f"{search_type} 검색 중 DB 오류: {e}")
         raise DatabaseQueryError(f"데이터베이스 쿼리 실행 실패: {e}")
-        
+
     return results
 
 
@@ -209,7 +209,13 @@ def reciprocal_rank_fusion(
     return sorted(fused.values(), key=lambda x: x.score, reverse=True)
 
 
-def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = None, collection: str = CHUNKS_TABLE) -> list[RetrievedChunk]:
+def search_chunks(
+    query: str,
+    top_k: int = 10,
+    metadata_filter: dict | None = None,
+    collection: str = CHUNKS_TABLE,
+    include_sparse: bool = True,
+) -> list[RetrievedChunk]:
     """
     하이브리드 검색 (Dense + Sparse) 전략을 통해 청크를 검색한다.
     - Dense/Sparse 독립 장애 처리: 한쪽 실패 시 나머지 결과만 반환, 양쪽 실패 시 DatabaseQueryError
@@ -217,19 +223,21 @@ def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = No
     - 재탐색 후에도 0건이면 NoContextFoundError 발생
     - collection: 검색 대상 테이블명(기본: 운영 CHUNKS_TABLE). 테스트가 전용 컬렉션을 가리키게 해
       운영 chunks 오염·소실 없이 격리하기 위한 주입점이다.
+    - include_sparse=False: Sparse 검색을 생략하고 Dense 단독으로 진행한다.
+      HyDE 가상 답변처럼 비도메인 명사류가 섞여 ts_rank_cd 노이즈 점수로 이어지는 질의에 쓴다.
     """
     logger.info(f"하이브리드 검색 시작: query='{query[:30]}...', top_k={top_k}")
 
     query_vector = embed_query(query)
 
     # Dense 및 Sparse 검색 실행 (각각 top_k만큼 가져와서 병합 풀 확보)
-    merged = _search_and_merge(query, query_vector, top_k, metadata_filter, collection)
+    merged = _search_and_merge(query, query_vector, top_k, metadata_filter, collection, include_sparse)
     final_results = merged[:top_k]
 
     if not final_results:
         retry_top_k = top_k * 2
         logger.info(f"검색 결과 0건, top_k={retry_top_k}로 재탐색")
-        merged = _search_and_merge(query, query_vector, retry_top_k, metadata_filter, collection)
+        merged = _search_and_merge(query, query_vector, retry_top_k, metadata_filter, collection, include_sparse)
         final_results = merged[:top_k]
 
     if not final_results:
@@ -239,7 +247,14 @@ def search_chunks(query: str, top_k: int = 10, metadata_filter: dict | None = No
     logger.info(f"하이브리드 검색 완료: {len(final_results)}건 반환")
     return final_results
 
-def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadata_filter: dict | None, collection: str) -> list[RetrievedChunk]:
+def _search_and_merge(
+    query: str,
+    query_vector: list[float],
+    top_k: int,
+    metadata_filter: dict | None,
+    collection: str,
+    include_sparse: bool = True,
+) -> list[RetrievedChunk]:
     """Dense + Sparse 검색을 독립 실행하고 RRF로 병합한다. 양쪽 모두 실패 시 DatabaseQueryError를 발생시킨다."""
     dense_results: list[RetrievedChunk] = []
     sparse_results: list[RetrievedChunk] = []
@@ -252,17 +267,20 @@ def _search_and_merge(query: str, query_vector: list[float], top_k: int, metadat
         dense_failed = True
         logger.warning(f"Dense 검색 실패, Sparse 단독 진행: {e}")
 
-    try:
-        sparse_results = sparse_search(query, top_k, metadata_filter, collection)
-    except (SearchTimeoutError, DatabaseQueryError) as e:
-        sparse_failed = True
-        logger.warning(f"Sparse 검색 실패, Dense 단독 진행: {e}")
+    if include_sparse:
+        try:
+            sparse_results = sparse_search(query, top_k, metadata_filter, collection)
+        except (SearchTimeoutError, DatabaseQueryError) as e:
+            sparse_failed = True
+            logger.warning(f"Sparse 검색 실패, Dense 단독 진행: {e}")
 
-    if dense_failed and sparse_failed:
+    if dense_failed and (sparse_failed or not include_sparse):
         raise DatabaseQueryError("Dense 및 Sparse 검색 모두 실패")
 
     if dense_failed:
         logger.info("검색 모드: Sparse 단독")
+    elif not include_sparse:
+        logger.info("검색 모드: Dense 단독 (Sparse 의도적 생략)")
     elif sparse_failed:
         logger.info("검색 모드: Dense 단독")
     else:

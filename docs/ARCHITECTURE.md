@@ -71,12 +71,13 @@ API 응답 스키마의 정본은 `src/api/schemas.py`다. 내부 `GraphState` �
 | 단계 | 현행 구현 |
 |---|---|
 | Dense | KURE-v1 질의 임베딩과 pgvector cosine distance를 사용한다. |
-| Sparse | PostgreSQL `to_tsvector('simple', content)` + `plainto_tsquery('simple', query)` + `ts_rank_cd`를 사용한다. |
+| Sparse | 질의를 형태소 명사류로 쪼개 사전토큰화 컬럼 `content_morph`에 `to_tsvector('simple', content_morph)` + `websearch_to_tsquery('simple', ...)`(OR 연결) + `ts_rank_cd`로 매칭한다. |
 | 병합 | Dense/Sparse 결과를 가중 RRF(RRF_K=60, SPARSE_FUSION_WEIGHT=0.1)로 병합한다. |
 | 장애 처리 | 한쪽 검색이 실패하면 다른 쪽 단독 결과로 진행한다. 양쪽 모두 실패하면 DB 오류로 처리한다. |
 | 재탐색 | 결과가 0건이면 `top_k * 2`로 한 번 더 검색한다. |
+| HyDE 가상 답변 제외 | hyde 전략의 가상 답변 쿼리는 Dense에는 포함하되 Sparse에서는 제외한다(`include_sparse=False`). 비도메인 명사류가 `ts_rank_cd` 점수를 노이즈로 오염시키는 것을 막는다. |
 
-2026-07-11 회의에서 언급된 형태소 분석기 기반 sparse 검색과 동의어 사전은 현행 구현이 아니다. 현재 sparse는 PostgreSQL `simple` 설정이라 한국어 형태소 분석이나 IDF 기반 BM25를 제공하지 않는다. 이 차이는 검색 개선 이슈를 만들 때 반드시 구분한다.
+ts_rank_cd에는 IDF(흔한 단어를 자동으로 덜 세는 가중치)가 없다. 품사 화이트리스트가 유일한 노이즈 방어선이고, 남는 회귀는 병합 가중(`SPARSE_FUSION_WEIGHT`)이 억제한다.
 
 ## 6. 워크플로 제어
 
@@ -129,6 +130,7 @@ Docker Compose는 세 서비스를 띄운다.
 
 기본 사용자 진입점은 `http://localhost:8000`이다. API 문서는 `http://localhost:8000/docs`에서 확인한다.
 
+<<<<<<< HEAD
 ### 임베딩 실행 위치
 
 사용자 PC에는 임베딩 모델 가중치를 두지 않는 것을 배포 전제로 한다. 배포 환경은 `EMBEDDING_SERVER_URL`을 설정해 `embedding` 서비스(TEI)에 임베딩과 토큰 계산을 위임한다. 이 값이 비어 있으면 프로세스 내 로드로 동작하며, 이는 개발자 호스트(MPS 가속 적재 등)에서만 사용한다.
@@ -154,9 +156,7 @@ Docker Compose는 세 서비스를 띄운다.
 ### 임베딩 벡터와 데이터 공개 범위
 
 청크와 임베딩 벡터는 팀 자산이며 로컬 환경(팀이 관리하는 서버와 개발 PC)에서만 관리한다. GitHub 저장소에는 벡터와 DB 덤프를 올리지 않는다. 서버 간 이관은 팀이 관리하는 경로(`db_dump.sh`, `db_restore.sh`, #274)로 수행한다.
-근거: 벡터는 기준서 원문에서 파생된 산출물이므로 BYO 정책(`docs/architecture/data_disclosure_policy.md`, #206)과 공개 정책 결정(#314)에 따라 공개 저장소에 두지 않는다.
-
-HIL 체크포인터는 현재 프로세스 로컬 `MemorySaver`다. 따라서 FastAPI는 단일 워커 전제이며, 서버 재시작 시 진행 중인 HIL 세션은 사라진다.
+HIL 체크포인터는 PostgreSQL 기반 `PostgresSaver`다(#209). 따라서 FastAPI는 다중 워커로 실행할 수 있고, 서버를 재시작해도 진행 중인 HIL 세션이 유지된다. 근거: 체크포인트가 프로세스 메모리가 아닌 공용 DB에 저장된다.
 
 ## 9. 평가와 성능 지표
 

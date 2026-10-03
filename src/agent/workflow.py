@@ -1,5 +1,6 @@
 # FUNC-009: LangGraph StateGraph 파이프라인 정의
 
+import threading
 import uuid
 from datetime import datetime
 from functools import wraps, partial
@@ -9,8 +10,9 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.types import interrupt, Command
+from src.db.connection import get_checkpointer_pool
 from src.agent.nodes.generate import generate_response as generate
 from src.agent.nodes.evaluate import evaluate_context as evaluate
 from src.retrieval.searcher import search_chunks as _search_impl
@@ -79,7 +81,7 @@ def rewrite(state: GraphState) -> dict:
     # 실제 모듈을 통해 상태 변화 수행 (in-place mutation)
     # updated_state는 사실상 state와 동일한 객체입니다.
     updated_state = _rewrite_impl(state)
-    
+
     # TODO: _rewrite_impl과 handle_node_errors 간의 이중 예외 처리 중복 해결 필요
     return {
         "rewrite_count": updated_state.rewrite_count,
@@ -218,11 +220,18 @@ def search(state: GraphState) -> dict:
     if state.standard_filter != "ALL":
         metadata_filter = {"standard_type": state.standard_filter}
 
+    # hyde 전략의 두 번째 쿼리는 LLM이 지어낸 가상 답변이라,
+    # 비도메인 명사류가 Sparse의 ts_rank_cd 점수를 노이즈로 오염시킨다.
+    # Dense에는 그대로 넣되 Sparse에서만 제외한다.
+    # 원문(0번) 및 decompose·stepback의 서브쿼리는 실제 질의이므로 그대로 둔다.
+    is_hyde = state.rewritten_query is not None and state.rewritten_query.strategy == "hyde"
+
     try:
         # 복수 쿼리에 대해 검색 후 병합·중복 제거
         all_chunks: dict[str, RetrievedChunk] = {}
-        for q in search_queries:
-            results = _search_impl(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter)
+        for idx, q in enumerate(search_queries):
+            include_sparse = not (is_hyde and idx == 1)
+            results = _search_impl(q, top_k=TOP_K_RETRIEVAL, metadata_filter=metadata_filter, include_sparse=include_sparse)
             for chunk in results:
                 if chunk.chunk_id not in all_chunks or chunk.score > all_chunks[chunk.chunk_id].score:
                     all_chunks[chunk.chunk_id] = chunk
@@ -358,7 +367,7 @@ def route_after_evaluate(state: GraphState) -> str:
     무시된 채 잘못된 답변 생성으로 직행하는 버그가 발생한다.
     """
     # TODO: evaluation이 None일 경우의 예외 처리에 대해 재검토 요망.
-    # 현재 단계에서는 유닛 테스트와의 충돌 방지 및 파이프라인의 안전한 종료를 위해 
+    # 현재 단계에서는 유닛 테스트와의 충돌 방지 및 파이프라인의 안전한 종료를 위해
     # ValueError 발생 대신 generate로 안전하게 우회하도록 유지합니다.
 
     # 1순위: 어느 노드에서든 재검색이 확정된 상태라면, 다른 안전장치보다 먼저 rewrite를 고려한다.
@@ -398,7 +407,7 @@ def build_workflow(checkpointer: BaseCheckpointSaver | None = None) -> CompiledS
         None이면 체크포인트 없이 컴파일되며 interrupt()를 호출할 수 없다(단순 단방향 실행 전용).
         이때 human_review 노드는 HIL 비활성화(hil_enabled=False)로 바인딩되어 decompose/stepback
         질의도 interrupt 없이 search로 통과한다.
-        HIL을 사용하는 run_workflow/resume_workflow는 MemorySaver 싱글턴(_CHECKPOINTER)을 주입한다.
+        HIL을 사용하는 run_workflow/resume_workflow는 PostgresSaver 싱글턴(_get_checkpointer())을 주입한다.
 
     return CompiledStateGraph : LangGraph로 빌드된 상태 그래프
     왜 CompiledGraph를 사용하는가? -> 성능 때문이 아니라 필수 절차이기 때문이다. StateGraph 자체에는
@@ -463,11 +472,30 @@ def build_workflow(checkpointer: BaseCheckpointSaver | None = None) -> CompiledS
     return workflow.compile(checkpointer=checkpointer)
 
 
-# HIL(interrupt/resume) 상태를 run_workflow와 resume_workflow 호출 간 공유하기 위한 인메모리 체크포인터 싱글턴
-# MemorySaver는 체크포인트를 자신의 내부 저장소에 thread_id로 보관하므로
-# 매 호출마다 build_workflow로 그래프를 새로 컴파일하더라도 동일 인스턴스를 주입하면 중단된 세션을 정상적으로 재개할 수 있다.
-# !TODO: 실서비스 전환 시 AsyncPostgresSaver로 교체 (checkpointer 인터페이스 통일됨)
-_CHECKPOINTER: BaseCheckpointSaver = MemorySaver()
+# HIL(interrupt/resume) 상태를 run_workflow와 resume_workflow 호출 간, 그리고 서버 재시작·다중 워커
+# 사이에도 공유하기 위한 PostgreSQL 기반 체크포인터 싱글턴(#209). 기존 MemorySaver는 프로세스
+# 로컬 메모리에만 상태를 둬 서버가 여러 대이거나 재시작되면 진행 중인 HIL 세션을 잃어버렸다.
+_checkpointer: BaseCheckpointSaver | None = None
+_checkpointer_lock = threading.Lock()
+
+
+def _get_checkpointer() -> BaseCheckpointSaver:
+    """HIL 체크포인터를 지연 초기화하여 반환한다.
+
+    PostgresSaver는 get_checkpointer_pool()의 전용 커넥션 풀을 쓴다. 모듈 임포트 시점에
+    즉시 생성하면 init_pool() 계열보다 먼저 workflow 모듈을 임포트하는 모든 경로(단위
+    테스트 포함)가 깨지므로, 최초 사용 시점까지 생성을 미룬다. setup()은 checkpoints
+    테이블이 없으면 생성하는 멱등 DDL이라 매 프로세스 기동 시 1회 호출해도 안전하다
+    (ensure_interaction_log_table()과 동일한 패턴).
+    """
+    global _checkpointer
+    if _checkpointer is None:
+        with _checkpointer_lock:
+            if _checkpointer is None:
+                saver = PostgresSaver(get_checkpointer_pool())
+                saver.setup()
+                _checkpointer = saver
+    return _checkpointer
 
 
 def _run_config(thread_id: str, metadata: dict[str, Any] | None = None) -> RunnableConfig:
@@ -531,7 +559,7 @@ def thread_exists(thread_id: str) -> bool:
     resume_workflow는 미존재 thread_id에 대한 동작이 정의돼 있지 않으므로(체크포인트 없이
     Command(resume=...) 주입), API 계층(#195)이 재개 전에 이 함수로 404를 판정한다.
     """
-    return _CHECKPOINTER.get(_run_config(thread_id)) is not None
+    return _get_checkpointer().get(_run_config(thread_id)) is not None
 
 
 def run_workflow(
@@ -543,16 +571,16 @@ def run_workflow(
     """
     외부에서 워크플로우를 실행하기 위한 진입점 함수.
 
-    HIL을 지원하기 위해 MemorySaver 체크포인터를 주입하고 thread_id로 세션을 식별한다.
+    HIL을 지원하기 위해 PostgresSaver 체크포인터를 주입하고 thread_id로 세션을 식별한다.
     thread_id가 주어지지 않으면 새 UUID를 발급한다. 반환 dict에는 항상 thread_id가 포함되어,
     워크플로우가 human_review에서 중단(`__interrupt__` 키 존재)된 경우 클라이언트가 이 값을
     resume_workflow에 전달하여 재개할 수 있다.
 
     metadata는 LangSmith 트레이스에 부착할 케이스 식별 정보(예: {"case_id", "gold"})로,
-    _run_config를 통해 RunnableConfig.metadata로 전달된다. 
+    _run_config를 통해 RunnableConfig.metadata로 전달된다.
     트레이싱 비활성 시 무시된다.
     """
-    app = build_workflow(checkpointer=_CHECKPOINTER)
+    app = build_workflow(checkpointer=_get_checkpointer())
 
     # 노드별 타임아웃 설정 (LangGraph CompiledStateGraph 속성)
     app.step_timeout = GRAPH_STEP_TIMEOUT_SECONDS
@@ -609,7 +637,7 @@ def resume_workflow(
     metadata는 run_workflow와 동일한 케이스 식별 정보를 재개 실행 트레이스에도 부착하기 위한 것으로,
     호출자가 run_workflow에 넘긴 값을 그대로 전달하면 한 케이스의 run/resume 트레이스가 동일 메타데이터를 공유한다.
     """
-    app = build_workflow(checkpointer=_CHECKPOINTER)
+    app = build_workflow(checkpointer=_get_checkpointer())
     app.step_timeout = GRAPH_STEP_TIMEOUT_SECONDS
 
     try:
