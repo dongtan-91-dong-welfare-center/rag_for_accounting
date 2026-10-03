@@ -2,8 +2,8 @@
 케이스별 회계사 검토 대조 리포트 단위 테스트
 
 대상: tests/utils/benchmark_metrics.py write_markdown_report()
-  - 전문(질문·예상정답·실제답변·판정사유)이 절단 없이 들어가는지
-  - 회계사 검토란(⑤)·검색통과(retrieval_pass) 노출 여부
+  - 평가 자산(질문·예상정답·실제답변·판정사유)이 마크다운 보고서에서 안전하게 제외되는지
+  - 회계사 검토란(③) 및 검색통과(retrieval_pass) 노출 여부
 """
 import pytest
 
@@ -50,14 +50,16 @@ class TestReviewReport:
         # 대조표 섹션·케이스·각 항목
         assert "## 케이스별 회계사 검토 대조표" in text
         assert "TEST-K-GAAP-001" in text
-        assert "간접법으로 영업활동현금흐름을 어떻게 가감하나요?" in text
-        assert "당기순이익에 비현금항목을 가감한다." in text
-        # 전문이 절단 없이(200자 초과) 들어갔는지
-        assert r.diag["answer"] in text
-        assert r.diag["eval_reasoning"] in text
-        # 회계사 체크란 + 검색통과 노출
-        assert "⑤ 회계사 검토" in text
-        assert "☐정확" in text and "☐적절" in text
+        # 평가 자산 보호를 위해 질문과 예상 정답, 실제 답변 및 판정 사유 전문은 마크다운 보고서에 포함되지 않아야 합니다.
+        assert "간접법으로 영업활동현금흐름을 어떻게 가감하나요?" not in text
+        assert "당기순이익에 비현금항목을 가감한다." not in text
+        assert r.diag["answer"] not in text
+        assert r.diag["eval_reasoning"] not in text
+        # 근거와 판정 정보 및 회계사 체크란 노출을 검증합니다.
+        assert "**① 예상 근거(gold)**: 2.65" in text
+        assert "**② 실제 근거(인용 문단)**: 2.65" in text
+        assert "③ 회계사 검토" in text
+        assert "☐적절" in text
         assert "검색 통과(핵심 Top-5)" in text  # 요약표 행
 
     def test_skip_and_error_cases_excluded_from_review(self, tmp_path):

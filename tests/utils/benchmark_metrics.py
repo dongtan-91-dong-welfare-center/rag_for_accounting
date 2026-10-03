@@ -605,8 +605,9 @@ def write_markdown_report(
     lines.append("## 케이스별 회계사 검토 대조표")
     lines.append("")
     lines.append(
-        "> 케이스별 [질문 · 예상정답+근거 · 실제답변+근거 · 판정]을 대조한다. "
-        "⑤ 회계사 검토란을 직접 채워 답변 정확성·근거 적절성을 판정한다."
+        "> 케이스별 [예상 근거 · 실제 근거 · 판정]을 대조합니다. "
+        "회계사 검토란을 직접 채워 근거 적절성을 판정합니다. "
+        "(질문 및 답변 전문은 평가 자산 보호를 위해 마크다운 보고서에 기록하지 않으며, 원시 측정 데이터에서 확인합니다.)"
     )
     lines.append("")
 
@@ -626,27 +627,15 @@ def write_markdown_report(
             f"answerable {_mk(m.get('is_answerable'))} · CRAG {d.get('rewrite_count')}"
         )
         lines.append("")
-        lines.append("**① 질문**  ")
-        lines.append(d.get("query") or "")
-        lines.append("")
-        lines.append("**② 예상 정답**  ")
-        lines.append(d.get("expected_answer") or "")
-        lines.append("")
-        lines.append(f"**②' 예상 근거(gold)**: {', '.join(r.gold_paras) or '—'}")
-        lines.append("")
-        lines.append("**③ 실제 답변**  ")
-        lines.append(d.get("answer") or "(답변 없음)")
+        lines.append(f"**① 예상 근거(gold)**: {', '.join(r.gold_paras) or '없음'}")
         lines.append("")
         lines.append(
-            f"**③' 실제 근거(인용 문단)**: {', '.join(d.get('citation_paras') or []) or '—'}  ·  "
+            f"**② 실제 근거(인용 문단)**: {', '.join(d.get('citation_paras') or []) or '없음'}  ·  "
             f"검색된 장: {d.get('retrieval_chapters') or []}"
         )
         lines.append("")
-        if d.get("eval_reasoning"):
-            lines.append(f"**④ 판정 근거(LLM eval)**: {d['eval_reasoning']}")
-            lines.append("")
         lines.append(
-            "**⑤ 회계사 검토**: 답변 정확성: ☐정확 ☐부분 ☐오류  /  "
+            "**③ 회계사 검토**: "
             "근거(조항) 적절성: ☐적절 ☐부족 ☐오인용  /  메모: "
         )
         lines.append("")
