@@ -32,10 +32,15 @@ def check_docker_infrastructure(require_app: bool = False):
         return f"Docker 실행 점검 중 에러 발생: {e}"
 
     if require_app:
+        # docker inspect -f '{{.State.Running}}':
+        # -f(--format) 플래그는 Docker의 Go 템플릿(Go template) 문법을 사용합니다.
+        # 컨테이너 전체 메타데이터 JSON을 파싱하지 않고 .State.Running 필드의 불리언 상태값('true' 또는 'false')만 표준 출력으로 직접 추출합니다.
         res_app = run_command("docker inspect -f '{{.State.Running}}' accounting_app")
         if res_app.returncode != 0 or "true" not in res_app.stdout.lower():
             return "accounting_app 컨테이너가 실행 중이 아닙니다."
 
+    # 파이썬 f-string 환경에서는 중괄호({, })를 리터럴로 표현하기 위해 이스케이프({{, }})가 필요하므로
+    # 셸에 '{{.State.Running}}' 문자열을 온전히 전달하기 위해 '{{{{.State.Running}}}}' 형태로 작성합니다.
     res_db = run_command(f"docker inspect -f '{{{{.State.Running}}}}' {DB_NAME}")
     if res_db.returncode != 0 or "true" not in res_db.stdout.lower():
         return f"{DB_NAME} 컨테이너가 실행 중이 아닙니다."
