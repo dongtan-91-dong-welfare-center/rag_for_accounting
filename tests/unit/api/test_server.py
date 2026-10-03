@@ -283,3 +283,91 @@ class TestDocumentPdf:
         r = client.get("/documents/..%2Fsecret/pdf")
         assert r.headers["content-type"] != "application/pdf"
         assert client.get("/documents/GAAP_CH10/pdf").status_code == 422
+
+
+class TestReadiness:
+    """#193 준비성 프로브: /health는 라이브니스, /ready는 DB와 임베딩 도달성을 확인한다."""
+
+    def test_health_stays_liveness_even_when_db_down(self, client, monkeypatch):
+        monkeypatch.setattr("src.api.server._check_database", lambda: (_ for _ in ()).throw(RuntimeError("down")))
+        assert client.get("/health").json() == {"status": "ok"}
+
+    def test_ready_ok_when_all_checks_pass(self, client, monkeypatch):
+        monkeypatch.setattr("src.api.server._check_database", lambda: None)
+        monkeypatch.setattr("src.api.server._check_embedding", lambda: "ok")
+        r = client.get("/ready")
+        assert r.status_code == 200
+        assert r.json() == {"status": "ready", "checks": {"database": "ok", "embedding": "ok"}}
+
+    def test_ready_503_when_database_down(self, client, monkeypatch):
+        def boom():
+            raise RuntimeError("connection refused")
+
+        monkeypatch.setattr("src.api.server._check_database", boom)
+        monkeypatch.setattr("src.api.server._check_embedding", lambda: "ok")
+        r = client.get("/ready")
+        assert r.status_code == 503
+        body = r.json()
+        assert body["status"] == "not_ready"
+        assert body["checks"]["database"].startswith("fail")
+        assert body["checks"]["embedding"] == "ok"
+
+    def test_ready_503_when_embedding_down(self, client, monkeypatch):
+        monkeypatch.setattr("src.api.server._check_database", lambda: None)
+
+        def boom():
+            raise RuntimeError("timeout")
+
+        monkeypatch.setattr("src.api.server._check_embedding", boom)
+        r = client.get("/ready")
+        assert r.status_code == 503
+        assert r.json()["checks"]["embedding"].startswith("fail")
+
+
+class TestReadinessChecks:
+    def test_embedding_skipped_for_local_embedding(self, monkeypatch):
+        from src.api import server
+
+        monkeypatch.setattr("src.api.server.EMBEDDING_SERVER_URL", "")
+        assert server._check_embedding() == "skipped"
+
+    def test_embedding_checks_remote_health(self, monkeypatch):
+        from src.api import server
+
+        seen = {}
+
+        class R:
+            def raise_for_status(self):
+                seen["raised"] = True
+
+        def fake_get(url, timeout):
+            seen["url"] = url
+            return R()
+
+        monkeypatch.setattr("src.api.server.EMBEDDING_SERVER_URL", "http://embedding:80")
+        monkeypatch.setattr("src.api.server.httpx.get", fake_get)
+        assert server._check_embedding() == "ok"
+        assert seen["url"] == "http://embedding:80/health"
+
+    def test_database_check_runs_select_1(self, monkeypatch):
+        from src.api import server
+
+        executed = []
+
+        class Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def execute(self, sql):
+                executed.append(sql)
+
+        class Pool:
+            def connection(self, timeout=None):
+                return Conn()
+
+        monkeypatch.setattr("src.api.server.get_pool", lambda: Pool())
+        server._check_database()
+        assert executed == ["SELECT 1"]

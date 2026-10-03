@@ -54,8 +54,9 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
     FRONTEND_DIST_DIR="/app/frontend/dist"
 
+# 빌드 재현성을 위해 uv 버전을 고정합니다. 올릴 때는 이 태그만 바꿉니다.
 # 공식 uv 배포 이미지로부터 고속 파이썬 패키지 관리자 바이너리(uv, uvx)를 컨테이너의 /bin 경로로 직접 복사합니다.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.22 /uv /uvx /bin/
 
 # 애플리케이션 실행 기준 디렉터리를 /app으로 설정합니다.
 WORKDIR /app
