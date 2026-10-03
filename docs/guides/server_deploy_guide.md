@@ -176,7 +176,7 @@ vi .env
 복원 스크립트는 `chunks` 및 `chunks_morph` 테이블의 행 수와 유효성을 자동으로 검증합니다.
 
 ### 7-2. 원문 PDF 파일 배치
-원문 PDF는 저작권 및 BYO(Bring Your Own Data) 원칙에 따라 DB 덤프에 포함되지 않습니다.
+원문 PDF는 한국회계기준원(KASB) 이용 규약 및 팀 데이터 보호 방침에 따른 BYO(Bring Your Own Data) 원칙에 따라 DB 덤프에 포함되지 않습니다.
 원본 서버의 PDF 파일들을 대상 서버의 `data/raw_data/` 디렉터리에 복사해야 조항 카드에서 원문 보기가 동작합니다:
 
 ```bash

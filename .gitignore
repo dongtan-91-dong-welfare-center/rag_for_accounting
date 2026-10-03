@@ -62,6 +62,8 @@ docs/benchmark/*.json
 docs/benchmark/*.tmp
 # 하니스의 --out-dir 기본값이 아직 이 경로를 가리킨다(경로 통일은 #232) — 실수 커밋을 막는 안전망.
 docs/measurements/
+# 골드 벤치마크 데이터셋은 팀 고유 자산 보호 및 BYO 원칙에 따라 저장소에서 제외한다(#206).
+data/test_data/benchmark.jsonl
 data/ontology
 data/md_data
 # data/ 루트에 LLM 파싱 산출물(가공된 회계기준 파생물)이 실수로 커밋되는 것을 막는다(#206).
