@@ -1,0 +1,47 @@
+{
+  "nodes": [
+    {
+      "id": "gaap-ch21",
+      "node_type": "Standard",
+      "standard_type": "GAAP",
+      "chapter": "21",
+      "name": "제 21 장 종업원급여"
+    },
+    {
+      "id": "gaap-ch21-s1",
+      "node_type": "Section",
+      "title": "제 1 절 총칙",
+      "order": 1
+    },
+    {
+      "id": "gaap-ch21-s2",
+      "node_type": "Section",
+      "title": "제 2 절 퇴직급여",
+      "order": 2
+    },
+    {
+      "id": "gaap-ch21-s2-p21.8",
+      "node_type": "Clause",
+      "title": "21.8",
+      "content": "퇴직급여충당부채는 회계연도 말 현재 전 종업원이 일시에 퇴직할 경우 지급하여야 할 퇴직금상당액을 추정하여 계상한다.",
+      "page": 12
+    }
+  ],
+  "edges": [
+    {
+      "from_id": "gaap-ch21",
+      "to_id": "gaap-ch21-s1",
+      "edge_type": "CONTAINS"
+    },
+    {
+      "from_id": "gaap-ch21",
+      "to_id": "gaap-ch21-s2",
+      "edge_type": "CONTAINS"
+    },
+    {
+      "from_id": "gaap-ch21-s2",
+      "to_id": "gaap-ch21-s2-p21.8",
+      "edge_type": "CONTAINS"
+    }
+  ]
+}
