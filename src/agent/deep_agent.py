@@ -1,4 +1,7 @@
-# FUNC-010: 단일 검색 도구 기반 자율 ReAct 딥에이전트 프로토타입 (시나리오 2, 이슈 #402)
+"""자율 ReAct 딥에이전트 프로토타입 구현 모듈 (이슈 #245, #402, #403).
+
+pydantic-ai Agent 기반으로 회계기준서 검색 도구를 자율 호출하여 최종 답변을 생성합니다.
+"""
 from __future__ import annotations
 
 import re
