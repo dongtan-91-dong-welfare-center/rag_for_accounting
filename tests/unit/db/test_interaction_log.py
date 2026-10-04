@@ -15,6 +15,8 @@ import pytest
 from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.models.schemas import Citation, EvaluationResult
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_db_pool():
