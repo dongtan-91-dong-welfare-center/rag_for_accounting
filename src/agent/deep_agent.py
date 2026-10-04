@@ -117,6 +117,19 @@ def create_deep_agent(
     return agent
 
 
+def _parse_citation_part_indices(part_str: str) -> list[int]:
+    """쉼표로 구분된 개별 인용 문자열(예: '1', '1-3')로부터 1-based 인덱스 목록을 추출합니다."""
+    if "-" in part_str:
+        sub = part_str.split("-")
+        if len(sub) == 2 and sub[0].strip().isdigit() and sub[1].strip().isdigit():
+            start_i, end_i = int(sub[0].strip()), int(sub[1].strip())
+            if start_i <= end_i:
+                return list(range(start_i, end_i + 1))
+    elif part_str.isdigit():
+        return [int(part_str)]
+    return []
+
+
 def extract_citations_from_collected_chunks(
     answer: str,
     collected_chunks: list[RetrievedChunk],
@@ -128,31 +141,17 @@ def extract_citations_from_collected_chunks(
     citations: list[Citation] = []
     used_indices: set[int] = set()
 
+    # 대괄호 내 숫자, 쉼표, 하이픈이 포함된 인용 블록 검색 (예: "[1]", "[1, 2]", "[1-3]")
     for block in re.finditer(r"\[([\d\s,\-]+)\]", answer):
         raw_content = block.group(1)
+        # 쉼표 구분 복수 인용 처리 (예: "1, 2" -> ["1", "2"])
         for part in raw_content.split(","):
             part_str = part.strip()
             if not part_str:
                 continue
-            if "-" in part_str:
-                sub = part_str.split("-")
-                if len(sub) == 2 and sub[0].strip().isdigit() and sub[1].strip().isdigit():
-                    start_i, end_i = int(sub[0].strip()), int(sub[1].strip())
-                    if start_i <= end_i:
-                        for idx in range(start_i, end_i + 1):
-                            if 1 <= idx <= len(collected_chunks) and idx not in used_indices:
-                                chunk = collected_chunks[idx - 1]
-                                citations.append(
-                                    Citation(
-                                        document_id=chunk.document_id,
-                                        chunk_id=chunk.chunk_id,
-                                        content=chunk.content,
-                                        relevance_score=float(chunk.score),
-                                    )
-                                )
-                                used_indices.add(idx)
-            elif part_str.isdigit():
-                idx = int(part_str)
+
+            for idx in _parse_citation_part_indices(part_str):
+                # 수집된 청크 인덱스 범위 유효성 검증 및 중복 인용 방지
                 if 1 <= idx <= len(collected_chunks) and idx not in used_indices:
                     chunk = collected_chunks[idx - 1]
                     citations.append(
