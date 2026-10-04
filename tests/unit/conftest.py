@@ -7,7 +7,12 @@ from src.models.schemas import LLMInternalResponse, EvaluationResult, RetrievedC
 
 @pytest.fixture(autouse=True)
 def mock_external_dependencies(monkeypatch):
-    """단위 테스트 실행 시 실수로 외부 의존성을 호출하는 것을 방지하기 위해 환경 변수를 가짜 값으로 설정"""
+    """단위 테스트 실행 시 실수로 외부 의존성을 호출하는 것을 방지하기 위해 환경 변수를 가짜 값으로 설정.
+
+    근거: 단위 테스트 실행 환경이나 .env에 EMBEDDING_SERVER_URL이 설정되어 있을 경우,
+    embed_texts()가 외부 TEI 원격 서버로 HTTP 요청을 전송하여 단위 테스트의 독립성이
+    훼손되거나 연결 오류가 발생하는 현상을 방지하기 위해 EMBEDDING_SERVER_URL을 공백으로 초기화합니다.
+    """
     monkeypatch.setenv("OPENAI_API_KEY", "mock-openai-key-for-unit-test")
     monkeypatch.setenv("POSTGRES_USER", "mock_user")
     monkeypatch.setenv("POSTGRES_PASSWORD", "mock_pass")
