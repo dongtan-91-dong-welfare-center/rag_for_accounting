@@ -37,10 +37,7 @@ class FinalResponse(BaseModel):
     confidence_score: float
 
 class ParsedDocument(BaseModel):
-    """파싱된 문서 — Docling 처리 결과 (FUNC-001 출력)
-
-    parser는 src/ingest/parse/parser_dtos.py를 통해 이 클래스를 재노출받아 사용한다.
-    """
+    """파싱된 문서 — Docling 처리 결과 (FUNC-001 출력)"""
     title: str
     text: str
     tables: list[dict] = Field(default_factory=list)
