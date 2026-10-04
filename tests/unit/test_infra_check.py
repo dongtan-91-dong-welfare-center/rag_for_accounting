@@ -8,6 +8,8 @@ import pytest
 
 from tests.utils.infra_check import check_docker_infrastructure
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_subprocess_run():

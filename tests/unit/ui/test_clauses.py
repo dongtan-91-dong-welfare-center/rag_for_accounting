@@ -1,6 +1,10 @@
 """src.ui.clauses.build_clause_rows 단위테스트 (순수 — DB·streamlit 불필요)."""
+import pytest
+
 from src.models.schemas import ChunkMetadata, RerankingResult, RetrievedChunk
 from src.ui.clauses import DEFAULT_TOP_N, ClauseRow, build_clause_rows
+
+pytestmark = pytest.mark.unit
 
 
 def _rr(chunk_id, score, chapter="6", node_id="gaap-ch6-s1", rerank_score=1.0, content="조항 본문"):

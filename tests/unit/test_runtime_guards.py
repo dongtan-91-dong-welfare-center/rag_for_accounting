@@ -16,6 +16,8 @@ from src.utils.config import (
     SEARCH_TIMEOUT_SECONDS,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_timeout_hierarchy_invariants():
     """

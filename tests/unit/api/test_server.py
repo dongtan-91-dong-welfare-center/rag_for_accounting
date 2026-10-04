@@ -13,6 +13,8 @@ from langgraph.types import Interrupt
 
 from src.models.schemas import FinalResponse
 
+pytestmark = pytest.mark.unit
+
 DONE_KEYS = {
     "status",
     "thread_id",
