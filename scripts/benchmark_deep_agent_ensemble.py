@@ -49,7 +49,13 @@ from pydantic_ai.models.test import TestModel
 
 from src.agent.deep_agent import create_deep_agent, run_deep_agent
 from src.db.connection import close_pool, init_pool
-from src.utils.config import KST, OPENAI_MODEL, TARGET_LATENCY_TOTAL_SEC
+from src.utils.config import (
+    GPT_5_4_MINI_INPUT_COST_PER_TOKEN,
+    GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN,
+    KST,
+    OPENAI_MODEL,
+    TARGET_LATENCY_TOTAL_SEC,
+)
 from tests.utils.benchmark_loader import BenchmarkCase, load_benchmark
 from tests.utils.benchmark_metrics import (
     _percentile,
@@ -63,12 +69,6 @@ from tests.utils.benchmark_metrics import (
     retrieval_pass,
 )
 from tests.utils.infra_check import check_docker_infrastructure
-
-# gpt-5.4-mini 정가 기준 (1M 토큰당 달러)
-# Input: $0.15 / 1M tokens ($0.00000015 per token)
-# Output: $0.60 / 1M tokens ($0.00000060 per token)
-GPT_5_4_MINI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
-GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
 
 @dataclass

@@ -47,7 +47,13 @@ if not os.getenv("EMBEDDING_SERVER_URL"):
 from pydantic_ai import Agent
 
 from src.db.connection import close_pool, init_pool
-from src.utils.config import KST, TARGET_LATENCY_TOTAL_SEC, USE_RERANKER
+from src.utils.config import (
+    GPT_5_4_MINI_INPUT_COST_PER_TOKEN,
+    GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN,
+    KST,
+    TARGET_LATENCY_TOTAL_SEC,
+    USE_RERANKER,
+)
 from tests.integration.helpers import run_workflow_to_completion
 from tests.utils.benchmark_loader import BenchmarkCase, load_benchmark
 from tests.utils.benchmark_metrics import (
@@ -64,12 +70,6 @@ from tests.utils.benchmark_metrics import (
     sort_chapters,
 )
 from tests.utils.infra_check import check_docker_infrastructure
-
-# gpt-5.4-mini 정가 기준 (1M 토큰당 달러)
-# Input: $0.15 / 1M tokens ($0.00000015 per token)
-# Output: $0.60 / 1M tokens ($0.00000060 per token)
-GPT_5_4_MINI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
-GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
 
 @dataclass

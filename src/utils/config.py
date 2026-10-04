@@ -42,6 +42,17 @@ LANGSMITH_ENDPOINT: str = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.lan
 VECTOR_COLLECTION_NAME: str = "rag_for_accounting"  # FUNC-003: pgvector 컬렉션명
 OPENAI_MODEL: str = "gpt-5.4-mini"   # FUNC-007, 008, 009: LLM 모델 식별자
 
+# LLM 모델 토큰 가격표 SSoT (1M 토큰당 USD)
+# gpt-5.4-mini 정가 기준: Input $0.15 / 1M tokens, Output $0.60 / 1M tokens
+MODEL_TOKEN_PRICING: dict[str, dict[str, float]] = {
+    "gpt-5.4-mini": {
+        "input_cost_per_token": 0.15 / 1_000_000,
+        "output_cost_per_token": 0.60 / 1_000_000,
+    },
+}
+GPT_5_4_MINI_INPUT_COST_PER_TOKEN: float = MODEL_TOKEN_PRICING["gpt-5.4-mini"]["input_cost_per_token"]
+GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN: float = MODEL_TOKEN_PRICING["gpt-5.4-mini"]["output_cost_per_token"]
+
 # 하이브리드 검색 병합 및 배치 설정
 # Dense/Sparse 결과를 RRF(Reciprocal Rank Fusion)로 병합한다.
 # 점수가 아닌 순위 기반이므로 점수 분포가 다른 두 검색을 정규화 없이 결합할 수 있다.
