@@ -16,6 +16,7 @@
   - `근거:` 시스템 통합 테스트는 로컬 환경에 PostgreSQL 및 임베딩 서버 컨테이너가 기동되어 있어야 성공하므로, 컨테이너 실행 상태를 사전에 확인하거나 단위 테스트(`tests/unit`)를 우선 실행하는 것을 권장합니다.
 - **테스트 마커 (`pyproject.toml` 기준)**:
   - `unit`: 개별 함수 논리 검증, 외부 의존성이 없는 단위 테스트 (Phase 0: Unit)
+    - `규칙:` `tests/unit/` 디렉터리 하위의 모든 테스트 모듈은 최상단에 `pytestmark = pytest.mark.unit`을 필수로 선언해야 합니다. 개별 함수 단위의 데코레이터 중복 사용은 지양하며, 마커 누락 여부는 `tests/unit/test_unit_markers.py` 회귀 테스트를 통해 자동으로 검증됩니다.
   - `system`: 가짜 데이터를 기반으로 한 예외 경로 및 데이터 규격 검증 (Phase 1: Fast Fail)
   - `benchmark`: 벤치마크 정답셋을 기반으로 한 답변 품질 검증 (Phase 2: Quality)
 - **테스트 데이터 위치**: `data/test_data`
