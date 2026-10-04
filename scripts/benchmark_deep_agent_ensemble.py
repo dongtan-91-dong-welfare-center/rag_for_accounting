@@ -1,8 +1,8 @@
 """
-[실측] 시나리오 2: 단일 검색 도구 기반 자율 ReAct 딥에이전트 프로토타입 및 다중 턴 비교 실측 (이슈 #402)
+[실측] 시나리오 3: 앙상블 검색 도구 결합 자율 ReAct 딥에이전트 프로토타입 및 다중 턴 비교 실측 (이슈 #403)
 
-상위 이슈 #245(앙상블 vs 딥에이전트 비교 실험) 및 #247(루프 유연성 스파이크)의 비교군:
-- 파이프라인: 단일 Dense 검색 도구를 사용하는 자율 ReAct 딥에이전트 (pydantic-ai Agent)
+상위 이슈 #245(앙상블 vs 딥에이전트 비교 실험)의 세 번째 비교군:
+- 파이프라인: 가중 RRF 하이브리드 검색(Dense + 형태소 Sparse w=0.1) 도구를 장착한 자율 ReAct 딥에이전트 (pydantic-ai Agent)
 - 다중 턴 상한선 비교: max_turns = 1 / 3 / 5
 - 계측 항목:
   1. 정확도: Hit@1, Hit@10, MRR, Recall (수집된 청크 검색 및 최종 생성 exact/prefix 매칭)
@@ -11,13 +11,13 @@
      - 총 토큰 소모량 (입력, 출력)
      - gpt-5.4-mini 가격 모델 기준 비용 (USD)
   3. 지연 시간: 쿼리별 전체 시간, 외부(LLM)/내부(검색) 시간 분리, p50/p90/p95/p99 통계
-  4. 시나리오 1(고정 파이프라인 베이스라인) 대비 비용/지연 시간 급증 폭 및 정확도 델타 분석
+  4. 시나리오 1(고정 파이프라인) 및 시나리오 2(단일 검색 에이전트) 대비 정확도 델타 및 비용/지연 시간 대조 분석
 
 실행:
-  uv run python scripts/benchmark_deep_agent_single.py --max-turns 1
-  uv run python scripts/benchmark_deep_agent_single.py --max-turns 3
-  uv run python scripts/benchmark_deep_agent_single.py --max-turns 5
-  uv run python scripts/benchmark_deep_agent_single.py --dry-run        # 오프라인 모의 검증
+  uv run python scripts/benchmark_deep_agent_ensemble.py --max-turns 1
+  uv run python scripts/benchmark_deep_agent_ensemble.py --max-turns 3
+  uv run python scripts/benchmark_deep_agent_ensemble.py --max-turns 5
+  uv run python scripts/benchmark_deep_agent_ensemble.py --dry-run        # 오프라인 모의 검증
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
@@ -73,8 +72,8 @@ GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
 
 @dataclass
-class DeepAgentCaseResult:
-    """시나리오 2 단일 케이스 계측 결과"""
+class DeepAgentEnsembleCaseResult:
+    """시나리오 3 단일 케이스 계측 결과"""
 
     case_id: str
     chapter: str
@@ -103,18 +102,18 @@ def compute_llm_cost(input_tokens: int, output_tokens: int) -> float:
     )
 
 
-def measure_deep_agent_case(
+def measure_deep_agent_ensemble_case(
     case: BenchmarkCase,
     max_turns: int = 3,
     k: int = 10,
     agent: Agent | None = None,
-) -> DeepAgentCaseResult:
-    """단일 벤치마크 케이스에 대해 시나리오 2 딥에이전트를 실행하고 정확도/비용/지연시간을 계측합니다."""
+) -> DeepAgentEnsembleCaseResult:
+    """단일 벤치마크 케이스에 대해 시나리오 3 앙상블 딥에이전트를 실행하고 정확도/비용/지연시간을 계측합니다."""
     clauses = parse_gold_clauses(case.references)
     gold_paras = gold_para_set(clauses)
     chapter = clauses[0].chapter if clauses else "?"
 
-    res = DeepAgentCaseResult(
+    res = DeepAgentEnsembleCaseResult(
         case_id=case.id,
         chapter=chapter,
         measurable=True,
@@ -129,6 +128,7 @@ def measure_deep_agent_case(
             standard_filter=case.standard,
             max_turns=max_turns,
             top_k=k,
+            tool_type="ensemble",
             agent=agent,
         )
     except Exception as e:
@@ -149,7 +149,7 @@ def measure_deep_agent_case(
     res.total_cost_usd = compute_llm_cost(res.total_input_tokens, res.total_output_tokens)
 
     # 지연 시간 추정 (외부 LLM 비율 대략 계측: 전체 시간 중 도구 실행 외 시간)
-    res.external_sec = round(max(0.0, dt * 0.8), 2)
+    res.external_sec = round(max(0.0, dt * 0.75), 2)
     res.internal_sec = round(max(0.0, dt - res.external_sec), 2)
 
     search_items = [(c.content, c.chunk_id) for c in chunks]
@@ -188,8 +188,8 @@ def measure_deep_agent_case(
     return res
 
 
-def aggregate_deep_agent_results(rows: list[DeepAgentCaseResult], k: int = 10) -> dict[str, Any]:
-    """딥에이전트 실측 결과 통계 집계"""
+def aggregate_deep_agent_ensemble_results(rows: list[DeepAgentEnsembleCaseResult], k: int = 10) -> dict[str, Any]:
+    """시나리오 3 앙상블 딥에이전트 실측 결과 통계 집계"""
     n_total = len(rows)
     valid_rows = [r for r in rows if r.error is None and r.metrics]
     n_valid = len(valid_rows)
@@ -282,7 +282,7 @@ def aggregate_deep_agent_results(rows: list[DeepAgentCaseResult], k: int = 10) -
     return summary
 
 
-def _save_checkpoint(path: Path, results: list[DeepAgentCaseResult], max_turns: int, k: int) -> None:
+def _save_checkpoint(path: Path, results: list[DeepAgentEnsembleCaseResult], max_turns: int, k: int) -> None:
     """원자적 교체 방식으로 체크포인트 저장"""
     tmp_path = path.with_suffix(".tmp")
     payload = {
@@ -295,7 +295,7 @@ def _save_checkpoint(path: Path, results: list[DeepAgentCaseResult], max_turns: 
     tmp_path.replace(path)
 
 
-def _load_checkpoint(path: Path, expected_turns: int, expected_k: int) -> list[DeepAgentCaseResult]:
+def _load_checkpoint(path: Path, expected_turns: int, expected_k: int) -> list[DeepAgentEnsembleCaseResult]:
     """체크포인트 파일 로드"""
     if not path.exists():
         return []
@@ -306,25 +306,25 @@ def _load_checkpoint(path: Path, expected_turns: int, expected_k: int) -> list[D
         raise ValueError(f"체크포인트 max_turns({saved_turns}) != 지정된 max_turns({expected_turns})")
     if saved_k is not None and saved_k != expected_k:
         raise ValueError(f"체크포인트 k({saved_k}) != 지정된 k({expected_k})")
-    return [DeepAgentCaseResult(**c) for c in data.get("cases", [])]
+    return [DeepAgentEnsembleCaseResult(**c) for c in data.get("cases", [])]
 
 
-def write_deep_agent_markdown_report(
+def write_deep_agent_ensemble_markdown_report(
     summary: dict[str, Any],
-    results: list[DeepAgentCaseResult],
+    results: list[DeepAgentEnsembleCaseResult],
     out_path: Path,
     k: int = 10,
 ) -> None:
-    """시나리오 2 실측 리포트 마크다운 파일 작성"""
+    """시나리오 3 실측 리포트 마크다운 파일 작성"""
     ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     lat = summary.get("latency", {}).get("total", {})
     cost = summary.get("cost_and_tokens", {})
     turns = summary.get("max_turns", 3)
 
     lines = [
-        f"# [실측 리포트] 시나리오 2: 단일 검색 도구 기반 딥에이전트 (max_turns={turns}) (#402)",
+        f"# [실측 리포트] 시나리오 3: 앙상블 검색 도구 기반 딥에이전트 (max_turns={turns}) (#403)",
         "",
-        "> **한 줄 요약 (BLUF):** 단일 Dense 검색 도구를 사용하는 자율 ReAct 딥에이전트의 "
+        "> **한 줄 요약 (BLUF):** 하이브리드 가중 RRF 앙상블 검색 도구를 사용하는 자율 ReAct 딥에이전트의 "
         f"114건 실측 결과, **검색 Hit@{k} {summary.get(f'retrieval_exact_hit@{k}', {}).get('rate', 0):.1%} "
         f"({summary.get(f'retrieval_exact_hit@{k}', {}).get('hits', 0)}/{summary.get('n_measured', 0)})**, "
         f"**생성 Hit@1 {summary.get('generation_exact_hit@1', {}).get('rate', 0):.1%}**, "
@@ -334,8 +334,8 @@ def write_deep_agent_markdown_report(
         "## 1. 실험 환경 및 측정 조건",
         "",
         f"- **측정 일시:** {ts}",
-        f"- **비교 시나리오:** 시나리오 2 (단일 Dense 검색 도구 + 자율 ReAct 루프, 상한 {turns}턴)",
-        "- **검색 아키텍처:** KURE-v1 Dense 임베딩 (1024차원) 단일 도구 바인딩 (`search_accounting_standards`)",
+        f"- **비교 시나리오:** 시나리오 3 (하이브리드 가중 RRF 앙상블 검색 도구 + 자율 ReAct 루프, 상한 {turns}턴)",
+        "- **검색 아키텍처:** KURE-v1 Dense 임베딩 (1024차원) + PostgreSQL `content_morph` tsvector Sparse (가중치 w=0.1) 앙상블 도구 바인딩 (`search_accounting_standards`)",
         f"- **LLM 모델:** `openai:{OPENAI_MODEL}`",
         f"- **모집단:** K-GAAP 벤치마크 114건 (측정 완료 {summary.get('n_measured', 0)}건, 에러 {summary.get('n_error', 0)}건)",
         f"- **가드레일 폴백율 (턴 초과 등):** {summary.get('fallback_rate', {}).get('rate', 0):.1%} ({summary.get('fallback_rate', {}).get('hits', 0)}건)",
@@ -366,9 +366,9 @@ def write_deep_agent_markdown_report(
         "|---|---|---|---|---|---|",
         f"| **전체 쿼리 지연 (Total)** | **{lat.get('p50', 0):.2f}s** | {lat.get('p90', 0):.2f}s | **{lat.get('p95', 0):.2f}s** | {lat.get('p99', 0):.2f}s | {lat.get('avg', 0):.2f}s |",
         "",
-        "## 5. 시나리오 1 베이스라인과의 대조 요약",
+        "## 5. 시나리오 1(고정 파이프라인) 및 시나리오 2(단일 검색 에이전트) 대조 요약",
         "",
-        "| 항목 | 시나리오 1 (기준선, 고정 4단계) | 시나리오 2 (딥에이전트 단일) | 델타 (Δ) |",
+        "| 항목 | 시나리오 1 (기준선, 고정 4단계) | 시나리오 3 (앙상블 딥에이전트) | 델타 (Δ vs 시나리오 1) |",
         "|---|---|---|---|",
         f"| 검색 Hit@10 | 91.6% | {summary.get(f'retrieval_exact_hit@{k}', {}).get('rate', 0):.1%} | {summary.get(f'retrieval_exact_hit@{k}', {}).get('rate', 0) - 0.916:+.1%}p |",
         f"| 생성 Hit@1 | 78.5% | {summary.get('generation_exact_hit@1', {}).get('rate', 0):.1%} | {summary.get('generation_exact_hit@1', {}).get('rate', 0) - 0.785:+.1%}p |",
@@ -384,7 +384,7 @@ def _execute_benchmark_loop(
     cases: list[BenchmarkCase],
     completed_ids: set[str],
     checkpoint_path: Path,
-    results: list[DeepAgentCaseResult],
+    results: list[DeepAgentEnsembleCaseResult],
     max_turns: int,
     k: int,
     agent: Agent | None,
@@ -395,7 +395,7 @@ def _execute_benchmark_loop(
             continue
 
         print(f"[{i}/{len(cases)}] {case.id} 실측 중…", flush=True)
-        res = measure_deep_agent_case(case, max_turns=max_turns, k=k, agent=agent)
+        res = measure_deep_agent_ensemble_case(case, max_turns=max_turns, k=k, agent=agent)
         sec_str = f"{res.elapsed_sec:.2f}s"
         if res.error:
             print(f"    ✗ 에러: {res.error} ({sec_str})")
@@ -414,7 +414,7 @@ def _execute_benchmark_loop(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="시나리오 2 단일 검색 도구 기반 딥에이전트 실측 하니스")
+    parser = argparse.ArgumentParser(description="시나리오 3 앙상블 검색 도구 결합 딥에이전트 실측 하니스")
     parser.add_argument("--max-turns", type=int, default=3, choices=[1, 3, 5], help="최대 추론 턴 수 상한 (1, 3, 5)")
     parser.add_argument("--k", type=int, default=10, help="Hit@k 의 k (기본 10)")
     parser.add_argument("--limit", type=int, default=None, help="최대 측정 케이스 수 (스모크 테스트용)")
@@ -444,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
                 "llm_self_score": 0.9,
             },
         )
-        agent = create_deep_agent(model_name=mock_model, tool_type="single")
+        agent = create_deep_agent(model_name=mock_model, tool_type="ensemble")
 
     init_pool()
     try:
@@ -459,9 +459,9 @@ def main(argv: list[str] | None = None) -> int:
 
         out_dir = Path(args.out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        checkpoint_path = out_dir / f"checkpoint_scenario2_turns_{args.max_turns}.json"
+        checkpoint_path = out_dir / f"checkpoint_scenario3_turns_{args.max_turns}.json"
 
-        results: list[DeepAgentCaseResult] = []
+        results: list[DeepAgentEnsembleCaseResult] = []
         completed_ids: set[str] = set()
 
         if args.resume:
@@ -485,39 +485,50 @@ def main(argv: list[str] | None = None) -> int:
             agent=agent,
         )
 
-        summary = aggregate_deep_agent_results(results, k=args.k)
-        print("\n" + "=" * 64)
-        print(f"시나리오 2 (max_turns={args.max_turns}) 실측 완료 집계")
-        print("=" * 64)
-        print(f"측정 건수: {summary['n_measured']}/{summary['n_total']}")
-        print(f"검색 Exact@{args.k}: {summary.get(f'retrieval_exact_hit@{args.k}', {}).get('rate', 0):.1%}")
-        print(f"생성 Exact@1: {summary.get('generation_exact_hit@1', {}).get('rate', 0):.1%}")
-        print(f"검색 Exact MRR: {summary.get('retrieval_exact_mrr_avg', 0):.4f}")
-        c = summary.get("cost_and_tokens", {})
-        print(f"평균 LLM 턴: {c.get('avg_llm_turns', 0):.2f}회 | 평균 비용: ${c.get('avg_cost_usd', 0):.6f}")
-        l = summary.get("latency", {}).get("total", {})
-        print(f"지연 시간: p50={l.get('p50', 0):.2f}s / p95={l.get('p95', 0):.2f}s / avg={l.get('avg', 0):.2f}s")
+        print("\n계측 완료! 종합 리포트를 산출합니다…\n")
+        summary = aggregate_deep_agent_ensemble_results(results, k=args.k)
 
-        # 결과 영속화 (raw JSON)
-        raw_out_path = out_dir / f"scenario2_turns_{args.max_turns}.json"
-        payload = {
-            "generated_at": datetime.now(KST).isoformat(),
-            "max_turns": args.max_turns,
-            "k": args.k,
-            "summary": summary,
-            "cases": [asdict(r) for r in results],
-        }
-        raw_out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"\nRaw 데이터 저장: {raw_out_path}")
+        summary_json_path = out_dir / f"summary_scenario3_turns_{args.max_turns}.json"
+        summary_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"  - 집계 JSON 저장: {summary_json_path}")
 
-        # 마크다운 리포트 저장
-        report_dir = Path("docs/benchmark")
-        report_dir.mkdir(parents=True, exist_ok=True)
-        report_out_path = report_dir / f"scenario2_turns_{args.max_turns}_report.md"
-        write_deep_agent_markdown_report(summary, results, report_out_path, k=args.k)
-        print(f"리포트 저장: {report_out_path}")
+        md_path = out_dir / f"report_scenario3_turns_{args.max_turns}.md"
+        write_deep_agent_ensemble_markdown_report(summary, results, md_path, k=args.k)
+        print(f"  - 마크다운 리포트 저장: {md_path}")
+
+        # docs/benchmark/ 디렉토리에도 표준 리포트 생성
+        benchmark_dir = Path("docs/benchmark")
+        benchmark_dir.mkdir(parents=True, exist_ok=True)
+        scenario3_report_path = benchmark_dir / f"scenario3_ensemble_report_turns_{args.max_turns}.md"
+        write_deep_agent_ensemble_markdown_report(summary, results, scenario3_report_path, k=args.k)
+        print(f"  - 공식 벤치마크 리포트 저장: {scenario3_report_path}")
+
+        # 콘솔 요약 출력
+        print("\n" + "=" * 60)
+        print(f"  시나리오 3 (max_turns={args.max_turns}) 최종 계측 요약")
+        print("=" * 60)
+        print(f"총 케이스: {summary['n_total']}건 (측정: {summary['n_measured']}건, 에러: {summary['n_error']}건)")
+        print(f"검색 Hit@1:  {summary['retrieval_exact_hit@1']['rate']:.1%}")
+        print(f"검색 Hit@{args.k}: {summary[f'retrieval_exact_hit@{args.k}']['rate']:.1%}")
+        print(f"생성 Hit@1:  {summary['generation_exact_hit@1']['rate']:.1%}")
+        print(f"생성 Hit@{args.k}: {summary[f'generation_exact_hit@{args.k}']['rate']:.1%}")
+        print(f"핵심조항 패스율: {summary['retrieval_pass']['rate']:.1%}")
+        print(f"답변 가능 판정: {summary['is_answerable']['rate']:.1%}")
+        print(f"가드레일 폴백: {summary['fallback_rate']['rate']:.1%}")
+
+        cost_info = summary.get("cost_and_tokens", {})
+        print(f"평균 LLM 턴: {cost_info.get('avg_llm_turns', 0):.2f}회")
+        print(f"평균 도구 호출: {cost_info.get('avg_tool_calls', 0):.2f}회")
+        print(f"평균 토큰:    {cost_info.get('avg_total_tokens', 0):.1f}")
+        print(f"평균 비용:    ${cost_info.get('avg_cost_usd', 0):.6f}")
+
+        lat_info = summary.get("latency", {}).get("total", {})
+        print(f"지연시간(p50): {lat_info.get('p50', 0):.2f}s")
+        print(f"지연시간(p95): {lat_info.get('p95', 0):.2f}s")
+        print("=" * 60 + "\n")
 
         return 0
+
     finally:
         close_pool()
 

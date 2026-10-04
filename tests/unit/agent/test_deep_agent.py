@@ -145,3 +145,35 @@ class TestDeepAgentExecution:
         assert "RuntimeError" in meta["fallback_reason"]
         assert final_resp.is_answerable is False
         assert final_resp.confidence_score == 0.0
+
+    @patch("src.retrieval.searcher.search_chunks")
+    def test_deep_agent_ensemble_tool_call(self, mock_search_chunks):
+        mock_search_chunks.return_value = [
+            _create_sample_chunk("gaap-ch10-10.38", "감가상각 회계처리 앙상블 검색 결과", score=0.95),
+        ]
+
+        model = TestModel(
+            call_tools=["search_accounting_standards"],
+            custom_output_args={
+                "answer": "감가상각방법에 관한 앙상블 결과입니다 [1].",
+                "is_answerable": True,
+                "llm_self_score": 0.98,
+            },
+        )
+        agent = create_deep_agent(tool_type="ensemble")
+        agent.model = model
+
+        final_resp, chunks, meta = run_deep_agent(
+            query="감가상각 기준",
+            tool_type="ensemble",
+            agent=agent,
+        )
+
+        assert final_resp.is_answerable is True
+        assert "앙상블 결과" in final_resp.answer
+        assert len(final_resp.citations) == 1
+        assert final_resp.citations[0].chunk_id == "gaap-ch10-10.38"
+        assert len(chunks) == 1
+        assert meta["search_calls"] == 1
+        mock_search_chunks.assert_called_once()
+

@@ -53,8 +53,68 @@ class DeepAgentDeps:
     call_count: int = 0
 
 
-def create_deep_agent(model_name: str | None = None) -> Agent[DeepAgentDeps, DeepAgentInternalResponse]:
-    """단일 검색 도구를 장착한 pydantic-ai 기반 딥에이전트 인스턴스를 생성합니다."""
+def _format_and_append_chunks(deps: DeepAgentDeps, chunks: list[RetrievedChunk]) -> str:
+    """검색된 청크 목록을 컨텍스트에 축적하고 [n] 인덱스 포맷 텍스트로 변환합니다."""
+    if not chunks:
+        return "검색 결과가 없습니다. 다른 검색어로 재시도해 보세요."
+
+    formatted_lines = []
+    start_idx = len(deps.collected_chunks) + 1
+    for i, chunk in enumerate(chunks, start=start_idx):
+        deps.collected_chunks.append(chunk)
+        chapter_info = f" (제{chunk.metadata.chapter}장)" if chunk.metadata.chapter else ""
+        formatted_lines.append(f"[{i}] {chunk.chunk_id}{chapter_info}\n{chunk.content}")
+
+    return "\n\n".join(formatted_lines)
+
+
+def _execute_single_search(query: str, deps: DeepAgentDeps) -> list[RetrievedChunk]:
+    """Dense 벡터 기반 단일 검색을 수행합니다."""
+    query_vec = embed_query(query)
+    metadata_filter = None
+    if deps.standard_filter and deps.standard_filter != "ALL":
+        metadata_filter = {"standard_type": deps.standard_filter}
+
+    return dense_search(
+        query_embedding=query_vec,
+        top_k=deps.top_k,
+        metadata_filter=metadata_filter,
+    )
+
+
+def _execute_ensemble_search(query: str, deps: DeepAgentDeps) -> list[RetrievedChunk]:
+    """Dense + 형태소 Sparse 가중 RRF 하이브리드 검색을 수행합니다."""
+    from src.retrieval.searcher import search_chunks
+    from src.utils.exception import NoContextFoundError
+
+    metadata_filter = None
+    if deps.standard_filter and deps.standard_filter != "ALL":
+        metadata_filter = {"standard_type": deps.standard_filter}
+
+    try:
+        return search_chunks(
+            query=query,
+            top_k=deps.top_k,
+            metadata_filter=metadata_filter,
+            include_sparse=True,
+        )
+    except NoContextFoundError:
+        return []
+    except Exception as e:
+        logger.warning(f"[DeepAgent] 앙상블 검색 중 오류 발생: {e}")
+        return []
+
+
+def create_deep_agent(
+    model_name: str | None = None,
+    tool_type: str = "single",
+) -> Agent[DeepAgentDeps, DeepAgentInternalResponse]:
+    """단일(dense) 또는 앙상블(hybrid) 검색 도구를 장착한 pydantic-ai 기반 딥에이전트 인스턴스를 생성합니다.
+
+    Args:
+        model_name: 사용할 LLM 모델 식별자 (미지정 시 config.OPENAI_MODEL)
+        tool_type: 검색 도구 유형 ('single' 또는 'ensemble', 기본: 'single')
+    """
     resolved_model = model_name or f"openai-chat:{OPENAI_MODEL}"
     agent = Agent(
         resolved_model,
@@ -63,9 +123,11 @@ def create_deep_agent(model_name: str | None = None) -> Agent[DeepAgentDeps, Dee
         system_prompt=DEEP_AGENT_SYSTEM_PROMPT,
     )
 
+    is_single = tool_type == "single"
+
     @agent.tool
     def search_accounting_standards(ctx: RunContext[DeepAgentDeps], query: str) -> str:
-        """회계기준서 문서를 Dense 벡터 유사도 검색으로 조회합니다.
+        """회계기준서 문서를 검색으로 조회합니다.
 
         Args:
             query: 검색할 회계 주제, 용어 또는 질의문
@@ -74,30 +136,14 @@ def create_deep_agent(model_name: str | None = None) -> Agent[DeepAgentDeps, Dee
         """
         ctx.deps.call_count += 1
         ctx.deps.search_queries.append(query)
-        logger.info(f"[DeepAgent Tool Call #{ctx.deps.call_count}] search_accounting_standards: '{query}'")
+        logger.info(f"[DeepAgent Tool Call #{ctx.deps.call_count}] search_accounting_standards ({'single' if is_single else 'ensemble'}): '{query}'")
 
-        query_vec = embed_query(query)
-        metadata_filter = None
-        if ctx.deps.standard_filter and ctx.deps.standard_filter != "ALL":
-            metadata_filter = {"standard_type": ctx.deps.standard_filter}
+        if is_single:
+            chunks = _execute_single_search(query, ctx.deps)
+        else:
+            chunks = _execute_ensemble_search(query, ctx.deps)
 
-        chunks = dense_search(
-            query_embedding=query_vec,
-            top_k=ctx.deps.top_k,
-            metadata_filter=metadata_filter,
-        )
-
-        if not chunks:
-            return "검색 결과가 없습니다. 다른 검색어로 재시도해 보세요."
-
-        formatted_lines = []
-        start_idx = len(ctx.deps.collected_chunks) + 1
-        for i, chunk in enumerate(chunks, start=start_idx):
-            ctx.deps.collected_chunks.append(chunk)
-            chapter_info = f" (제{chunk.metadata.chapter}장)" if chunk.metadata.chapter else ""
-            formatted_lines.append(f"[{i}] {chunk.chunk_id}{chapter_info}\n{chunk.content}")
-
-        return "\n\n".join(formatted_lines)
+        return _format_and_append_chunks(ctx.deps, chunks)
 
     return agent
 
@@ -134,9 +180,10 @@ def run_deep_agent(
     max_turns: int = 3,
     top_k: int = 10,
     model_name: str | None = None,
+    tool_type: str = "single",
     agent: Agent[DeepAgentDeps, DeepAgentInternalResponse] | None = None,
 ) -> tuple[FinalResponse, list[RetrievedChunk], dict[str, Any]]:
-    """단일 검색기 기반 자율 딥에이전트를 실행하고 결과 및 계측 메타데이터를 반환합니다.
+    """자율 딥에이전트를 실행하고 결과 및 계측 메타데이터를 반환합니다.
 
     Args:
         query: 사용자 질의
@@ -144,6 +191,7 @@ def run_deep_agent(
         max_turns: LLM 추론/도구 호출 최대 상한 턴 수 (1, 3, 5 등)
         top_k: 도구 1회 검색당 반환할 청크 수 (기본: 10)
         model_name: 사용할 모델 명 (미지정 시 config.OPENAI_MODEL)
+        tool_type: 사용할 검색 도구 유형 ('single' 또는 'ensemble', 기본: 'single')
         agent: 주입할 Agent 인스턴스 (테스트 시 모의 객체 주입 가능)
 
     Returns:
@@ -153,7 +201,7 @@ def run_deep_agent(
             - dict[str, Any]: 실행 통계 및 메타데이터 (턴 수, 토큰, 도구 호출 수 등)
     """
     if agent is None:
-        agent = create_deep_agent(model_name=model_name)
+        agent = create_deep_agent(model_name=model_name, tool_type=tool_type)
 
     deps = DeepAgentDeps(
         standard_filter=standard_filter,
