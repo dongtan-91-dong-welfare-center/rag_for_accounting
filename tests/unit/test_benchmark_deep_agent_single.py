@@ -22,23 +22,30 @@ from scripts.benchmark_deep_agent_single import (
     write_deep_agent_markdown_report,
 )
 from src.agent.deep_agent import create_deep_agent
+from src.utils.config import (
+    GPT_5_4_MINI_INPUT_COST_PER_TOKEN,
+    GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN,
+)
 from tests.utils.benchmark_loader import BenchmarkCase
 
 pytestmark = pytest.mark.unit
 
 
 def test_compute_llm_cost():
-    # gpt-5.4-mini: $0.15/1M in, $0.60/1M out
-    # 1,000,000 in + 1,000,000 out = $0.75
+    """입력/출력 토큰 수에 따른 딥에이전트 비용 산정식이 config SSoT 단가와 일치하는지 검증합니다."""
+    # 1,000,000 in + 1,000,000 out 계산
+    expected_cost = 1_000_000 * GPT_5_4_MINI_INPUT_COST_PER_TOKEN + 1_000_000 * GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN
     cost = compute_llm_cost(1_000_000, 1_000_000)
-    assert abs(cost - 0.75) < 1e-6
+    assert abs(cost - expected_cost) < 1e-6
 
-    # 2,000 in + 500 out = 2000 * 1.5e-7 + 500 * 6.0e-7 = 0.00030 + 0.00030 = 0.00060
+    # 2,000 in + 500 out 계산
+    expected_cost2 = 2000 * GPT_5_4_MINI_INPUT_COST_PER_TOKEN + 500 * GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN
     cost2 = compute_llm_cost(2000, 500)
-    assert abs(cost2 - 0.00060) < 1e-6
+    assert abs(cost2 - expected_cost2) < 1e-6
 
 
 def test_measure_deep_agent_case_mock():
+    """모의(Mock) 에이전트를 주입하여 measure_deep_agent_case의 측정 지표 및 비용 계산 동작을 검증합니다."""
     mock_model = TestModel(
         call_tools=["search_accounting_standards"],
         custom_output_args={
@@ -84,6 +91,7 @@ def test_measure_deep_agent_case_mock():
 
 
 def test_aggregate_deep_agent_results():
+    """복수 케이스 결과로부터 딥에이전트 Hit rate, 폴백률, 평균 턴/도구 호출수 집계 통계를 검증합니다."""
     r1 = DeepAgentCaseResult(
         case_id="TEST-1",
         chapter="10",
@@ -157,6 +165,7 @@ def test_aggregate_deep_agent_results():
 
 
 def test_checkpoint_save_and_load(tmp_path: Path):
+    """딥에이전트 체크포인트 파일의 저장, 로드 및 max_turns 불일치 예외 처리를 검증합니다."""
     ckpt_file = tmp_path / "checkpoint_test.json"
     r = DeepAgentCaseResult(
         case_id="TEST-CKPT",
@@ -181,6 +190,7 @@ def test_checkpoint_save_and_load(tmp_path: Path):
 
 
 def test_write_deep_agent_markdown_report(tmp_path: Path):
+    """단일 검색 딥에이전트 벤치마크 결과에 대한 마크다운 보고서 생성을 검증합니다."""
     report_file = tmp_path / "test_report.md"
     summary = {
         "n_total": 1,
