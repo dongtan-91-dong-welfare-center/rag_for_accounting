@@ -1,7 +1,7 @@
 """
-[실측] 시나리오 1: 가중 RRF 하이브리드 검색 기준 성능 및 비용 실측 하니스 (이슈 #401)
+[실측] 가중 RRF 하이브리드 검색 베이스라인 파이프라인 성능 및 비용 실측 하니스 (이슈 #401)
 
-이슈 #245(앙상블 vs 딥에이전트 비교 실험)의 기준 베이스라인(Scenario 1) 계측 스크립트:
+이슈 #245(앙상블 vs 딥에이전트 비교 실험)의 기준 베이스라인 계측 스크립트:
 - 파이프라인: 현행 가중 RRF 하이브리드 검색 (Dense + Sparse 형태소 w=0.1) + 고정 4단계 LangGraph
 - 대상: 벤치마크 114건 (K-GAAP)
 - 계측 항목:
@@ -13,9 +13,9 @@
   3. 지연 시간: 쿼리별 전체 시간, 내부(검색/RRF)/외부(LLM) 시간 분리, p50/p90/p95/p99 통계
 
 실행:
-  uv run python scripts/benchmark_scenario1.py
-  uv run python scripts/benchmark_scenario1.py --limit 5        # 스모크 테스트
-  uv run python scripts/benchmark_scenario1.py --resume         # 중단 시 이어하기
+  uv run python scripts/benchmark_baseline_pipeline.py
+  uv run python scripts/benchmark_baseline_pipeline.py --limit 5        # 스모크 테스트
+  uv run python scripts/benchmark_baseline_pipeline.py --resume         # 중단 시 이어하기
 """
 from __future__ import annotations
 
@@ -84,8 +84,8 @@ class LLMCallRecord:
 
 
 @dataclass
-class Scenario1CaseResult:
-    """시나리오 1 단일 케이스 계측 결과"""
+class BaselineCaseResult:
+    """베이스라인 고정 파이프라인 단일 케이스 계측 결과"""
     case_id: str
     chapter: str
     measurable: bool
@@ -102,6 +102,10 @@ class Scenario1CaseResult:
     external_sec: float = 0.0
     internal_sec: float = 0.0
     error: str | None = None
+
+
+# 하위 호환성을 위한 별칭
+Scenario1CaseResult = BaselineCaseResult
 
 
 def compute_llm_cost(input_tokens: int, output_tokens: int) -> float:
@@ -251,8 +255,8 @@ def measure_scenario1_case(case: BenchmarkCase, k: int = 10) -> Scenario1CaseRes
     return res
 
 
-def aggregate_scenario1(results: list[Scenario1CaseResult], k: int = 10) -> dict[str, Any]:
-    """시나리오 1 전체 결과에 대한 정확도, LLM 호출/토큰/비용, 레이턴시 집계"""
+def aggregate_baseline_results(results: list[BaselineCaseResult], k: int = 10) -> dict[str, Any]:
+    """베이스라인 파이프라인 전체 결과에 대한 정확도, LLM 호출/토큰/비용, 지연 시간 집계"""
     rows = [r for r in results if r.measurable and r.error is None]
     n = len(rows)
 
@@ -336,7 +340,11 @@ def aggregate_scenario1(results: list[Scenario1CaseResult], k: int = 10) -> dict
     return summary
 
 
-def _save_checkpoint(path: Path, results: list[Scenario1CaseResult], k: int) -> None:
+# 하위 호환성을 위한 별칭
+aggregate_scenario1 = aggregate_baseline_results
+
+
+def _save_checkpoint(path: Path, results: list[BaselineCaseResult], k: int) -> None:
     """원자적 교체 방식으로 체크포인트 저장"""
     tmp_path = path.with_suffix(".tmp")
     payload = {
@@ -359,19 +367,19 @@ def _load_checkpoint(path: Path, expected_k: int) -> list[Scenario1CaseResult]:
     return [Scenario1CaseResult(**c) for c in data.get("cases", [])]
 
 
-def write_scenario1_markdown_report(
+def write_baseline_markdown_report(
     summary: dict[str, Any],
-    results: list[Scenario1CaseResult],
+    results: list[BaselineCaseResult],
     out_path: Path,
     k: int = 10,
 ) -> None:
-    """시나리오 1 기준 실측 리포트 마크다운 파일 작성"""
+    """베이스라인 파이프라인 기준 실측 리포트 마크다운 파일 작성"""
     ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     lat = summary.get("latency", {}).get("total", {})
     cost = summary.get("cost_and_tokens", {})
 
     lines = [
-        "# [실측 리포트] 시나리오 1: 가중 RRF 하이브리드 검색 기준 성능 및 비용 (#401)",
+        "# [실측 리포트] 가중 RRF 하이브리드 검색 베이스라인 성능 및 비용 (#401)",
         "",
         "> **한 줄 요약 (BLUF):** 현행 가중 RRF 하이브리드 검색(Dense + 형태소 Sparse w=0.1)과 고정 4단계 파이프라인의 "
         f"114건 실측 결과, **검색 Hit@{k} {summary.get(f'retrieval_exact_hit@{k}', {}).get('rate', 0):.1%} "
@@ -423,17 +431,52 @@ def write_scenario1_markdown_report(
         "1. **기준선(Baseline) 확립:** 현행 고정 LangGraph 파이프라인은 쿼리당 항상 4회의 LLM 호출이 발생하며, "
         f"평균 지연 시간 {lat.get('avg', 0):.2f}초 중 약 {(summary.get('latency', {}).get('external_llm', {}).get('avg', 0) / max(lat.get('avg', 1), 0.001) * 100):.1f}%가 "
         "순수 LLM API 왕복 지연에 의해 발생합니다.",
-        "2. **시나리오 2 (#402 딥에이전트 단일 검색) 대조 포인트:** 딥에이전트의 ReAct 루프가 1~2턴 만에 조기 종료될 경우 "
+        "2. **단일 검색 딥에이전트(#402) 대조 포인트:** 딥에이전트의 ReAct 루프가 1~2턴 만에 조기 종료될 경우 "
         "비용과 지연 시간을 절감할 수 있으나, 3턴 이상 반복 시 고정 4단계 파이프라인 대비 비용 및 지연 시간 급증 위험이 있습니다.",
-        "3. **시나리오 3 (#403 앙상블+딥에이전트) 대조 포인트:** 본 기준선의 높은 검색 회수율(Hit@10)을 유지하면서 "
+        "3. **앙상블 딥에이전트(#403) 대조 포인트:** 본 기준선의 높은 검색 회수율(Hit@10)을 유지하면서 "
         "딥에이전트의 동적 판단을 결합했을 때의 트레이드오프를 평가하는 데 본 수치가 단일 기준점으로 활용됩니다.",
     ]
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+# 하위 호환성을 위한 별칭
+write_scenario1_markdown_report = write_baseline_markdown_report
+
+
+def run_benchmark_baseline_loop(
+    cases: list[BenchmarkCase],
+    completed_ids: set[str],
+    checkpoint_path: Path,
+    results: list[BaselineCaseResult],
+    k: int,
+) -> None:
+    """케이스 반복 실행 및 계측 로그 출력 실행 함수"""
+    for i, case in enumerate(cases, 1):
+        if case.id in completed_ids:
+            continue
+
+        print(f"[{i}/{len(cases)}] {case.id} 실측 중…", flush=True)
+        res = measure_scenario1_case(case, k=k)
+        sec_str = f"{res.elapsed_sec:.2f}s"
+        if res.error:
+            print(f"    ✗ 에러: {res.error} ({sec_str})")
+        else:
+            m = res.metrics
+            print(
+                f"    소요={sec_str} (LLM {res.external_sec:.2f}s, 내부 {res.internal_sec:.2f}s) | "
+                f"LLM호출={res.total_llm_calls}회 | "
+                f"토큰={res.total_tokens} (비용=${res.total_cost_usd:.6f}) | "
+                f"검색 exact@{k}={m[f'retrieval_exact_hit@{k}']} | "
+                f"생성 exact@1={m['generation_exact_hit@1']}"
+            )
+        results.append(res)
+        _save_checkpoint(checkpoint_path, results, k)
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="시나리오 1 가중 RRF 하이브리드 검색 기준 성능 및 비용 실측")
+    """CLI 진입점 스크립트 함수: 인자 파싱 및 인프라 검증 후 벤치마크 실행 루프를 호출합니다."""
+    parser = argparse.ArgumentParser(description="가중 RRF 하이브리드 검색 베이스라인 파이프라인 성능 및 비용 실측")
     parser.add_argument("--k", type=int, default=10, help="Hit@k 의 k (기본 10)")
     parser.add_argument("--limit", type=int, default=None, help="최대 측정 케이스 수 (스모크 테스트용)")
     parser.add_argument("--resume", action="store_true", help="중단된 체크포인트 이어서 진행")
@@ -464,7 +507,7 @@ def main(argv: list[str] | None = None) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         checkpoint_path = out_dir / "checkpoint_scenario1.json"
 
-        results: list[Scenario1CaseResult] = []
+        results: list[BaselineCaseResult] = []
         completed_ids: set[str] = set()
 
         if args.resume:
@@ -476,30 +519,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"적재된 장: {len(indexed)}개")
         print(f"측정 대상 케이스: {len(cases)}건 (k={args.k}, 기완료 {len(completed_ids)}건)\n")
 
-        for i, case in enumerate(cases, 1):
-            if case.id in completed_ids:
-                continue
+        run_benchmark_baseline_loop(
+            cases=cases,
+            completed_ids=completed_ids,
+            checkpoint_path=checkpoint_path,
+            results=results,
+            k=args.k,
+        )
 
-            print(f"[{i}/{len(cases)}] {case.id} 실측 중…", flush=True)
-            res = measure_scenario1_case(case, k=args.k)
-            sec_str = f"{res.elapsed_sec:.2f}s"
-            if res.error:
-                print(f"    ✗ 에러: {res.error} ({sec_str})")
-            else:
-                m = res.metrics
-                print(
-                    f"    소요={sec_str} (LLM {res.external_sec:.2f}s, 내부 {res.internal_sec:.2f}s) | "
-                    f"LLM호출={res.total_llm_calls}회 | "
-                    f"토큰={res.total_tokens} (비용=${res.total_cost_usd:.6f}) | "
-                    f"검색 exact@{args.k}={m[f'retrieval_exact_hit@{args.k}']} | "
-                    f"생성 exact@1={m['generation_exact_hit@1']}"
-                )
-            results.append(res)
-            _save_checkpoint(checkpoint_path, results, args.k)
-
-        summary = aggregate_scenario1(results, k=args.k)
+        summary = aggregate_baseline_results(results, k=args.k)
         print("\n" + "=" * 64)
-        print("시나리오 1 실측 완료 집계")
+        print("베이스라인 실측 완료 집계")
         print("=" * 64)
         print(f"측정 건수: {summary['n_measured']}/{summary['n_total']}")
         print(f"검색 Exact@{args.k}: {summary.get(f'retrieval_exact_hit@{args.k}', {}).get('rate', 0):.1%}")
@@ -525,7 +555,7 @@ def main(argv: list[str] | None = None) -> int:
         report_dir = Path("docs/benchmark")
         report_dir.mkdir(parents=True, exist_ok=True)
         report_out_path = report_dir / "scenario1_baseline_report.md"
-        write_scenario1_markdown_report(summary, results, report_out_path, k=args.k)
+        write_baseline_markdown_report(summary, results, report_out_path, k=args.k)
         print(f"리포트 저장: {report_out_path}")
 
         return 0

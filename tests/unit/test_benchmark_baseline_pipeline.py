@@ -1,7 +1,7 @@
 """
-scripts/benchmark_scenario1.py 단위 테스트
+scripts/benchmark_baseline_pipeline.py 단위 테스트
 
-비용 산정식, LLMTracker 계측, 집계(aggregate_scenario1), 마크다운 리포트 생성 및
+비용 산정식, LLMTracker 계측, 집계(aggregate_baseline_results), 마크다운 리포트 생성 및
 체크포인트 저장/복구 로직을 검증합니다.
 """
 import json
@@ -9,32 +9,42 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from scripts.benchmark_scenario1 import (
+from scripts.benchmark_baseline_pipeline import (
+    BaselineCaseResult,
     LLMCallRecord,
     LLMTracker,
     Scenario1CaseResult,
     _load_checkpoint,
     _save_checkpoint,
+    aggregate_baseline_results,
     aggregate_scenario1,
     compute_llm_cost,
+    write_baseline_markdown_report,
     write_scenario1_markdown_report,
+)
+from src.utils.config import (
+    GPT_5_4_MINI_INPUT_COST_PER_TOKEN,
+    GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN,
 )
 
 pytestmark = pytest.mark.unit
 
 
 def test_compute_llm_cost():
-    # gpt-5.4-mini: $0.15/1M in, $0.60/1M out
-    # 1,000,000 in + 1,000,000 out = $0.75
+    """입력/출력 토큰 수에 따른 gpt-5.4-mini 비용 산정식이 config SSoT 단가와 일치하는지 검증합니다."""
+    # 1,000,000 in + 1,000,000 out 계산
+    expected_cost = 1_000_000 * GPT_5_4_MINI_INPUT_COST_PER_TOKEN + 1_000_000 * GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN
     cost = compute_llm_cost(1_000_000, 1_000_000)
-    assert abs(cost - 0.75) < 1e-6
+    assert abs(cost - expected_cost) < 1e-6
 
-    # 1,000 in + 500 out = 1000 * 1.5e-7 + 500 * 6.0e-7 = 0.00015 + 0.00030 = 0.00045
+    # 1,000 in + 500 out 계산
+    expected_cost2 = 1000 * GPT_5_4_MINI_INPUT_COST_PER_TOKEN + 500 * GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN
     cost2 = compute_llm_cost(1000, 500)
-    assert abs(cost2 - 0.00045) < 1e-6
+    assert abs(cost2 - expected_cost2) < 1e-6
 
 
 def test_llm_tracker_captures_run_sync():
+    """LLMTracker 컨텍스트 매니저가 Agent.run_sync 실행 시 토큰 사용량과 지연 시간을 정상 가로채는지 검증합니다."""
     tracker = LLMTracker()
     with tracker:
         from pydantic_ai import Agent
@@ -51,6 +61,7 @@ def test_llm_tracker_captures_run_sync():
 
 
 def test_aggregate_scenario1_statistics():
+    """복수 케이스 결과로부터 Hit rate, MRR, 평균 비용 및 지연 시간 집계 통계가 올바르게 계산되는지 검증합니다."""
     r1 = Scenario1CaseResult(
         case_id="TEST-1",
         chapter="2",
@@ -125,6 +136,7 @@ def test_aggregate_scenario1_statistics():
 
 
 def test_checkpoint_save_and_load(tmp_path: Path):
+    """체크포인트 JSON 파일로의 원자적 저장 및 k값 검증을 포함한 역직렬화 복구를 검증합니다."""
     chk_path = tmp_path / "chk.json"
     r = Scenario1CaseResult(
         case_id="TEST-1",
@@ -147,6 +159,7 @@ def test_checkpoint_save_and_load(tmp_path: Path):
 
 
 def test_write_scenario1_markdown_report(tmp_path: Path):
+    """집계 통계 결과를 바탕으로 마크다운 보고서 파일이 필수 섹션을 포함하여 생성되는지 검증합니다."""
     r = Scenario1CaseResult(
         case_id="TEST-1",
         chapter="2",
@@ -172,7 +185,7 @@ def test_write_scenario1_markdown_report(tmp_path: Path):
     write_scenario1_markdown_report(summary, [r], out_file, k=10)
 
     content = out_file.read_text(encoding="utf-8")
-    assert "# [실측 리포트] 시나리오 1" in content
+    assert "# [실측 리포트] 가중 RRF 하이브리드 검색 베이스라인 성능 및 비용" in content
     assert "한 줄 요약 (BLUF)" in content
     assert "100.0%" in content
     assert "지연 시간" in content
