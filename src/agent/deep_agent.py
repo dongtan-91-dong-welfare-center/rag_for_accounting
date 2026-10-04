@@ -5,7 +5,6 @@ pydantic-ai Agent 기반으로 회계기준서 검색 도구를 자율 호출하
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -16,6 +15,7 @@ from pydantic_ai.usage import UsageLimits
 from src.agent.prompts import DEEP_AGENT_SYSTEM_PROMPT
 from src.models.schemas import (
     Citation,
+    DeepAgentDeps,
     DeepAgentInternalResponse,
     FinalResponse,
     RetrievedChunk,
@@ -26,17 +26,6 @@ from src.utils.exception import NoContextFoundError
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class DeepAgentDeps:
-    """딥에이전트 실행 컨텍스트 의존성 객체"""
-
-    collected_chunks: list[RetrievedChunk] = field(default_factory=list)
-    standard_filter: str | None = None
-    top_k: int = 10
-    search_queries: list[str] = field(default_factory=list)
-    call_count: int = 0
 
 
 def _format_and_append_chunks(deps: DeepAgentDeps, chunks: list[RetrievedChunk]) -> str:

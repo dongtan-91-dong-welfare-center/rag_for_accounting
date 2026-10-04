@@ -1,6 +1,7 @@
 # 문서 파싱부터 답변 생성까지 파이프라인 전 단계(파싱·인덱싱·재작성·검색·재정렬·평가·생성)가 공유하는 데이터 스키마 모음
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from dataclasses import dataclass, field
 from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 QueryScopeCategory = Literal["accounting", "out_of_scope_adjacent", "completely_unrelated"]
 
@@ -130,6 +131,16 @@ class RetrievedChunk(BaseModel):
     content: str
     score: float
     metadata: ChunkMetadata = Field(default_factory=ChunkMetadata)
+
+@dataclass
+class DeepAgentDeps:
+    """딥에이전트 실행 컨텍스트 의존성 객체"""
+
+    collected_chunks: list[RetrievedChunk] = field(default_factory=list)
+    standard_filter: str | None = None
+    top_k: int = 10
+    search_queries: list[str] = field(default_factory=list)
+    call_count: int = 0
 
 class RerankingResult(BaseModel):
     """재정렬 결과 — Cross-Encoder 재정렬 후 청크 (FUNC-006 출력)"""
