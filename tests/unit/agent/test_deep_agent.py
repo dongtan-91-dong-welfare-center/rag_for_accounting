@@ -122,11 +122,19 @@ class TestDeepAgentExecution:
 
     @patch("src.agent.deep_agent.search_chunks")
     def test_deep_agent_max_turns_exceeded_fallback(self, mock_search_chunks):
+        """턴 상한(UsageLimits.request_limit) 초과 시 폴백 동작을 검증합니다.
+
+        동작 원리:
+        pydantic-ai의 TestModel(call_tools=['search_accounting_standards'])은
+        최종 답변(output_type)을 반환하지 않고 매 턴마다 지정된 도구만 반복 호출하도록 동작합니다.
+        따라서 run_deep_agent에서 max_turns=1(UsageLimits request_limit=1)로 제한했을 때,
+        에이전트는 1회의 도구 호출 이후 추가 요청을 시도하다가 UsageLimitExceeded 예외를 발생시키게 됩니다.
+        이를 통해 실제 LLM이 답변 생성을 완료하지 못하고 도구만 계속 호출하는 무한 루프/상한 초과 상황을 모의합니다.
+        """
         mock_search_chunks.return_value = [
             _create_sample_chunk("gaap-ch10-10", "감가상각방법 내용", score=0.88),
         ]
 
-        # request_limit=1인데 모델이 계속 도구만 호출하여 한도를 초과하도록 유도
         model = TestModel(
             call_tools=["search_accounting_standards"],
         )
