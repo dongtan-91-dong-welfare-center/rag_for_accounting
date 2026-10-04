@@ -4,8 +4,11 @@ main.py·app.py에 2중 복제돼 있던 정규화 규약을 단일 모듈로 �
 LangGraph invoke 결과의 `__interrupt__` 실계약(Interrupt 객체 리스트)을 그대로 검증한다.
 """
 from langgraph.types import Interrupt
+import pytest
 
 from src.agent.interrupts import extract_interrupt_payload, is_interrupt
+
+pytestmark = pytest.mark.unit
 
 PAYLOAD = {
     "type": "human_review",

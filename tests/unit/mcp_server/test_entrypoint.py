@@ -1,7 +1,10 @@
 """패키지 진입점 등록 검증 (#264)."""
 
-import tomllib
 from pathlib import Path
+import tomllib
+import pytest
+
+pytestmark = pytest.mark.unit
 
 
 def test_mcp_server_exposes_main_callable():
