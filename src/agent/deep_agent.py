@@ -14,20 +14,17 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 from src.agent.prompts import DEEP_AGENT_SYSTEM_PROMPT
-from src.models.schemas import Citation, FinalResponse, RetrievedChunk
+from src.models.schemas import (
+    Citation,
+    DeepAgentInternalResponse,
+    FinalResponse,
+    RetrievedChunk,
+)
 from src.retrieval.searcher import dense_search, embed_query
 from src.utils.config import OPENAI_MODEL
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-class DeepAgentInternalResponse(BaseModel):
-    """딥에이전트 LLM 최종 구조화 응답 모델"""
-
-    answer: str = Field(description="답변 본문 ([n] 인용 표기 포함)")
-    is_answerable: bool = Field(description="검색된 맥락을 근거로 명확히 답변 가능하면 true, 부족하면 false")
-    llm_self_score: float = Field(default=1.0, description="스스로 평가한 답변의 정확도 및 근거 충실도 (0.0 ~ 1.0)")
 
 
 @dataclass

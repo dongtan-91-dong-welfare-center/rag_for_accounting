@@ -22,6 +22,12 @@ class LLMInternalResponse(BaseModel):
     is_answerable: bool
     llm_self_score: float
 
+class DeepAgentInternalResponse(BaseModel):
+    """딥에이전트 LLM 최종 구조화 응답 모델"""
+    answer: str = Field(description="답변 본문 ([n] 인용 표기 포함)")
+    is_answerable: bool = Field(description="검색된 맥락을 근거로 명확히 답변 가능하면 true, 부족하면 false")
+    llm_self_score: float = Field(default=1.0, description="스스로 평가한 답변의 정확도 및 근거 충실도 (0.0 ~ 1.0)")
+
 class FinalResponse(BaseModel):
     """최종 답변 — 사용자에게 반환되는 응답 구조체"""
     answer: str

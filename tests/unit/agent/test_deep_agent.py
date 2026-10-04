@@ -14,12 +14,16 @@ from pydantic_ai.models.test import TestModel
 
 from src.agent.deep_agent import (
     DeepAgentDeps,
-    DeepAgentInternalResponse,
     create_deep_agent,
     extract_citations_from_collected_chunks,
     run_deep_agent,
 )
-from src.models.schemas import ChunkMetadata, FinalResponse, RetrievedChunk
+from src.models.schemas import (
+    ChunkMetadata,
+    DeepAgentInternalResponse,
+    FinalResponse,
+    RetrievedChunk,
+)
 
 pytestmark = pytest.mark.unit
 
