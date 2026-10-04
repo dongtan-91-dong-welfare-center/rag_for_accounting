@@ -13,6 +13,9 @@ def mock_external_dependencies(monkeypatch):
     monkeypatch.setenv("POSTGRES_PASSWORD", "mock_pass")
     monkeypatch.setenv("POSTGRES_DB", "mock_db")
     monkeypatch.setenv("POSTGRES_HOST", "localhost")
+    monkeypatch.delenv("EMBEDDING_SERVER_URL", raising=False)
+    from src.utils import config
+    monkeypatch.setattr(config, "EMBEDDING_SERVER_URL", "")
 
 @pytest.fixture(autouse=True)
 def mock_llm_agent():
