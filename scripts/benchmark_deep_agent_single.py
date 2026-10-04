@@ -1,9 +1,9 @@
 """
-[실측] 시나리오 2: 단일 검색 도구 기반 자율 ReAct 딥에이전트 프로토타입 및 다중 턴 비교 실측 (이슈 #402)
+[실측] 단일 검색 도구 기반 자율 ReAct 딥에이전트 실측 하니스 (이슈 #402)
 
 상위 이슈 #245(앙상블 vs 딥에이전트 비교 실험) 및 #247(루프 유연성 스파이크)의 비교군:
 - 파이프라인: 단일 Dense 검색 도구를 사용하는 자율 ReAct 딥에이전트 (pydantic-ai Agent)
-- 다중 턴 상한선 비교: max_turns = 1 / 3 / 5
+- 다중 턴 상한선: max_turns = 3 (표준 실측 완료 기준)
 - 계측 항목:
   1. 정확도: Hit@1, Hit@10, MRR, Recall (수집된 청크 검색 및 최종 생성 exact/prefix 매칭)
   2. LLM 호출 및 비용:
@@ -11,13 +11,11 @@
      - 총 토큰 소모량 (입력, 출력)
      - gpt-5.4-mini 가격 모델 기준 비용 (USD)
   3. 지연 시간: 쿼리별 전체 시간, 외부(LLM)/내부(검색) 시간 분리, p50/p90/p95/p99 통계
-  4. 시나리오 1(고정 파이프라인 베이스라인) 대비 비용/지연 시간 급증 폭 및 정확도 델타 분석
+  4. 고정 파이프라인(기준선) 대비 비용/지연 시간 급증 폭 및 정확도 델타 분석
 
 실행:
-  uv run python scripts/benchmark_deep_agent_single.py --max-turns 1
-  uv run python scripts/benchmark_deep_agent_single.py --max-turns 3
-  uv run python scripts/benchmark_deep_agent_single.py --max-turns 5
-  uv run python scripts/benchmark_deep_agent_single.py --dry-run        # 오프라인 모의 검증
+  uv run python scripts/benchmark_deep_agent_single.py --max-turns 3        # 표준 실측
+  uv run python scripts/benchmark_deep_agent_single.py --dry-run             # 오프라인 모의 검증
 """
 
 from __future__ import annotations
