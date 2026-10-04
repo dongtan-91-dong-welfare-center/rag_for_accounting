@@ -39,11 +39,8 @@ sys.path.insert(0, str(_ROOT))
 from dotenv import load_dotenv
 
 load_dotenv()
-if os.getenv("POSTGRES_HOST") in ("database", "localhost", None):
+if os.getenv("POSTGRES_HOST") in ("database", None):
     os.environ["POSTGRES_HOST"] = "127.0.0.1"
-
-if not os.getenv("EMBEDDING_SERVER_URL"):
-    os.environ["EMBEDDING_SERVER_URL"] = "http://localhost:8080"
 
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
@@ -420,8 +417,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=None, help="최대 측정 케이스 수 (스모크 테스트용)")
     parser.add_argument("--resume", action="store_true", help="중단된 체크포인트 이어서 진행")
     parser.add_argument("--dry-run", action="store_true", help="오프라인 모의(Mock) 실행 모드")
+    parser.add_argument("--embedding-url", default=None, help="원격 TEI 임베딩 서버 URL (미지정 시 환경변수 또는 로컬 CPU/MPS 기본값 준수)")
     parser.add_argument("--out-dir", default="docs/measurements", help="결과 저장 디렉토리")
     args = parser.parse_args(argv)
+
+    if args.embedding_url:
+        os.environ["EMBEDDING_SERVER_URL"] = args.embedding_url
 
     if not args.dry_run:
         infra_error = check_docker_infrastructure()

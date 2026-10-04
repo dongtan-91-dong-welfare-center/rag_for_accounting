@@ -59,13 +59,10 @@ def test_measure_deep_agent_case_mock():
         references=["일반기업회계기준 제10장 문단 10.38"],
     )
 
-    with (
-        patch("src.agent.deep_agent.embed_query", return_value=[0.1] * 768),
-        patch("src.agent.deep_agent.dense_search") as mock_dense,
-    ):
+    with patch("src.agent.deep_agent.search_chunks") as mock_search_chunks:
         from src.models.schemas import ChunkMetadata, RetrievedChunk
 
-        mock_dense.return_value = [
+        mock_search_chunks.return_value = [
             RetrievedChunk(
                 chunk_id="gaap-ch10-10.38",
                 document_id="doc1",

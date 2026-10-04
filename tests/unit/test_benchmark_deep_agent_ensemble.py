@@ -58,7 +58,7 @@ def test_measure_deep_agent_ensemble_case_mock():
         references=["일반기업회계기준 제10장 문단 10.38"],
     )
 
-    with patch("src.retrieval.searcher.search_chunks") as mock_search_chunks:
+    with patch("src.agent.deep_agent.search_chunks") as mock_search_chunks:
         from src.models.schemas import ChunkMetadata, RetrievedChunk
 
         mock_search_chunks.return_value = [
