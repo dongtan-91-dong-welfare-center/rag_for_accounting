@@ -9,8 +9,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
+pytestmark = pytest.mark.unit
 
-@pytest.mark.unit
+
 class TestGitHubWorkflows:
     """GitHub Actions CI/CD 워크플로 명세 및 보안 가드 검증"""
 
@@ -135,7 +136,6 @@ class TestGitHubWorkflows:
         assert "./check.sh" in ssh_run
 
 
-@pytest.mark.unit
 class TestIssueAndPRTemplates:
     """이슈 및 PR 템플릿, CODEOWNERS, 기여 가이드 구조 검증"""
 
@@ -194,7 +194,6 @@ class TestIssueAndPRTemplates:
         assert "SNAKE_CASE" in text
 
 
-@pytest.mark.unit
 class TestProjectVersionAndLinterConfig:
     """pyproject.toml 버전 및 ruff 린터 설정 검증"""
 
