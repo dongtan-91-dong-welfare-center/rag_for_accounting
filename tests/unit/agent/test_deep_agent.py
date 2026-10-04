@@ -67,6 +67,18 @@ class TestExtractCitations:
         assert len(citations) == 1
         assert citations[0].chunk_id == "gaap-ch10-1"
 
+    def test_extract_citations_multi_comma_and_range(self):
+        chunks = [
+            _create_sample_chunk("gaap-ch10-1", "청크 1"),
+            _create_sample_chunk("gaap-ch10-2", "청크 2"),
+            _create_sample_chunk("gaap-ch10-3", "청크 3"),
+        ]
+        text = "쉼표 인용 [1, 2] 및 범위 인용 [2-3]."
+        citations = extract_citations_from_collected_chunks(text, chunks)
+
+        assert len(citations) == 3
+        assert [c.chunk_id for c in citations] == ["gaap-ch10-1", "gaap-ch10-2", "gaap-ch10-3"]
+
 
 class TestDeepAgentExecution:
     @patch("src.agent.deep_agent.embed_query")

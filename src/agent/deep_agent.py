@@ -137,24 +137,49 @@ def extract_citations_from_collected_chunks(
     answer: str,
     collected_chunks: list[RetrievedChunk],
 ) -> list[Citation]:
-    """답변 본문의 [n] 인용 표기를 파싱하여 1-based 인덱스에 해당하는 Citation 목록을 생성합니다."""
+    """답변 본문의 [n] 인용 표기를 파싱하여 1-based 인덱스에 해당하는 Citation 목록을 생성합니다.
+
+    `[1]`, `[1][2]` 표준 표기뿐만 아니라 `[1, 2]`, `[1-3]` 등의 복수 인용 엣지 케이스도 파싱합니다.
+    """
     citations: list[Citation] = []
     used_indices: set[int] = set()
 
-    for match in re.finditer(r"\[(\d+)\]", answer):
-        idx = int(match.group(1))
-        # 1-based 인덱스 검증
-        if 1 <= idx <= len(collected_chunks) and idx not in used_indices:
-            chunk = collected_chunks[idx - 1]
-            citations.append(
-                Citation(
-                    document_id=chunk.document_id,
-                    chunk_id=chunk.chunk_id,
-                    content=chunk.content,
-                    relevance_score=float(chunk.score),
-                )
-            )
-            used_indices.add(idx)
+    for block in re.finditer(r"\[([\d\s,\-]+)\]", answer):
+        raw_content = block.group(1)
+        for part in raw_content.split(","):
+            part_str = part.strip()
+            if not part_str:
+                continue
+            if "-" in part_str:
+                sub = part_str.split("-")
+                if len(sub) == 2 and sub[0].strip().isdigit() and sub[1].strip().isdigit():
+                    start_i, end_i = int(sub[0].strip()), int(sub[1].strip())
+                    if start_i <= end_i:
+                        for idx in range(start_i, end_i + 1):
+                            if 1 <= idx <= len(collected_chunks) and idx not in used_indices:
+                                chunk = collected_chunks[idx - 1]
+                                citations.append(
+                                    Citation(
+                                        document_id=chunk.document_id,
+                                        chunk_id=chunk.chunk_id,
+                                        content=chunk.content,
+                                        relevance_score=float(chunk.score),
+                                    )
+                                )
+                                used_indices.add(idx)
+            elif part_str.isdigit():
+                idx = int(part_str)
+                if 1 <= idx <= len(collected_chunks) and idx not in used_indices:
+                    chunk = collected_chunks[idx - 1]
+                    citations.append(
+                        Citation(
+                            document_id=chunk.document_id,
+                            chunk_id=chunk.chunk_id,
+                            content=chunk.content,
+                            relevance_score=float(chunk.score),
+                        )
+                    )
+                    used_indices.add(idx)
 
     return citations
 
