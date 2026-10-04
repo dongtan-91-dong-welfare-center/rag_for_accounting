@@ -81,11 +81,9 @@ class TestExtractCitations:
 
 
 class TestDeepAgentExecution:
-    @patch("src.agent.deep_agent.embed_query")
-    @patch("src.agent.deep_agent.dense_search")
-    def test_deep_agent_single_turn_successful_tool_call(self, mock_dense, mock_embed):
-        mock_embed.return_value = [0.1] * 768
-        mock_dense.return_value = [
+    @patch("src.agent.deep_agent.search_chunks")
+    def test_deep_agent_single_turn_successful_tool_call(self, mock_search_chunks):
+        mock_search_chunks.return_value = [
             _create_sample_chunk("gaap-ch10-10", "감가상각방법 변경 회계처리", score=0.92),
         ]
 
@@ -116,12 +114,15 @@ class TestDeepAgentExecution:
         assert len(chunks) == 1
         assert meta["search_calls"] == 1
         assert meta["fallback_triggered"] is False
+        mock_search_chunks.assert_called_once()
+        call_kwargs = mock_search_chunks.call_args.kwargs
+        assert call_kwargs["top_k"] == 5
+        assert call_kwargs["metadata_filter"] == {"standard_type": "GAAP"}
+        assert call_kwargs["include_sparse"] is True
 
-    @patch("src.agent.deep_agent.embed_query")
-    @patch("src.agent.deep_agent.dense_search")
-    def test_deep_agent_max_turns_exceeded_fallback(self, mock_dense, mock_embed):
-        mock_embed.return_value = [0.1] * 768
-        mock_dense.return_value = [
+    @patch("src.agent.deep_agent.search_chunks")
+    def test_deep_agent_max_turns_exceeded_fallback(self, mock_search_chunks):
+        mock_search_chunks.return_value = [
             _create_sample_chunk("gaap-ch10-10", "감가상각방법 내용", score=0.88),
         ]
 
@@ -162,7 +163,7 @@ class TestDeepAgentExecution:
         assert final_resp.is_answerable is False
         assert final_resp.confidence_score == 0.0
 
-    @patch("src.retrieval.searcher.search_chunks")
+    @patch("src.agent.deep_agent.search_chunks")
     def test_deep_agent_ensemble_tool_call(self, mock_search_chunks):
         mock_search_chunks.return_value = [
             _create_sample_chunk("gaap-ch10-10.38", "감가상각 회계처리 앙상블 검색 결과", score=0.95),

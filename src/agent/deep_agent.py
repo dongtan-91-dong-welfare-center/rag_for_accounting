@@ -20,8 +20,9 @@ from src.models.schemas import (
     FinalResponse,
     RetrievedChunk,
 )
-from src.retrieval.searcher import dense_search, embed_query
+from src.retrieval.searcher import search_chunks
 from src.utils.config import OPENAI_MODEL
+from src.utils.exception import NoContextFoundError
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -53,25 +54,11 @@ def _format_and_append_chunks(deps: DeepAgentDeps, chunks: list[RetrievedChunk])
     return "\n\n".join(formatted_lines)
 
 
-def _execute_single_search(query: str, deps: DeepAgentDeps) -> list[RetrievedChunk]:
-    """Dense 벡터 기반 단일 검색을 수행합니다."""
-    query_vec = embed_query(query)
-    metadata_filter = None
-    if deps.standard_filter and deps.standard_filter != "ALL":
-        metadata_filter = {"standard_type": deps.standard_filter}
+def _execute_search(query: str, deps: DeepAgentDeps, include_sparse: bool = True) -> list[RetrievedChunk]:
+    """검증된 하이브리드/단일 검색기(`src.retrieval.searcher.search_chunks`)를 재사용하여 검색을 수행합니다.
 
-    return dense_search(
-        query_embedding=query_vec,
-        top_k=deps.top_k,
-        metadata_filter=metadata_filter,
-    )
-
-
-def _execute_ensemble_search(query: str, deps: DeepAgentDeps) -> list[RetrievedChunk]:
-    """Dense + 형태소 Sparse 가중 RRF 하이브리드 검색을 수행합니다."""
-    from src.retrieval.searcher import search_chunks
-    from src.utils.exception import NoContextFoundError
-
+    0건 검색 시 재탐색 메커니즘 및 부분 장애 격리가 search_chunks 내부에 구현되어 있습니다.
+    """
     metadata_filter = None
     if deps.standard_filter and deps.standard_filter != "ALL":
         metadata_filter = {"standard_type": deps.standard_filter}
@@ -81,24 +68,24 @@ def _execute_ensemble_search(query: str, deps: DeepAgentDeps) -> list[RetrievedC
             query=query,
             top_k=deps.top_k,
             metadata_filter=metadata_filter,
-            include_sparse=True,
+            include_sparse=include_sparse,
         )
     except NoContextFoundError:
         return []
     except Exception as e:
-        logger.warning(f"[DeepAgent] 앙상블 검색 중 오류 발생: {e}")
+        logger.error(f"[{type(e).__name__}] search_accounting_standards 도구 시스템 에러: {e}", exc_info=True)
         return []
 
 
 def create_deep_agent(
     model_name: str | None = None,
-    tool_type: str = "single",
+    tool_type: str = "ensemble",
 ) -> Agent[DeepAgentDeps, DeepAgentInternalResponse]:
-    """단일(dense) 또는 앙상블(hybrid) 검색 도구를 장착한 pydantic-ai 기반 딥에이전트 인스턴스를 생성합니다.
+    """앙상블(hybrid, 기본) 또는 단일(dense) 검색 도구를 장착한 pydantic-ai 기반 딥에이전트 인스턴스를 생성합니다.
 
     Args:
         model_name: 사용할 LLM 모델 식별자 (미지정 시 config.OPENAI_MODEL)
-        tool_type: 검색 도구 유형 ('single' 또는 'ensemble', 기본: 'single')
+        tool_type: 검색 도구 유형 ('ensemble' 기본 또는 'single')
     """
     resolved_model = model_name or f"openai-chat:{OPENAI_MODEL}"
     agent = Agent(
@@ -108,7 +95,7 @@ def create_deep_agent(
         system_prompt=DEEP_AGENT_SYSTEM_PROMPT,
     )
 
-    is_single = tool_type == "single"
+    include_sparse = (tool_type != "single")
 
     @agent.tool
     def search_accounting_standards(ctx: RunContext[DeepAgentDeps], query: str) -> str:
@@ -121,13 +108,10 @@ def create_deep_agent(
         """
         ctx.deps.call_count += 1
         ctx.deps.search_queries.append(query)
-        logger.info(f"[DeepAgent Tool Call #{ctx.deps.call_count}] search_accounting_standards ({'single' if is_single else 'ensemble'}): '{query}'")
+        mode_label = "ensemble" if include_sparse else "single"
+        logger.info(f"딥에이전트 도구 호출 #{ctx.deps.call_count} ({mode_label}): query='{query}'")
 
-        if is_single:
-            chunks = _execute_single_search(query, ctx.deps)
-        else:
-            chunks = _execute_ensemble_search(query, ctx.deps)
-
+        chunks = _execute_search(query, ctx.deps, include_sparse=include_sparse)
         return _format_and_append_chunks(ctx.deps, chunks)
 
     return agent
@@ -190,7 +174,7 @@ def run_deep_agent(
     max_turns: int = 3,
     top_k: int = 10,
     model_name: str | None = None,
-    tool_type: str = "single",
+    tool_type: str = "ensemble",
     agent: Agent[DeepAgentDeps, DeepAgentInternalResponse] | None = None,
 ) -> tuple[FinalResponse, list[RetrievedChunk], dict[str, Any]]:
     """자율 딥에이전트를 실행하고 결과 및 계측 메타데이터를 반환합니다.
@@ -201,7 +185,7 @@ def run_deep_agent(
         max_turns: LLM 추론/도구 호출 최대 상한 턴 수 (1, 3, 5 등)
         top_k: 도구 1회 검색당 반환할 청크 수 (기본: 10)
         model_name: 사용할 모델 명 (미지정 시 config.OPENAI_MODEL)
-        tool_type: 사용할 검색 도구 유형 ('single' 또는 'ensemble', 기본: 'single')
+        tool_type: 사용할 검색 도구 유형 ('ensemble' 기본 또는 'single')
         agent: 주입할 Agent 인스턴스 (테스트 시 모의 객체 주입 가능)
 
     Returns:
