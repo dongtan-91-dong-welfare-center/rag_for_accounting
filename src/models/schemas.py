@@ -1,6 +1,7 @@
 # 문서 파싱부터 답변 생성까지 파이프라인 전 단계(파싱·인덱싱·재작성·검색·재정렬·평가·생성)가 공유하는 데이터 스키마 모음
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from dataclasses import dataclass, field
 from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 QueryScopeCategory = Literal["accounting", "out_of_scope_adjacent", "completely_unrelated"]
 
@@ -21,6 +22,12 @@ class LLMInternalResponse(BaseModel):
     answer: str
     is_answerable: bool
     llm_self_score: float
+
+class DeepAgentInternalResponse(BaseModel):
+    """딥에이전트 LLM 최종 구조화 응답 모델"""
+    answer: str = Field(description="답변 본문 ([n] 인용 표기 포함)")
+    is_answerable: bool = Field(description="검색된 맥락을 근거로 명확히 답변 가능하면 true, 부족하면 false")
+    llm_self_score: float = Field(default=1.0, description="스스로 평가한 답변의 정확도 및 근거 충실도 (0.0 ~ 1.0)")
 
 class FinalResponse(BaseModel):
     """최종 답변 — 사용자에게 반환되는 응답 구조체"""
@@ -124,6 +131,16 @@ class RetrievedChunk(BaseModel):
     content: str
     score: float
     metadata: ChunkMetadata = Field(default_factory=ChunkMetadata)
+
+@dataclass
+class DeepAgentDeps:
+    """딥에이전트 실행 컨텍스트 의존성 객체"""
+
+    collected_chunks: list[RetrievedChunk] = field(default_factory=list)
+    standard_filter: str | None = None
+    top_k: int = 10
+    search_queries: list[str] = field(default_factory=list)
+    call_count: int = 0
 
 class RerankingResult(BaseModel):
     """재정렬 결과 — Cross-Encoder 재정렬 후 청크 (FUNC-006 출력)"""
