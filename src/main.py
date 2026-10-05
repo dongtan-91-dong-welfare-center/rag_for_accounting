@@ -3,15 +3,15 @@
 두 가지 실행 경로를 단일 CLI로 제공한다.
 
   1. ingest — 적재 경로
-     온톨로지 그래프 → 청킹(FUNC-002/003) → pgvector 적재(FUNC-003)
+     온톨로지 그래프 → 청킹(ontology/chunk) → pgvector 적재(index)
      · 기본 소스: 미리 빌드된 온톨로지 JSON(data/ontology/*.json)
-     · --pdf/--md 지정 시: 파싱(FUNC-001) → 온톨로지 빌드(FUNC-002) → 청킹 → 적재까지 전체 경로
+     · --pdf/--md 지정 시: 파싱(parse) → 온톨로지 빌드(ontology) → 청킹 → 적재까지 전체 경로
      · 적재 대상 테이블은 기본값으로 검색기가 조회하는 CHUNKS_TABLE("chunks")를 써서 적재와 검색이
        같은 테이블을 보게 한다. --collection으로 다른 테이블을 지정하면 이 전제가 깨지므로, 특별한
        이유가 없으면 기본값을 그대로 쓴다.
 
   2. query — 질의 경로
-     질의 → LangGraph 워크플로(rewrite→search→rerank→evaluate→generate, FUNC-004~009)
+     질의 → LangGraph 워크플로(rewrite→search→rerank→evaluate→generate)
           → 답변/인용 출력
      · HIL(human_review) interrupt 발생 시 대화형으로 승인/재작성을 받아 재개한다.
 
@@ -49,7 +49,7 @@ def _load_graph_from_json(path: Path):
 
 
 def _build_graph_from_source(args):
-    """--pdf/--md 입력으로부터 온톨로지 그래프를 새로 빌드한다(FUNC-001→002).
+    """--pdf/--md 입력으로부터 온톨로지 그래프를 새로 빌드한다(parse→ontology).
 
     PDF는 DoclingParser로 마크다운을 추출한 뒤 build_graph에 넘긴다.
     LLM 엣지 추출이 포함되므로 OPENAI_API_KEY와 실행 시간이 필요하다.
@@ -59,7 +59,7 @@ def _build_graph_from_source(args):
     if args.md:
         md_path = Path(args.md)
     else:
-        # PDF → 마크다운(FUNC-001). build_graph는 마크다운 파일 경로를 입력으로 받으므로
+        # PDF → 마크다운(parse). build_graph는 마크다운 파일 경로를 입력으로 받으므로
         # 파싱 결과 텍스트를 임시 .md로 저장해 전달한다.
         from src.ingest.parse.parser import DoclingParser
 
@@ -70,7 +70,7 @@ def _build_graph_from_source(args):
         md_path.write_text(parsed.text, encoding="utf-8")
         logger.info(f"파싱 결과 마크다운 저장: {md_path}")
 
-    logger.info(f"온톨로지 빌드 시작(FUNC-002): {md_path}")
+    logger.info(f"온톨로지 빌드 시작(ontology): {md_path}")
     graph = build_graph(md_path, args.standard_id, args.standard_type)
     return graph, str(md_path)
 

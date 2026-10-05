@@ -1,4 +1,4 @@
-# FUNC-003/FUNC-005 공유 임베딩 모듈 — KURE-v1 자체호스팅 (이슈 #93 설계 확정)
+# index/search 공유 임베딩 모듈 — KURE-v1 자체호스팅 (이슈 #93 설계 확정)
 # 인덱싱(index_documents)과 검색(embed_query)이 이 모듈의 embed_texts()를 공유하여
 # "인덱싱 모델 = 검색 모델" 일치를 구조적으로 보장한다.
 # KURE-v1은 BAAI/bge-m3를 한국어 검색에 파인튜닝한 모델로, 1024차원 벡터를 출력한다.

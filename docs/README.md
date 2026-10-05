@@ -10,7 +10,7 @@
 |---|---|---|
 | 프로젝트 README | 프로젝트 목적, 주요 기능 요약, 빠른 시작 및 실행 방법 안내 | [프로젝트 README](../README.md) |
 | 전체 아키텍처 | 서비스 목적, 5단계 파이프라인 구조, 데이터베이스 및 런타임 구성 | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| 함수 인터페이스 명세 | FUNC-001부터 FUNC-009까지 각 기능의 역할, 진입점 및 입출력 계약 | [func_interfaces.md](func_interfaces.md) |
+| 함수 인터페이스 명세 | 파이프라인 각 단계(parse, ontology, index, rewrite, search, rerank, evaluate, generate, workflow)의 역할, 진입점 및 입출력 계약 | [func_interfaces.md](func_interfaces.md) |
 | 예외 및 타임아웃 정책 | 에러 코드 분류 체계, 계층별 타임아웃 구조 및 장애 복구 규약 | [architecture/exception_policy.md](architecture/exception_policy.md) |
 | 데이터 공개 및 격리 정책 | 기밀 노하우 자산 격리, 레포 분리 기준 및 데이터 보호 가이드 | [architecture/data_disclosure_policy.md](architecture/data_disclosure_policy.md) |
 

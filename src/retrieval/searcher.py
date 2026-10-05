@@ -1,4 +1,4 @@
-# FUNC-005: 하이브리드 검색 (Dense + Sparse) 매니저
+# search: 하이브리드 검색 (Dense + Sparse) 매니저
 
 import json
 from typing import LiteralString, cast
@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 def embed_query(query: str) -> list[float]:
     """KURE-v1 임베딩 모델을 사용하여 질의를 벡터로 변환한다.
 
-    인덱싱(FUNC-003)과 동일한 embed_texts()를 공유하므로 모델·차원이 항상 일치한다.
+    인덱싱(index)과 동일한 embed_texts()를 공유하므로 모델·차원이 항상 일치한다.
     실패 시 embed_texts()가 LLMAPIConnectionError(CM-002, node="search")를 발생시킨다.
     """
     return embed_texts([query], node="search")[0]

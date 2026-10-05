@@ -24,23 +24,23 @@ def _env_float(name: str, default: float) -> float:
 
 
 # 파이프라인 전역 설정값
-MAX_REWRITE_COUNT: int = 3          # FUNC-004: CRAG 루프(평가 임계치 미달 재검색) 최대 반복 횟수
+MAX_REWRITE_COUNT: int = 3          # rewrite: CRAG 루프(평가 임계치 미달 재검색) 최대 반복 횟수
 MAX_HIL_COUNT: int = 5              # 워크플로우: Human-in-the-Loop 재작성 요청 최대 반복 횟수 (CRAG 루프와 분리)
-TOP_K_RETRIEVAL: int = 10           # FUNC-005: 1차 검색 반환 청크 수
+TOP_K_RETRIEVAL: int = 10           # search: 1차 검색 반환 청크 수
 MAX_ERROR_LOGS: int = int(os.getenv("MAX_ERROR_LOGS", "50"))  # GraphState error_logs 최대 보존 건수 (FIFO 회전 상한)
 LOG_FORMAT: str = os.getenv("LOG_FORMAT", "text").strip().lower()  # "text" | "json" (구조화 로깅 포맷)
 
 # Reranking Configuration — .env로 토글 가능. 기본은 OFF.
 USE_RERANKER: bool = _env_bool("USE_RERANKER", False)           # 리랭킹 모델 활성화 여부
-RERANK_THRESHOLD: float = _env_float("RERANK_THRESHOLD", 0.5)   # FUNC-006: 재정렬 후 필터링 임계값 (기본값: 중간 신뢰도)
-RERANK_MODEL: str = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")  # FUNC-006: Cross-Encoder 모델 식별자
+RERANK_THRESHOLD: float = _env_float("RERANK_THRESHOLD", 0.5)   # rerank: 재정렬 후 필터링 임계값 (기본값: 중간 신뢰도)
+RERANK_MODEL: str = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")  # rerank: Cross-Encoder 모델 식별자
 # Tracing & Observability — LangSmith / OpenTelemetry
 # LANGSMITH_TRACING=true 및 LANGSMITH_API_KEY 설정 시 PydanticAI / LangGraph 트레이싱이 활성화된다.
 LANGSMITH_TRACING_ENABLED: bool = _env_bool("LANGSMITH_TRACING", False) or _env_bool("LANGCHAIN_TRACING_V2", False)
 LANGSMITH_ENDPOINT: str = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com:443/v1/traces")
 
-VECTOR_COLLECTION_NAME: str = "rag_for_accounting"  # FUNC-003: pgvector 컬렉션명
-OPENAI_MODEL: str = "gpt-5.4-mini"   # FUNC-007, 008, 009: LLM 모델 식별자
+VECTOR_COLLECTION_NAME: str = "rag_for_accounting"  # index: pgvector 컬렉션명
+OPENAI_MODEL: str = "gpt-5.4-mini"   # evaluate, generate, workflow: LLM 모델 식별자
 
 # LLM 모델 토큰 가격표 SSoT (1M 토큰당 USD)
 # gpt-5.4-mini 정가 기준: Input $0.15 / 1M tokens, Output $0.60 / 1M tokens
@@ -57,7 +57,7 @@ GPT_5_4_MINI_OUTPUT_COST_PER_TOKEN: float = MODEL_TOKEN_PRICING["gpt-5.4-mini"][
 # Dense/Sparse 결과를 RRF(Reciprocal Rank Fusion)로 병합한다.
 # 점수가 아닌 순위 기반이므로 점수 분포가 다른 두 검색을 정규화 없이 결합할 수 있다.
 # RRF_K가 클수록 상위 순위 간 점수 격차가 완만해지며, 60은 원 논문 권장 기본값이다.
-RRF_K: int = 60                # FUNC-005: RRF 순위 평활 상수
+RRF_K: int = 60                # search: RRF 순위 평활 상수
 BATCH_SIZE: int = 100          # 인덱싱 배치 크기
 
 # Sparse 리스트에 줄 RRF 가중치 (dense=1.0 고정). 1.0이면 대칭 RRF다.
@@ -104,7 +104,7 @@ TARGET_LATENCY_TOTAL_SEC: float = _env_float("TARGET_LATENCY_TOTAL_SEC", 120.0)
 # 리랭킹 단계 지연 시간 목표(15.0초)는 향후 USE_RERANKER 기본 활성화 시 추가하여 계측합니다.
 
 # 임베딩 모델 설정
-# 인덱싱(FUNC-003)과 검색(FUNC-005)이 src/clients/embedding.embed_texts()를 공유하므로
+# 인덱싱(index)과 검색(search)이 src/clients/embedding.embed_texts()를 공유하므로
 # 모델·차원 불일치가 구조적으로 발생하지 않는다.
 EMBEDDING_MODEL: str = "nlpai-lab/KURE-v1"
 EMBEDDING_DIM: int = 1024   # KURE-v1 벡터 차원 수 → pgvector vector(1024)

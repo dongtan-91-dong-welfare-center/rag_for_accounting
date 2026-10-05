@@ -1,4 +1,4 @@
-# FUNC-006: Cross-Encoder 기반 재정렬 모듈
+# rerank: Cross-Encoder 기반 재정렬 모듈
 import math
 
 from src.models.schemas import RetrievedChunk, RerankingResult

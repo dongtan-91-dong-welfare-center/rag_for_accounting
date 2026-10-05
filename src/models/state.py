@@ -1,4 +1,4 @@
-# FUNC-009: LangGraph 파이프라인 전체 노드가 공유하는 상태 객체
+# workflow: LangGraph 파이프라인 전체 노드가 공유하는 상태 객체
 from pydantic import BaseModel, field_validator
 from typing import Literal, TypedDict
 from src.models.schemas import (

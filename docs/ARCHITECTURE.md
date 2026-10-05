@@ -17,8 +17,8 @@
 
 ```mermaid
 flowchart TD
-    PDF[사용자 제공 PDF/Markdown] --> PARSE[FUNC-001 Docling 파싱]
-    PARSE --> ONTO[FUNC-002 온톨로지 빌드]
+    PDF[사용자 제공 PDF/Markdown] --> PARSE[parse: Docling 파싱]
+    PARSE --> ONTO[ontology: 온톨로지 빌드]
     ONTO --> CHUNK[온톨로지 노드/조항 청킹]
     CHUNK --> EMBED[KURE-v1 임베딩]
     EMBED --> DB[(PostgreSQL + pgvector chunks)]

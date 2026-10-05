@@ -1,4 +1,4 @@
-# FUNC-007: 검색 맥락 평가 노드 (CRAG 패턴)
+# evaluate: 검색 맥락 평가 노드 (CRAG 패턴)
 import re
 
 import httpx

@@ -1,5 +1,5 @@
 """
-[FUNC-007] 맥락 평가 단위 테스트
+[evaluate] 맥락 평가 단위 테스트
 
 대상 모듈: src/agent/nodes/evaluate.py
 검증 범위:

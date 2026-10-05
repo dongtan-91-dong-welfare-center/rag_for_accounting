@@ -1,4 +1,4 @@
-# FUNC-009: LangGraph StateGraph 파이프라인 정의
+# workflow: LangGraph StateGraph 파이프라인 정의
 
 import threading
 import uuid
