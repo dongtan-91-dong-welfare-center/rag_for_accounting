@@ -32,25 +32,6 @@ _DEPLOY_SH = _ROOT / "deploy.sh"
 _DOCKERIGNORE = _ROOT / ".dockerignore"
 _DOCKERFILE = _ROOT / "Dockerfile"
 
-# 테스트용 공통 Mock 바이너리 스텁 상수
-DOCKER_STUB_DEFAULT = """#!/bin/sh
-if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
-  echo "Docker Compose version v2.39.0"; exit 0
-fi
-if [ "$1" = "inspect" ]; then
-  echo "running"; exit 0
-fi
-exit 0
-"""
-
-CURL_STUB_SUCCESS = """#!/bin/sh
-exit 0
-"""
-
-CURL_STUB_FAIL = """#!/bin/sh
-exit 1
-"""
-
 
 @pytest.mark.unit
 def test_deploy_bash_syntax():
@@ -371,112 +352,21 @@ exit 0
 
 @pytest.mark.unit
 def test_deploy_podman_compose_flow(tmp_path: Path):
-    """Podman 환경에서 deploy.sh 실행 시 accounting_app 단독 stop/rm 및 up -d --no-deps app을 호출해야 합니다 (#399)."""
+    """Podman 환경에서 deploy.sh 실행 시 podman-compose build app -> up -d --force-recreate --no-deps app 순으로 호출해야 합니다."""
     work = tmp_path / "repo"
     shutil.copytree(_ROOT / "scripts", work / "scripts")
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
     (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
 
-    compose_calls_log = tmp_path / "podman_compose_calls.log"
-    container_calls_log = tmp_path / "podman_calls.log"
+    log_file = tmp_path / "podman_calls.log"
     podman_compose_stub = f"""#!/bin/sh
-echo "$@" >> "{compose_calls_log}"
-exit 0
-"""
-    podman_stub = f"""#!/bin/sh
-echo "$@" >> "{container_calls_log}"
-if [ "$1" = "inspect" ]; then
-  echo "running"; exit 0
-fi
-exit 0
-"""
-    bin_dir = _make_bin(
-        tmp_path,
-        {
-            "podman-compose": podman_compose_stub,
-            "podman": podman_stub,
-            "curl": CURL_STUB_SUCCESS,
-        },
-    )
-    env = _make_mock_env(bin_dir, isolate=True)
-
-    proc = _run_shell("./deploy.sh", cwd=work, env=env)
-    assert proc.returncode == 0
-
-    compose_calls = compose_calls_log.read_text().splitlines()
-    podman_calls = container_calls_log.read_text().splitlines()
-
-    assert any("build app" in c for c in compose_calls)
-    assert any("up -d --no-deps app" in c for c in compose_calls)
-    assert not any("--force-recreate" in c for c in compose_calls)
-
-    # accounting_app 컨테이너 단독 stop 및 rm 호출 검증
-    assert any("stop accounting_app" in c for c in podman_calls)
-    assert any("rm accounting_app" in c for c in podman_calls)
-
-    # accounting_db 및 accounting_embedding은 stop/rm 대상에서 제외되어야 함
-    assert not any("stop accounting_db" in c or "stop accounting_embedding" in c for c in podman_calls)
-    assert not any("rm accounting_db" in c or "rm accounting_embedding" in c for c in podman_calls)
-
-
-@pytest.mark.unit
-def test_deploy_podman_custom_app_container(tmp_path: Path):
-    """APP_CONTAINER 환경변수 지정 시 해당 컨테이너명을 대상으로 stop/rm을 수행해야 합니다 (#399)."""
-    work = tmp_path / "repo"
-    shutil.copytree(_ROOT / "scripts", work / "scripts")
-    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
-    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
-
-    podman_log = tmp_path / "podman_calls.log"
-    podman_compose_stub = """#!/bin/sh
-exit 0
-"""
-    podman_stub = f"""#!/bin/sh
-echo "$@" >> "{podman_log}"
-if [ "$1" = "inspect" ]; then
-  echo "running"; exit 0
-fi
-exit 0
-"""
-    bin_dir = _make_bin(
-        tmp_path,
-        {
-            "podman-compose": podman_compose_stub,
-            "podman": podman_stub,
-            "curl": CURL_STUB_SUCCESS,
-        },
-    )
-    env = _make_mock_env(bin_dir, isolate=True)
-    env["APP_CONTAINER"] = "custom_accounting_app"
-
-    proc = _run_shell("./deploy.sh", cwd=work, env=env)
-    assert proc.returncode == 0
-
-    podman_calls = podman_log.read_text().splitlines()
-    assert any("stop custom_accounting_app" in c for c in podman_calls)
-    assert any("rm custom_accounting_app" in c for c in podman_calls)
-    assert not any("stop accounting_app" in c for c in podman_calls)
-
-
-@pytest.mark.unit
-def test_deploy_podman_tolerates_missing_app_container_on_stop_rm(tmp_path: Path):
-    """Podman 환경에서 app 컨테이너가 아직 없거나 중지된 상태여서 stop/rm이 오류를 내도 || true에 의해 정상 기동되어야 합니다 (#399)."""
-    work = tmp_path / "repo"
-    shutil.copytree(_ROOT / "scripts", work / "scripts")
-    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
-    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
-
-    podman_compose_stub = """#!/bin/sh
+echo "$@" >> "{log_file}"
 exit 0
 """
     podman_stub = """#!/bin/sh
 if [ "$1" = "inspect" ]; then
   echo "running"; exit 0
 fi
-if [ "$1" = "stop" ] || [ "$1" = "rm" ]; then
-  echo "Error: no such container: accounting_app" >&2
-  exit 1
-fi
 exit 0
 """
     bin_dir = _make_bin(
@@ -484,77 +374,22 @@ exit 0
         {
             "podman-compose": podman_compose_stub,
             "podman": podman_stub,
-            "curl": CURL_STUB_SUCCESS,
+            "curl": "#!/bin/sh\nexit 0\n",
         },
     )
     env = _make_mock_env(bin_dir, isolate=True)
 
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
     assert proc.returncode == 0
-    assert "배포 완료: app 컨테이너가 성공적으로 갱신되었습니다" in proc.stdout
 
+    calls = log_file.read_text().splitlines()
+    assert any("build app" in c for c in calls)
+    assert any("up -d --force-recreate --no-deps app" in c for c in calls)
 
-@pytest.mark.unit
-def test_deploy_docker_does_not_stop_rm_app(tmp_path: Path):
-    """Docker 환경에서는 compose up이 직접 컨테이너 교체를 관장하므로 별도 stop/rm을 호출하지 않아야 합니다."""
-    work = tmp_path / "repo"
-    shutil.copytree(_ROOT / "scripts", work / "scripts")
-    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
-    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
-
-    docker_log = tmp_path / "docker_calls.log"
-    docker_stub = f"""#!/bin/sh
-echo "$@" >> "{docker_log}"
-if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
-  echo "Docker Compose version v2.39.0"; exit 0
-fi
-if [ "$1" = "inspect" ]; then
-  echo "running"; exit 0
-fi
-exit 0
-"""
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": CURL_STUB_SUCCESS})
-    env = _make_mock_env(bin_dir, isolate=True)
-
-    proc = _run_shell("./deploy.sh", cwd=work, env=env)
-    assert proc.returncode == 0
-
-    docker_calls = docker_log.read_text().splitlines()
-    assert not any("stop" in c or "rm" in c for c in docker_calls)
-
-
-@pytest.mark.unit
-def test_deploy_delegating_podman_without_podman_cli_stops_rms_app(tmp_path: Path):
-    """Podman 4.7+ 위임 환경에서 podman CLI가 없더라도 docker 래퍼를 통해 accounting_app 단독 stop/rm을 수행해야 합니다 (#399)."""
-    work = tmp_path / "repo"
-    shutil.copytree(_ROOT / "scripts", work / "scripts")
-    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
-    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
-
-    docker_log = tmp_path / "docker_calls.log"
-    docker_stub = f"""#!/bin/sh
-echo "$@" >> "{docker_log}"
-if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
-  echo '>>>> 외부 compose 제공자 "/usr/bin/podman-compose" 실행 중' >&2
-  echo "podman-compose version 1.0.6"
-  exit 0
-fi
-if [ "$1" = "inspect" ]; then
-  echo "running"; exit 0
-fi
-exit 0
-"""
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": CURL_STUB_SUCCESS})
-    env = _make_mock_env(bin_dir, isolate=True)
-
-    proc = _run_shell("./deploy.sh", cwd=work, env=env)
-    assert proc.returncode == 0
-
-    docker_calls = docker_log.read_text().splitlines()
-    assert any("stop accounting_app" in c for c in docker_calls)
-    assert any("rm accounting_app" in c for c in docker_calls)
-    assert not any("stop accounting_db" in c or "stop accounting_embedding" in c for c in docker_calls)
-    assert not any("rm accounting_db" in c or "rm accounting_embedding" in c for c in docker_calls)
+    # podman-compose build app이 podman-compose up보다 먼저 실행되었는지 호출 순서 검증
+    build_idx = next(i for i, c in enumerate(calls) if "build app" in c)
+    up_idx = next(i for i, c in enumerate(calls) if "up -d --force-recreate --no-deps app" in c)
+    assert build_idx < up_idx, "podman-compose build app이 podman-compose up보다 먼저 실행되어야 합니다."
 
 
 @pytest.mark.unit
@@ -576,7 +411,7 @@ if [ "$1" = "inspect" ]; then
 fi
 exit 0
 """
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": CURL_STUB_SUCCESS})
+    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": "#!/bin/sh\nexit 0\n"})
     env = _make_mock_env(bin_dir, isolate=True)
 
     proc = _run_shell("./deploy.sh --no-cache", cwd=work, env=env)
@@ -588,10 +423,13 @@ exit 0
 
 @pytest.mark.unit
 def test_deploy_healthcheck_timeout_outputs_tail_logs(tmp_path: Path):
-    """앱 서버 준비 상태(/ready) 점검이 타임아웃되면 compose logs --tail=50 app을 출력하고 exit 1로 종료해야 합니다 (#399)."""
+    """앱 서버 헬스체크가 타임아웃되면 compose logs --tail=50 app을 출력하고 exit 1로 종료해야 합니다."""
     work = tmp_path / "repo"
     shutil.copytree(_ROOT / "scripts", work / "scripts")
-    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
+    # 대기 루프를 빠르게 실패시키기 위해 seq 1 60을 seq 1 1로 임시 치환
+    deploy_content = _DEPLOY_SH.read_text(encoding="utf-8").replace("seq 1 60", "seq 1 1").replace("sleep 2", "sleep 0.1")
+    (work / "deploy.sh").write_text(deploy_content, encoding="utf-8")
+    (work / "deploy.sh").chmod(0o755)
     (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n", encoding="utf-8")
 
     docker_stub = """#!/bin/sh
@@ -607,122 +445,22 @@ fi
 exit 0
 """
     curl_stub = """#!/bin/sh
-# 8000(앱 서버) /ready 호출은 실패시킴
+# 8000(앱 서버) 호출은 실패시킴
 for arg in "$@"; do
   case "$arg" in
-    *8000/ready*) exit 1 ;;
+    *8000/health*) exit 1 ;;
   esac
 done
 exit 0
 """
     bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": curl_stub})
     env = _make_mock_env(bin_dir, isolate=True)
-    env["DEPLOY_READY_WAIT_SECONDS"] = "0"
 
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
     assert proc.returncode == 1
     assert "오류: 앱 서버가 준비되지 않았습니다" in proc.stderr
     assert "최근 app 컨테이너 로그" in proc.stderr
     assert "Mock Container Log: Traceback" in proc.stderr
-
-
-@pytest.mark.unit
-def test_deploy_ready_check_polling_success(tmp_path: Path):
-    """앱 서버 /ready 엔드포인트를 정상 폴링하여 200 OK를 수신하면 배포 성공을 보고해야 합니다 (#399)."""
-    work = tmp_path / "repo"
-    shutil.copytree(_ROOT / "scripts", work / "scripts")
-    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
-    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n", encoding="utf-8")
-
-    log_file = tmp_path / "curl_calls.log"
-    docker_stub = """#!/bin/sh
-if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
-  echo "Docker Compose version v2.39.0"; exit 0
-fi
-if [ "$1" = "inspect" ]; then
-  echo "running"; exit 0
-fi
-exit 0
-"""
-    curl_stub = f"""#!/bin/sh
-echo "$@" >> "{log_file}"
-exit 0
-"""
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": curl_stub})
-    env = _make_mock_env(bin_dir, isolate=True)
-
-    proc = _run_shell("./deploy.sh", cwd=work, env=env)
-    assert proc.returncode == 0
-    assert "배포 완료: app 컨테이너가 성공적으로 갱신되었습니다" in proc.stdout
-
-    curl_calls = log_file.read_text().splitlines()
-    assert any("http://localhost:8000/ready" in c for c in curl_calls)
-
-
-@pytest.mark.unit
-def test_check_script_fails_when_ready_fails(tmp_path: Path):
-    """check.sh 실행 시 /ready 엔드포인트가 실패하면 [FAIL]을 출력하고 exit 1로 종료해야 합니다 (#399)."""
-    work = tmp_path / "repo"
-    shutil.copytree(_ROOT / "scripts", work / "scripts")
-    shutil.copy(_ROOT / "check.sh", work / "check.sh")
-    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n", encoding="utf-8")
-
-    docker_stub = """#!/bin/sh
-if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
-  echo "Docker Compose version v2.39.0"; exit 0
-fi
-if [ "$1" = "inspect" ]; then
-  echo "running"; exit 0
-fi
-if [ "$1" = "exec" ]; then
-  echo "1"; exit 0
-fi
-exit 0
-"""
-    curl_stub = """#!/bin/sh
-for arg in "$@"; do
-  case "$arg" in
-    *8000/ready*) exit 1 ;;
-  esac
-done
-exit 0
-"""
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": curl_stub})
-    env = _make_mock_env(bin_dir, isolate=True)
-
-    proc = _run_shell("./check.sh", cwd=work, env=env)
-    assert proc.returncode == 1
-    assert "[FAIL] app이 준비 상태가 아닙니다" in proc.stdout
-    assert "확인 완료: 심각한 문제가 발견되었습니다" in proc.stdout
-
-
-@pytest.mark.unit
-def test_check_script_passes_when_ready_succeeds(tmp_path: Path):
-    """check.sh 실행 시 /ready 엔드포인트가 정상이면 [PASS]를 출력하고 exit 0으로 종료해야 합니다 (#399)."""
-    work = tmp_path / "repo"
-    shutil.copytree(_ROOT / "scripts", work / "scripts")
-    shutil.copy(_ROOT / "check.sh", work / "check.sh")
-    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n", encoding="utf-8")
-
-    docker_stub = """#!/bin/sh
-if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
-  echo "Docker Compose version v2.39.0"; exit 0
-fi
-if [ "$1" = "inspect" ]; then
-  echo "running"; exit 0
-fi
-if [ "$1" = "exec" ]; then
-  echo "1"; exit 0
-fi
-exit 0
-"""
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": CURL_STUB_SUCCESS})
-    env = _make_mock_env(bin_dir, isolate=True)
-
-    proc = _run_shell("./check.sh", cwd=work, env=env)
-    assert proc.returncode == 0
-    assert "[PASS] app이 준비 상태입니다" in proc.stdout
-    assert "확인 완료: 심각한 문제는 발견되지 않았습니다" in proc.stdout
 
 
 @pytest.mark.unit

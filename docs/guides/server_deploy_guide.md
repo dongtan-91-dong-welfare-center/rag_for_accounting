@@ -248,13 +248,6 @@ git pull origin main
 ./check.sh
 ```
 
-- **가동 준비성(`/ready`) 폴링 검증 (#399)**:
-  `deploy.sh`는 단순 프로세스 생존(`/health`)이 아닌 데이터베이스 및 TEI 임베딩 연계 가동 상태를 포괄하는 `/ready` 엔드포인트를 대상으로 200 OK 응답이 반환될 때까지 주기적으로 폴링합니다. 기본 대기 시간은 120초(2초 간격)이며, `DEPLOY_READY_WAIT_SECONDS` 환경변수를 통해 조정할 수 있습니다. 제한 시간 내 준비되지 않을 경우 최근 50줄의 컨테이너 로그를 출력하고 즉시 실패(종료 코드 1)로 중단됩니다.
-- **Podman 환경 컨테이너 격리 보장 (#399)**:
-  `podman-compose` 1.0.6 환경에서 `--force-recreate` 사용 시 `--no-deps`가 무시되어 DB 및 임베딩 컨테이너까지 재생성되는 문제를 원천 차단하기 위해, `deploy.sh`는 기동 직전 기존 `accounting_app` 컨테이너만 명시적으로 중지(`stop`) 및 제거(`rm`)한 후 `up -d --no-deps app`을 실행합니다. 이를 통해 수 분이 소요되는 TEI 재웜업 없이 `app` 컨테이너만 단독 교체됩니다. 대상 컨테이너명은 `APP_CONTAINER` 환경변수를 통해 커스텀 지정할 수 있습니다.
-- **`check.sh` 준비 상태 엄격 검증 (#399)**:
-  `check.sh`는 `/ready` 엔드포인트 응답 실패 시 기존의 경고(`warn`) 대신 치명적 오류(`fail`)를 발생시키며 비정상 종료 코드(`exit 1`)를 반환합니다. 이를 통해 워크플로 파이프라인에서 불완전한 배포 상태를 즉각 감지합니다.
-
 패키지 캐시 오염 등으로 클린 재빌드가 필요한 경우에는 `--no-cache` 옵션을 사용할 수 있습니다:
 
 ```bash
@@ -295,26 +288,16 @@ git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
 `main` 브랜치에 변경 사항이 병합되면 `.github/workflows/deploy.yml` 워크플로가 트리거되어 운영 서버에 자동으로 최신 소스를 동기화하고 배포를 실행합니다.
 
 #### 1) 배포 아키텍처 및 보안 모델
-공인 IP를 통한 SSH 포트 개방 및 키 관리 위험을 제거하기 위해 **Tailscale SSH** 사설망 통신을 표준으로 적용합니다. 배포 실패 시에는 직전 정상 커밋으로 자동 롤백(`git reset --hard "$PREV_COMMIT" && ./deploy.sh`)을 수행하여 서비스 가용성을 유지합니다.
+공인 IP를 통한 SSH 포트 개방 및 키 관리 위험을 제거하기 위해 **Tailscale SSH** 사설망 통신을 표준으로 적용합니다.
 
 ```mermaid
 flowchart TD
-    A["GitHub Actions 러너 (Ubuntu)"] -->|DEPLOY_PATH 시크릿 사전 검증| A1{"시크릿 유효?"}
-    A1 -->|비어있음/공백| AF["즉시 실패 (exit 1)"]
-    A1 -->|유효| B["Tailscale 테일넷 조인 (tag:ci)"]
+    A["GitHub Actions 러너 (Ubuntu)"] -->|TAILSCALE_AUTHKEY (tag:ci)| B["Tailscale 테일넷 조인"]
     B -->|tailscale ssh (ACL: tag:ci -> tag:server root accept)| C["운영 서버 (Rocky Linux / Podman)"]
-    C --> C1{"배포 디렉터리 존재?"}
-    C1 -->|미존재| CF["원격 세션 즉시 중단 (exit 1)"]
-    C1 -->|존재| G["추적 파일 변경 검사 (로컬 수정 감지 시 중단)"]
-    G --> PREV["직전 정상 커밋 해시 보관 (PREV_COMMIT)"]
-    PREV --> D["git fetch origin main && git reset --hard origin/main"]
-    D --> E["./deploy.sh (app 단독 stop/rm 및 증분 빌드, /ready 폴링)"]
-    E --> F["./check.sh (인프라 및 /ready 엄격 검증)"]
-    F -->|성공| S["배포 완료 (정상 종료)"]
-    D -.->|실패 시| RB["자동 롤백: git reset --hard $PREV_COMMIT && ./deploy.sh"]
-    E -.->|실패 시| RB
-    F -.->|실패 시| RB
-    RB --> RF["파이프라인 실패 보고 (exit 1)"]
+    C --> G["추적 파일 변경 검사 (변경이 있으면 배포 중단)"]
+    G --> D["git fetch origin main && git reset --hard origin/main"]
+    D --> E["./deploy.sh (정적 인프라 DB/TEI 유지, app 증분 재빌드)"]
+    E --> F["./check.sh (인프라 및 헬스체크 검증)"]
 ```
 
 #### 2) 사전 설정 요구사항 (GitHub Repository Secrets)
@@ -324,13 +307,12 @@ flowchart TD
 - `DEPLOY_PATH`: 운영 서버 내 저장소 절대 경로 (예: `/root/rag_for_accounting`)
 - `TAILSCALE_AUTHKEY`: `tag:ci` 권한 및 Ephemeral(일회성) 속성이 부여된 Tailscale Auth Key
 
-#### 3) 파이프라인 실행 동작 (#397, #399)
-1. **러너 단계 시크릿 선제 검증**: 원격 접속 시도 전 GitHub Actions 러너 단계에서 `DEPLOY_PATH`가 비어 있거나 공백 문자만으로 구성되었는지 검사하여, 누락 시 원격 SSH 연결을 시도하지 않고 즉시 비정상 종료(`exit 1`)합니다.
-2. **원격 테일넷 연결 및 디렉터리 검증**: Tailscale ACL 규칙(`tag:ci` → `tag:server`, `root` accept)에 따라 원격 서버에 무인 SSH로 접속하며, 지정된 배포 경로 디렉터리의 실제 존재 여부를 검사합니다.
-3. **추적 파일 변경 검사 및 직전 커밋 보관**: `git status --porcelain --untracked-files=no`로 로컬 수정을 검사하여 작업 손실을 예방하며, 최신 소스 갱신 직전 현재 정상 커밋 해시(`PREV_COMMIT=$(git rev-parse HEAD)`)를 안전하게 기록합니다.
-4. **최신 소스 동기화 및 증분 배포**: `git fetch origin main && git reset --hard origin/main`으로 최신 소스를 반영한 후 `./deploy.sh`를 실행합니다. Podman 환경에서는 `accounting_app`만 단독 중지 및 제거되어 의존 컨테이너 재생성을 방지하며, `/ready` 200 OK를 최대 120초간 대기합니다.
-5. **엄격한 헬스체크 및 무결성 검증**: `./check.sh`를 실행하여 모든 엔드포인트와 컨테이너가 정상 준비(`ready`) 상태인지 검증합니다.
-6. **장애 발생 시 자동 롤백 분기 (#397)**: 소스 반영(`git reset`), 배포(`deploy.sh`), 또는 점검(`check.sh`) 중 어느 한 단계라도 실패할 경우, 직전 커밋으로의 자동 롤백(`git reset --hard "$PREV_COMMIT" && ./deploy.sh`)을 즉각 수행합니다. 롤백 완료 여부와 관계없이 워크플로는 배포 실패 상태(`exit 1`)를 명확히 보고합니다.
+#### 3) 파이프라인 실행 동작
+1. GitHub Actions 워크플로가 Ephemeral 노드로 테일넷에 임시 조인(`tag:ci`)합니다.
+2. Tailscale ACL 규칙(`tag:ci` → `tag:server`, `root` accept)에 따라 원격 서버에 비밀번호/키 파일 없이 무인 SSH로 접속합니다.
+3. 대상 디렉터리로 이동한 뒤 `git status --porcelain --untracked-files=no`로 추적 파일의 로컬 수정을 검사합니다. 변경이 있으면 수정 내용이 경고 없이 사라지지 않도록 배포를 중단하고 실패로 종료합니다. 변경이 없을 때에 한하여 Git 원격 최신 커밋을 강제 동기화(`git fetch origin main && git reset --hard origin/main`)하여 히스토리 정합성을 보장합니다. 서버의 로컬 수정은 배포 전에 저장소에 반영하거나 별도 override 파일로 분리해야 합니다.
+4. `./deploy.sh`를 실행하여 데이터베이스와 TEI 임베딩 컨테이너를 유지한 채 애플리케이션(`app`) 컨테이너만 증분 재빌드 및 교체합니다.
+5. `./check.sh`를 실행하여 모든 엔드포인트와 컨테이너가 정상 준비(`ready`) 상태인지 검증합니다.
 
 ---
 
@@ -345,9 +327,6 @@ flowchart TD
 | Nginx 연결 시 `502 Bad Gateway` 오류 | SELinux가 Nginx의 내부 포트 접근 차단 | `sudo setsebool -P httpd_can_network_connect 1` 명령을 실행합니다. |
 | 컨테이너 기동 직후 앱에서 `Connection refused` 발생 | TEI 웜업 완료 전 app 조기 기동 | `./install.sh`를 통해 기동하거나 `curl http://localhost:8080/health`가 200 OK를 반환할 때까지 대기합니다. |
 | 인라인 환경변수로 지정한 포트가 반영되지 않음 | `podman-compose` 1.0.6의 우선순위 동작 특성 | 셸 환경변수 대신 `.env` 파일의 `APP_HOST_PORT` 값을 직접 수정합니다. |
-| `DEPLOY_PATH` 시크릿 누락 또는 공백으로 배포 실패 (#397) | GitHub Secrets 설정 미비 또는 공백 입력 | GitHub 저장소의 `Settings > Secrets and variables > Actions`에서 `DEPLOY_PATH`에 올바른 서버 절대 경로를 등록합니다. |
-| 배포 실패 후 직전 커밋으로 자동 롤백됨 (#397, #399) | `./deploy.sh`의 `/ready` 타임아웃 또는 `./check.sh` 실패 | 서버에 SSH 접속하여 `podman logs accounting_app` 및 `./check.sh`를 실행해 애플리케이션 가동 준비 실패 원인을 분석합니다. |
-| Podman 환경에서 배포 시 TEI 임베딩 컨테이너가 재생성됨 (#399) | `--force-recreate` 플래그 중복 적용 | `scripts/container_runtime.sh`의 `_COMPOSE_DEPLOY_FLAGS_PODMAN=(-d --no-deps)` 설정 및 `deploy.sh`의 단독 `stop/rm` 로직이 정상 동작하는지 확인합니다. |
 
 ---
 
@@ -366,4 +345,3 @@ flowchart TD
 # 상태 점검
 ./check.sh
 ```
-

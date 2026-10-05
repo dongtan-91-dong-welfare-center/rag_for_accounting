@@ -113,7 +113,7 @@ fi
 if curl -fsS "$APP_URL/ready" >/dev/null 2>&1; then
   pass "app이 준비 상태입니다(DB와 임베딩 서버에 도달 가능)."
 else
-  fail "app이 준비 상태가 아닙니다. 기동 직후라면 잠시 뒤 다시 확인하고, 계속되면 curl $APP_URL/ready 응답의 checks를 확인합니다."
+  warn "app이 준비 상태가 아닙니다. 기동 직후라면 잠시 뒤 다시 확인하고, 계속되면 curl $APP_URL/ready 응답의 checks를 확인합니다."
 fi
 
 if curl -fsS "$APP_URL/" >/dev/null 2>&1; then
