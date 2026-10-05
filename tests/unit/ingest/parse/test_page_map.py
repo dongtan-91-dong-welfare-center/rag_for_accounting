@@ -6,6 +6,7 @@ export_to_markdown()이 잃는 페이지 정보를, Docling 텍스트 아이템(
 정렬 정확도 가정: reading order 재정렬·표 텍스트화·페이지 걸침으로 어긋날 수 있어 page_start/page_end 범위로 흡수하고, 미매칭은 None으로 드러낸다.
 """
 from types import SimpleNamespace
+import pytest
 
 from src.ingest.parse.page_map import (
     _normalize,
@@ -15,6 +16,8 @@ from src.ingest.parse.page_map import (
     pages_from_markers,
     resolve_pdf_path,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _item(text: str, page_no: int):

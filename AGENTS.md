@@ -16,6 +16,7 @@
   - `근거:` 시스템 통합 테스트는 로컬 환경에 PostgreSQL 및 임베딩 서버 컨테이너가 기동되어 있어야 성공하므로, 컨테이너 실행 상태를 사전에 확인하거나 단위 테스트(`tests/unit`)를 우선 실행하는 것을 권장합니다.
 - **테스트 마커 (`pyproject.toml` 기준)**:
   - `unit`: 개별 함수 논리 검증, 외부 의존성이 없는 단위 테스트 (Phase 0: Unit)
+    - `규칙:` `tests/unit/` 디렉터리 하위의 모든 테스트 모듈은 최상단에 `pytestmark = pytest.mark.unit`을 필수로 선언해야 합니다. 개별 함수 단위의 데코레이터 중복 사용은 지양하며, 마커 누락 여부는 `tests/unit/test_unit_markers.py` 회귀 테스트를 통해 자동으로 검증됩니다.
   - `system`: 가짜 데이터를 기반으로 한 예외 경로 및 데이터 규격 검증 (Phase 1: Fast Fail)
   - `benchmark`: 벤치마크 정답셋을 기반으로 한 답변 품질 검증 (Phase 2: Quality)
 - **테스트 데이터 위치**: `data/test_data`
@@ -23,7 +24,7 @@
 ## 3. 단일 진실 공급원(SSoT) 규칙
 
 - **모델·임계값·상수**: `src/utils/config.py` 파일이 단일 정본입니다. 문서에 수치나 모델명을 직접 복제하지 않고 이 파일을 가리키도록 작성합니다.
-  - `근거:` 인덱싱(FUNC-003)과 검색(FUNC-005)이 `src/clients/embedding.py`를 공유하므로 모델과 차원을 단일 지점에서 고정해야 불일치 발생을 구조적으로 방지할 수 있습니다.
+  - `근거:` 인덱싱(index)과 검색(search)이 `src/clients/embedding.py`를 공유하므로 모델과 차원을 단일 지점에서 고정해야 불일치 발생을 구조적으로 방지할 수 있습니다.
   - 주요 상수 예시: `OPENAI_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIM`, `RRF_K`, `TOP_K_RETRIEVAL`, `MAX_REWRITE_COUNT`, `MAX_HIL_COUNT`, `USE_RERANKER`.
 - **스키마 정의**: `src/models/schemas.py` 파일이 파이프라인 전반의 공통 데이터 스키마 정본입니다. API 응답 스키마는 `src/api/schemas.py`를 정본으로 합니다.
 

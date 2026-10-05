@@ -17,8 +17,8 @@
 
 ```mermaid
 flowchart TD
-    PDF[사용자 제공 PDF/Markdown] --> PARSE[FUNC-001 Docling 파싱]
-    PARSE --> ONTO[FUNC-002 온톨로지 빌드]
+    PDF[사용자 제공 PDF/Markdown] --> PARSE[parse: Docling 파싱]
+    PARSE --> ONTO[ontology: 온톨로지 빌드]
     ONTO --> CHUNK[온톨로지 노드/조항 청킹]
     CHUNK --> EMBED[KURE-v1 임베딩]
     EMBED --> DB[(PostgreSQL + pgvector chunks)]
@@ -130,7 +130,6 @@ Docker Compose는 세 서비스를 띄운다.
 
 기본 사용자 진입점은 `http://localhost:8000`이다. API 문서는 `http://localhost:8000/docs`에서 확인한다.
 
-<<<<<<< HEAD
 ### 임베딩 실행 위치
 
 사용자 PC에는 임베딩 모델 가중치를 두지 않는 것을 배포 전제로 한다. 배포 환경은 `EMBEDDING_SERVER_URL`을 설정해 `embedding` 서비스(TEI)에 임베딩과 토큰 계산을 위임한다. 이 값이 비어 있으면 프로세스 내 로드로 동작하며, 이는 개발자 호스트(MPS 가속 적재 등)에서만 사용한다.

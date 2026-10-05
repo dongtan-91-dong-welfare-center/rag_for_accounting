@@ -21,7 +21,8 @@ import html
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from src.ingest.parse.parser_dtos import ParsedDocument, _PAGE_TOP_THRESHOLD, _PAGE_BOT_THRESHOLD
+from src.models.schemas import ParsedDocument
+from src.ingest.parse.parser_dtos import _PAGE_TOP_THRESHOLD, _PAGE_BOT_THRESHOLD
 
 # docling은 선택 의존성이다 — `uv sync --extra ingest`로만 설치되고, 운영 이미지·기본 개발 환경에는 없다(용량이 커서 파싱을 실제로 돌리는 환경에만 넣는다).
 # 그래서 모듈 최상단이 아니라 실제로 converter를 만드는 _get_converter()에서 import한다.

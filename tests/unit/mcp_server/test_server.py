@@ -5,6 +5,8 @@ from pydantic import BaseModel
 
 from src.mcp_server import server
 
+pytestmark = pytest.mark.unit
+
 
 class _FakeResponse(BaseModel):
     status: str = "done"

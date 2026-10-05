@@ -1,5 +1,5 @@
 """
-[FUNC-005] 하이브리드 검색 단위 테스트
+[search] 하이브리드 검색 단위 테스트
 
 대상 모듈: src/retrieval/searcher.py
 검증 범위:

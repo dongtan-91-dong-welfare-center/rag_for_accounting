@@ -34,6 +34,8 @@ from tests.utils.shell_test_helpers import (
 _ROOT = Path(__file__).resolve().parents[2]
 _LIB = _ROOT / "scripts" / "env_file.sh"
 
+pytestmark = pytest.mark.unit
+
 
 def _read_env(tmp_path: Path, env_body: str, key: str) -> tuple[int, str, str]:
     """
@@ -62,7 +64,6 @@ def _read_env(tmp_path: Path, env_body: str, key: str) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout.rstrip("\n"), proc.stderr
 
 
-@pytest.mark.unit
 class TestReadEnv:
     def test_value_containing_dollar_sign_is_returned_literally(self, tmp_path):
         """비밀번호에 흔히 쓰이는 `$`가 값을 죽이지 않아야 한다."""
@@ -154,7 +155,6 @@ class TestReadEnv:
         assert proc.stderr.strip() == ""  # 표준 에러 없음
 
 
-@pytest.mark.unit
 class TestEntryScriptsSurviveHostileEnv:
     """
     install.sh와 check.sh가 특별한 글자가 든 .env를 만나도 죽지 않아야 한다.
@@ -258,7 +258,6 @@ class TestEntryScriptsSurviveHostileEnv:
         assert "확인 완료" in proc.stdout    # 점검 완료 확인
 
 
-@pytest.mark.unit
 class TestEnvExampleCompleteness:
     """프로젝트 .env.example 파일의 필수 환경 변수 및 TEI 기동 설정 무결성 검증."""
 

@@ -4,6 +4,7 @@
 error_code("TIMEOUT"|null)는 error_logs에서 서버가 파생 · interrupt 노출 필드는 4종.
 """
 from langgraph.types import Interrupt
+import pytest
 
 from src.api.schemas import (
     QueryDoneResponse,
@@ -17,6 +18,8 @@ from src.models.schemas import (
     RerankingResult,
     RetrievedChunk,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _rr(chunk_id, score, chapter="6", node_id="gaap-ch6-s1", content="조항 본문", **extra):

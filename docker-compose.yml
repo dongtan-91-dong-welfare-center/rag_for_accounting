@@ -4,10 +4,8 @@ services:
       context: .
       dockerfile: db.Dockerfile
     container_name: accounting_db
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-accounting_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounting_password}
-      POSTGRES_DB: ${POSTGRES_DB:-accounting_db}
+    env_file:
+      - .env
     # 호스트에 포트를 여는 범위를 .env로 조정한다. 
     # 형식은 "바인딩주소:호스트포트:컨테이너포트"다.
     # 기본값 127.0.0.1(루프백: 같은 컴퓨터 안에서만 닿는 주소)로 두는 이유는, 
@@ -72,9 +70,6 @@ services:
     environment:
       POSTGRES_HOST: database
       POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-accounting_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounting_password}
-      POSTGRES_DB: ${POSTGRES_DB:-accounting_db}
       EMBEDDING_SERVER_URL: http://embedding:80
       FRONTEND_DIST_DIR: /app/frontend/dist
       # 리랭커(bge-reranker-v2-m3, ~2.2GB)가 HF 허브에서 받는 모델을 이 경로에 캐시한다.

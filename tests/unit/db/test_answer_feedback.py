@@ -12,6 +12,8 @@ import pytest
 
 from src.db.answer_feedback import ensure_answer_feedback_table, save_feedback
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_db_pool():

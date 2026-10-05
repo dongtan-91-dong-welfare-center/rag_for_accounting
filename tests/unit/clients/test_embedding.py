@@ -1,5 +1,5 @@
 """
-[FUNC-003/FUNC-005] 공유 임베딩 모듈 단위 테스트
+[index/search] 공유 임베딩 모듈 단위 테스트
 
 대상 모듈: src/clients/embedding.py
 검증 범위:
