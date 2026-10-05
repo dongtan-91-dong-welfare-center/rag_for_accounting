@@ -153,7 +153,7 @@ class TestDetectContainerRuntime:
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"  # Podman 전용 증분 배포 플래그 선택
+        assert deploy_flags == "-d --no-deps"  # Podman 전용 증분 배포 플래그 선택 (-d --no-deps)
 
     def test_falls_back_when_docker_wrapper_cannot_run_compose(self, tmp_path):
         """
@@ -171,7 +171,7 @@ class TestDetectContainerRuntime:
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_prefers_podman_cli_but_accepts_docker_wrapper(self, tmp_path):
         """podman-compose는 있는데 podman 실행 파일이 없으면 래퍼(docker)로 컨테이너를 다룬다."""
@@ -185,7 +185,7 @@ class TestDetectContainerRuntime:
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "docker"  # docker를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_delegating_docker_compose_is_treated_as_podman(self, tmp_path):
         """
@@ -205,7 +205,7 @@ class TestDetectContainerRuntime:
         assert compose == "docker compose"  # docker compose를 선택
         assert container == "podman"  # podman이 설치되어 있으면 podman CLI를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_delegating_docker_compose_falls_back_to_docker_when_podman_cli_absent(
         self, tmp_path
@@ -221,7 +221,7 @@ class TestDetectContainerRuntime:
         assert compose == "docker compose"  # docker compose를 선택
         assert container == "docker"  # podman이 없으므로 docker를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_podman_wrapper_exiting_zero_on_version_falls_back_to_podman_compose(
         self, tmp_path
@@ -244,7 +244,7 @@ class TestDetectContainerRuntime:
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_podman_wrapper_exiting_zero_without_podman_compose_fails(
         self, tmp_path
@@ -280,6 +280,42 @@ class TestDetectContainerRuntime:
         assert compose == "docker compose"  # 안전한 기본값을 남긴다
         assert container == "docker"  # 안전한 기본값을 남긴다
         assert deploy_flags == "-d --no-deps"
+
+    def test_is_podman_indicator_set_correctly(self, tmp_path):
+        """Docker 환경에서는 IS_PODMAN이 0, Podman 환경에서는 IS_PODMAN이 1로 설정되어야 합니다 (#399)."""
+        # [환경 1: 순수 Docker Compose v2 환경 모의]
+        # 'docker compose version'이 Docker 표준 출력을 반환하는 환경에서는 IS_PODMAN=0으로 설정되어야 합니다.
+        bin_dir_docker = _make_bin(tmp_path / "docker_env", {"docker": _DOCKER_WITH_COMPOSE})
+        proc_docker = subprocess.run(
+            [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],
+            env={"PATH": str(bin_dir_docker)},
+            capture_output=True,
+            text=True,
+        )
+        assert "is_podman=0" in proc_docker.stdout
+
+        # [환경 2: 네이티브 Podman + podman-compose CLI 환경 모의]
+        # 'podman-compose'와 'podman'이 PATH에 존재하는 전형적인 RHEL/Rocky 환경에서는 IS_PODMAN=1로 감지되어야 합니다.
+        bin_dir_podman = _make_bin(tmp_path / "podman_env", {"podman-compose": _STUB, "podman": _STUB})
+        proc_podman = subprocess.run(
+            [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],
+            env={"PATH": str(bin_dir_podman)},
+            capture_output=True,
+            text=True,
+        )
+        assert "is_podman=1" in proc_podman.stdout
+
+        # [환경 3: Docker alias/래퍼를 통해 Podman에 위임(delegating)하는 환경 모의]
+        # Rocky/RHEL 9 등에서 'docker' 명령어가 내부적으로 podman-compose를 호출하도록 구성된 Podman 4.7+ 위임 환경에서도
+        # deploy.sh의 Podman 격리 분기(stop/rm)가 정상 발동되도록 IS_PODMAN=1로 정확히 식별되어야 합니다.
+        bin_dir_delegating = _make_bin(tmp_path / "delegating_env", {"docker": _DOCKER_DELEGATING_TO_PODMAN})
+        proc_delegating = subprocess.run(
+            [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],
+            env={"PATH": str(bin_dir_delegating)},
+            capture_output=True,
+            text=True,
+        )
+        assert "is_podman=1" in proc_delegating.stdout
 
 
 @pytest.mark.unit
