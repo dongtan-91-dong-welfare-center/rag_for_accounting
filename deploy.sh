@@ -135,8 +135,17 @@ echo "[1/3] Building app container"
 "${COMPOSE[@]}" build ${build_args[@]+"${build_args[@]}"} app
 
 # Podman 환경 의존 컨테이너 재생성 방지:
-# podman-compose 1.0.6에서 --force-recreate 지정 시 --no-deps 옵션이 무시되어 database 및 embedding 컨테이너까지
-# 불필요하게 재생성되는 결함이 있습니다. 이를 방지하기 위해 대상 app 컨테이너만 명시적으로 stop 및 rm 처리한 후 기동합니다.
+# [기술적 배경 및 근거]
+# 1. 분기 조건 3중화 이유:
+#    - IS_PODMAN=1: container_runtime.sh 감지 결과로 export된 플래그
+#    - CONTAINER[0]=podman: 네이티브 Podman CLI가 직접 컨테이너 관리자로 지정된 경우
+#    - COMPOSE[*] =~ podman: docker compose 명령어가 podman-compose로 내부 위임(delegating)되거나 compose 명령에 podman이 포함된 경우
+#    위 3가지 조건을 망라하여 다양한 리눅스 배포판(Rocky, RHEL, Ubuntu 등)의 모든 Podman 환경을 완벽하게 포괄합니다.
+# 2. accounting_app 단독 stop/rm 및 || true 적용 이유:
+#    - podman-compose 1.0.6에서 --force-recreate를 주면 --no-deps 옵션이 무시되어 database 및 embedding 컨테이너까지
+#      불필요하게 재생성되면서 TEI 모델의 14분 재웜업 지연이 발생하는 치명적 결함을 원천 차단합니다.
+#    - '|| true': 초기 배포나 이전 컨테이너가 이미 중지/삭제된 상태에서 stop/rm이 0이 아닌 종료 코드를 반환하더라도
+#      배포 스크립트가 비정상 중단되지 않고 compose up 단계로 안전하게 진행되도록 방어합니다.
 APP_CONTAINER="${APP_CONTAINER:-accounting_app}"
 if [ "${IS_PODMAN:-0}" = "1" ] || [ "${CONTAINER[0]:-}" = "podman" ] || [[ "${COMPOSE[*]}" =~ podman ]]; then
   "${CONTAINER[@]}" stop "$APP_CONTAINER" >/dev/null 2>&1 || true

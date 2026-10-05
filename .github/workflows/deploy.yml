@@ -35,6 +35,16 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        # 원격 Tailscale SSH 배포 제어 흐름:
+        # 1. 'set -euo pipefail': 명령 오류(e), 정의되지 않은 변수(u), 파이프 실패(pipefail) 발생 시 스크립트를 즉시 중단합니다.
+        # 2. '[ -z "$DEPLOY_PATH" ] || [ ! -d "$DEPLOY_PATH" ]': 배포 디렉터리가 비어있거나 원격 서버에 없으면 즉시 exit 1로 종료합니다.
+        # 3. 'git status --porcelain --untracked-files=no': 추적 중인 파일의 커밋되지 않은 수정이 존재하면 덮어쓰기 방지를 위해 즉시 중단합니다.
+        # 4. 'PREV_COMMIT=$(git rev-parse HEAD)': 소스 갱신 직전의 정상 커밋 해시를 저장하여 배포 실패 시 복구 지점으로 활용합니다.
+        # 5. '! (git reset --hard origin/main && ./deploy.sh && ./check.sh)':
+        #    최신 소스 반영, 컨테이너 빌드/배포, 헬스체크 중 하나라도 실패하면 서브셸이 0이 아닌 코드를 반환하여 자동 롤백 분기로 진입합니다.
+        # 6. 'git reset --hard "$PREV_COMMIT" && ./deploy.sh || echo ...':
+        #    직전 정상 커밋으로 코드를 되돌리고 배포 스크립트를 재실행하여 서비스를 안정 상태로 복구하며,
+        #    롤백 자체에 오류가 있더라도 명시적 경고 로그를 출력한 뒤 최종 워크플로는 exit 1로 실패 보고합니다.
         run: |
           tailscale ssh \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \

@@ -283,6 +283,8 @@ class TestDetectContainerRuntime:
 
     def test_is_podman_indicator_set_correctly(self, tmp_path):
         """Docker 환경에서는 IS_PODMAN이 0, Podman 환경에서는 IS_PODMAN이 1로 설정되어야 합니다 (#399)."""
+        # [환경 1: 순수 Docker Compose v2 환경 모의]
+        # 'docker compose version'이 Docker 표준 출력을 반환하는 환경에서는 IS_PODMAN=0으로 설정되어야 합니다.
         bin_dir_docker = _make_bin(tmp_path / "docker_env", {"docker": _DOCKER_WITH_COMPOSE})
         proc_docker = subprocess.run(
             [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],
@@ -292,6 +294,8 @@ class TestDetectContainerRuntime:
         )
         assert "is_podman=0" in proc_docker.stdout
 
+        # [환경 2: 네이티브 Podman + podman-compose CLI 환경 모의]
+        # 'podman-compose'와 'podman'이 PATH에 존재하는 전형적인 RHEL/Rocky 환경에서는 IS_PODMAN=1로 감지되어야 합니다.
         bin_dir_podman = _make_bin(tmp_path / "podman_env", {"podman-compose": _STUB, "podman": _STUB})
         proc_podman = subprocess.run(
             [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],
@@ -301,6 +305,9 @@ class TestDetectContainerRuntime:
         )
         assert "is_podman=1" in proc_podman.stdout
 
+        # [환경 3: Docker alias/래퍼를 통해 Podman에 위임(delegating)하는 환경 모의]
+        # Rocky/RHEL 9 등에서 'docker' 명령어가 내부적으로 podman-compose를 호출하도록 구성된 Podman 4.7+ 위임 환경에서도
+        # deploy.sh의 Podman 격리 분기(stop/rm)가 정상 발동되도록 IS_PODMAN=1로 정확히 식별되어야 합니다.
         bin_dir_delegating = _make_bin(tmp_path / "delegating_env", {"docker": _DOCKER_DELEGATING_TO_PODMAN})
         proc_delegating = subprocess.run(
             [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],

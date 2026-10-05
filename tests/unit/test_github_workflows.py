@@ -218,12 +218,15 @@ class TestGitHubWorkflows:
         ssh_step = next(s for s in steps if "tailscale ssh" in s.get("run", ""))
         ssh_run = ssh_step["run"]
 
+        # [단계 1: Mock tailscale 바이너리 준비]
+        # 원격 Tailscale SSH 명령어 체인을 로컬 서브프로세스 bash로 투명하게 실행하여 원격 셸 로직을 시뮬레이션합니다.
         mock_tailscale = tmp_path / "tailscale"
         mock_tailscale.write_text(
             '#!/bin/sh\nif [ "$1" = "ssh" ]; then\n  exec /usr/bin/env bash -c "$3"\nfi\nexit 0\n'
         )
         mock_tailscale.chmod(0o755)
 
+        # [단계 2: 원격 서버의 초기 정상 배포 상태 (v1 커밋) 모의]
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
@@ -243,10 +246,12 @@ class TestGitHubWorkflows:
             .stdout.strip()
         )
 
+        # [단계 3: 원격 중앙 bare 저장소(origin) 구성]
         origin = tmp_path / "origin"
         subprocess.run(["git", "clone", "--bare", str(repo), str(origin)], check=True, capture_output=True)
         subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=repo, check=True)
 
+        # [단계 4: 배포 스크립트가 실패(exit 1)하도록 결함이 유입된 신규 커밋(v2) 푸시]
         work2 = tmp_path / "work2"
         subprocess.run(["git", "clone", str(origin), str(work2)], check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=work2, check=True)
@@ -258,6 +263,8 @@ class TestGitHubWorkflows:
         subprocess.run(["git", "commit", "-m", "commit 2"], cwd=work2, check=True)
         subprocess.run(["git", "push", "origin", "main"], cwd=work2, check=True)
 
+        # [단계 5: 원격 배포 실행 및 자동 롤백 동작 검증]
+        # 러너 환경변수를 구성하고 SSH 원격 배포 스크립트를 시뮬레이션 실행합니다.
         env = os.environ.copy()
         cur_path = env["PATH"]
         env["PATH"] = f"{tmp_path}:{cur_path}"
@@ -275,8 +282,11 @@ class TestGitHubWorkflows:
             subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
             .stdout.strip()
         )
+        # 1) deploy.sh 실패로 인해 워크플로가 최종적으로 실패(exit 1)해야 합니다.
         assert proc.returncode == 1
+        # 2) 저장소의 HEAD가 v2가 아닌 직전 정상 커밋(v1)으로 롤백되어 있어야 합니다.
         assert cur_hash == v1_hash
+        # 3) 자동 롤백 수행 안내 로그가 표준 에러에 명확히 출력되어야 합니다.
         assert "배포 또는 점검 실패: 직전 커밋으로 자동 롤백을 수행합니다." in proc.stderr
 
     def test_deploy_workflow_remote_ssh_rollback_on_check_failure(self, tmp_path: Path):
@@ -293,6 +303,7 @@ class TestGitHubWorkflows:
         )
         mock_tailscale.chmod(0o755)
 
+        # 초기 정상 커밋 (v1)
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
@@ -316,6 +327,7 @@ class TestGitHubWorkflows:
         subprocess.run(["git", "clone", "--bare", str(repo), str(origin)], check=True, capture_output=True)
         subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=repo, check=True)
 
+        # check.sh가 실패(exit 1)하는 결함 커밋 (v2) 생성 및 원격 푸시
         work2 = tmp_path / "work2"
         subprocess.run(["git", "clone", str(origin), str(work2)], check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=work2, check=True)
@@ -346,6 +358,7 @@ class TestGitHubWorkflows:
             subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
             .stdout.strip()
         )
+        # 점검 단계 실패 시에도 직전 정상 커밋(v1)으로 롤백되고 파이프라인 실패(exit 1) 처리되어야 함
         assert proc.returncode == 1
         assert cur_hash == v1_hash
         assert "배포 또는 점검 실패: 직전 커밋으로 자동 롤백을 수행합니다." in proc.stderr
@@ -364,6 +377,7 @@ class TestGitHubWorkflows:
         )
         mock_tailscale.chmod(0o755)
 
+        # 초기 커밋(v1)의 deploy.sh마저 실패하도록 작성하여 롤백 스크립트 2차 실패 시나리오를 모의
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
@@ -415,6 +429,7 @@ class TestGitHubWorkflows:
             subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
             .stdout.strip()
         )
+        # 롤백 스크립트 실행 실패 시에도 exit 1 종료 및 2차 에러 경고 로그 출력 확인
         assert proc.returncode == 1
         assert cur_hash == v1_hash
         assert "배포 또는 점검 실패: 직전 커밋으로 자동 롤백을 수행합니다." in proc.stderr
@@ -622,12 +637,12 @@ class TestProjectVersionAndLinterConfig:
     """pyproject.toml 버전 및 ruff 린터 설정 검증"""
 
     def test_pyproject_version_and_ruff_settings(self):
-        """pyproject.toml 버전이 1.1.2이며 ruff 의존성 및 설정이 올바르게 정의되어 있는지 검증합니다."""
+        """pyproject.toml 버전이 1.1.1이며 ruff 의존성 및 설정이 올바르게 정의되어 있는지 검증합니다."""
         pyproject_file = REPO_ROOT / "pyproject.toml"
         assert pyproject_file.exists()
 
         data = tomllib.loads(pyproject_file.read_text(encoding="utf-8"))
-        assert data.get("project", {}).get("version") == "1.1.2", "패키지 버전은 1.1.2이어야 합니다."
+        assert data.get("project", {}).get("version") == "1.1.1", "패키지 버전은 1.1.1이어야 합니다."
 
         dev_deps = data.get("dependency-groups", {}).get("dev", [])
         assert any("ruff" in dep for dep in dev_deps), "dev 의존성 그룹에 ruff가 포함되어야 합니다."

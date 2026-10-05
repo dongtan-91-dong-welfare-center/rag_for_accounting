@@ -406,33 +406,37 @@ exit 0
     compose_calls = compose_calls_log.read_text().splitlines()
     podman_calls = container_calls_log.read_text().splitlines()
 
+    # 1. podman-compose가 app 서비스만 단독 증분 빌드 및 기동하는지 검증
+    # --no-deps 옵션을 통해 의존 서비스(accounting_db, accounting_embedding)의 불필요한 재생성을 차단합니다.
     assert any("build app" in c for c in compose_calls)
     assert any("up -d --no-deps app" in c for c in compose_calls)
     assert not any("--force-recreate" in c for c in compose_calls)
 
-    # accounting_app 컨테이너 단독 stop 및 rm 호출 검증
+    # 2. podman native CLI를 통한 accounting_app 컨테이너 단독 stop 및 rm 호출 검증
+    # podman-compose의 --force-recreate 결함(전체 서비스 재생성)을 우회하기 위해 app만 선제적으로 중지/제거합니다.
     assert any("stop accounting_app" in c for c in podman_calls)
     assert any("rm accounting_app" in c for c in podman_calls)
 
-    # accounting_db 및 accounting_embedding은 stop/rm 대상에서 제외되어야 함
+    # 3. 핵심 의존 인프라인 accounting_db 및 accounting_embedding은 절대 stop/rm 대상에 포함되지 않아야 함
+    # [기술적 근거]: TEI 임베딩 모델의 14분 웜업 지연과 PostgreSQL 재시작 지연을 방지하기 위함
     assert not any("stop accounting_db" in c or "stop accounting_embedding" in c for c in podman_calls)
     assert not any("rm accounting_db" in c or "rm accounting_embedding" in c for c in podman_calls)
 
 
 @pytest.mark.unit
 def test_deploy_podman_custom_app_container(tmp_path: Path):
-    """APP_CONTAINER 환경변수 지정 시 해당 컨테이너명을 대상으로 stop/rm을 수행해야 합니다 (#399)."""
+    """APP_CONTAINER 환경변수 지정 시 기본값(accounting_app) 대신 해당 컨테이너명을 대상으로 stop/rm을 수행해야 합니다 (#399)."""
     work = tmp_path / "repo"
     shutil.copytree(_ROOT / "scripts", work / "scripts")
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
     (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
 
-    podman_log = tmp_path / "podman_calls.log"
+    container_calls_log = tmp_path / "podman_calls.log"
     podman_compose_stub = """#!/bin/sh
 exit 0
 """
     podman_stub = f"""#!/bin/sh
-echo "$@" >> "{podman_log}"
+echo "$@" >> "{container_calls_log}"
 if [ "$1" = "inspect" ]; then
   echo "running"; exit 0
 fi
@@ -452,7 +456,8 @@ exit 0
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
     assert proc.returncode == 0
 
-    podman_calls = podman_log.read_text().splitlines()
+    podman_calls = container_calls_log.read_text().splitlines()
+    # 커스텀 지정된 컨테이너명(custom_accounting_app)만 stop/rm 대상이어야 하며 기본값은 호출되지 않아야 함
     assert any("stop custom_accounting_app" in c for c in podman_calls)
     assert any("rm custom_accounting_app" in c for c in podman_calls)
     assert not any("stop accounting_app" in c for c in podman_calls)
@@ -461,6 +466,9 @@ exit 0
 @pytest.mark.unit
 def test_deploy_podman_tolerates_missing_app_container_on_stop_rm(tmp_path: Path):
     """Podman 환경에서 app 컨테이너가 아직 없거나 중지된 상태여서 stop/rm이 오류를 내도 || true에 의해 정상 기동되어야 합니다 (#399)."""
+    # [기술적 근거]:
+    # 신규 서버 최초 배포 시에는 accounting_app 컨테이너가 존재하지 않으므로 podman stop/rm 명령이 exit 1을 반환합니다.
+    # 스크립트 내 '|| true' 방어 처리를 통해 초기 배포 시에도 스크립트가 중단되지 않고 성공적으로 끝까지 실행되는지 검증합니다.
     work = tmp_path / "repo"
     shutil.copytree(_ROOT / "scripts", work / "scripts")
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
@@ -497,6 +505,7 @@ exit 0
 @pytest.mark.unit
 def test_deploy_docker_does_not_stop_rm_app(tmp_path: Path):
     """Docker 환경에서는 compose up이 직접 컨테이너 교체를 관장하므로 별도 stop/rm을 호출하지 않아야 합니다."""
+    # [기술적 근거]: Docker Compose v2는 --no-deps 옵션이 충실하게 동작하므로 외부 선제 stop/rm이 불필요합니다.
     work = tmp_path / "repo"
     shutil.copytree(_ROOT / "scripts", work / "scripts")
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
@@ -526,6 +535,9 @@ exit 0
 @pytest.mark.unit
 def test_deploy_delegating_podman_without_podman_cli_stops_rms_app(tmp_path: Path):
     """Podman 4.7+ 위임 환경에서 podman CLI가 없더라도 docker 래퍼를 통해 accounting_app 단독 stop/rm을 수행해야 합니다 (#399)."""
+    # [기술적 근거]:
+    # 사용자가 시스템에 podman CLI를 직접 호출하지 않고 docker 래퍼 바이너리만 제공하는 환경에서도
+    # podman-compose로의 위임을 감지하여 app 컨테이너 단독 stop/rm을 정상 실행함을 검증합니다.
     work = tmp_path / "repo"
     shutil.copytree(_ROOT / "scripts", work / "scripts")
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
@@ -551,8 +563,10 @@ exit 0
     assert proc.returncode == 0
 
     docker_calls = docker_log.read_text().splitlines()
+    # docker 래퍼를 통해 stop/rm accounting_app이 정확히 실행되었는지 검증
     assert any("stop accounting_app" in c for c in docker_calls)
     assert any("rm accounting_app" in c for c in docker_calls)
+    # database와 embedding은 건드리지 않음
     assert not any("stop accounting_db" in c or "stop accounting_embedding" in c for c in docker_calls)
     assert not any("rm accounting_db" in c or "rm accounting_embedding" in c for c in docker_calls)
 

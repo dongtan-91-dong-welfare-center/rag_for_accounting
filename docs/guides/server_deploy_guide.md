@@ -295,7 +295,14 @@ git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
 `main` 브랜치에 변경 사항이 병합되면 `.github/workflows/deploy.yml` 워크플로가 트리거되어 운영 서버에 자동으로 최신 소스를 동기화하고 배포를 실행합니다.
 
 #### 1) 배포 아키텍처 및 보안 모델
-공인 IP를 통한 SSH 포트 개방 및 키 관리 위험을 제거하기 위해 **Tailscale SSH** 사설망 통신을 표준으로 적용합니다. 배포 실패 시에는 직전 정상 커밋으로 자동 롤백(`git reset --hard "$PREV_COMMIT" && ./deploy.sh`)을 수행하여 서비스 가용성을 유지합니다.
+공인 IP를 통한 SSH 포트 개방 및 키 관리 위험을 제거하기 위해 **Tailscale SSH** 사설망 통신을 표준으로 적용합니다. 
+
+[주요 설계 결정 및 기술적 배경]
+- **시크릿 사전 검증**: 러너 단계에서 `DEPLOY_PATH` 공백/누락을 선제 차단하여, 불필요한 SSH 연결 시도 및 잘못된 원격 경로 조작을 방지합니다.
+- **체크아웃 무결성 보호**: 원격 서버 내 미커밋 변경 사항(`git status --porcelain`)을 사전 검사하여 운영 중 수동 작업 파일의 덮어쓰기 손실을 예방합니다.
+- **앱 단독 격리 교체 (`deploy.sh`)**: `podman-compose`의 의존 컨테이너 동시 재생성 결함을 차단하기 위해 `accounting_app`만 단독 중지/삭제함으로써 TEI 임베딩 모델의 14분 웜업 지연을 방지하고, `/ready` 200 OK를 최대 120초간 폴링 대기합니다.
+- **엄격한 준비성 판정 (`check.sh`)**: 기존 경고(`warn`) 처리로 인해 서비스 미가동 상태에서 배포가 성공하던 문제를 방지하고자, `/ready` 실패 시 치명적 오류(`fail`)와 함께 비정상 종료(`exit 1`)합니다.
+- **원자적 자동 롤백**: 소스 반영(`git reset`), 배포(`deploy.sh`), 점검(`check.sh`) 중 어느 단계라도 실패하면 소스 갱신 직전 보관한 정상 커밋(`$PREV_COMMIT`)으로 즉시 복귀(`git reset --hard "$PREV_COMMIT" && ./deploy.sh`)하여 가용성을 보장하며, 워크플로는 최종 실패(`exit 1`)로 종료됩니다.
 
 ```mermaid
 flowchart TD
