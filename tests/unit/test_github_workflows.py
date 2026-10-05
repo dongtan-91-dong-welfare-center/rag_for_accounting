@@ -125,8 +125,22 @@ class TestGitHubWorkflows:
         assert "TAILSCALE_AUTHKEY" in str(tailscale_with.get("authkey", ""))
         assert "tag:ci" in str(tailscale_with.get("tags", ""))
 
+        # DEPLOY_PATH 시크릿 사전 검증 스텝 존재 여부 검증 (공백 및 누락 시 SSH 진입 차단)
+        validate_step = next(
+            (s for s in steps if "DEPLOY_PATH" in s.get("env", {}) and "tailscale ssh" not in s.get("run", "")),
+            None,
+        )
+        assert validate_step is not None, "러너 단계에서 DEPLOY_PATH 사전 검증 스텝이 존재해야 합니다."
+        validate_run = validate_step.get("run", "")
+        assert "DEPLOY_PATH" in validate_run
+        assert "exit 1" in validate_run
+
         ssh_step = next(s for s in steps if "tailscale ssh" in s.get("run", ""))
         ssh_run = ssh_step.get("run", "")
+        # 원격 서버 배포 디렉터리 존재 검사 선행 확인
+        assert "! -d" in ssh_run
+        assert ssh_run.index("! -d") < ssh_run.index("git reset --hard")
+
         assert "git fetch origin main" in ssh_run
         assert "git reset --hard origin/main" in ssh_run
         # 서버의 로컬 수정이 경고 없이 사라지지 않도록 reset 이전에 변경 검사가 선행되어야 한다
@@ -134,6 +148,13 @@ class TestGitHubWorkflows:
         assert ssh_run.index("git status --porcelain") < ssh_run.index("git reset --hard")
         assert "./deploy.sh" in ssh_run
         assert "./check.sh" in ssh_run
+
+        # 직전 정상 커밋 보관 및 자동 롤백 로직 검증
+        assert "PREV_COMMIT=$(git rev-parse HEAD)" in ssh_run.replace("\\$", "$")
+        assert 'git reset --hard "$PREV_COMMIT" && ./deploy.sh' in (
+            ssh_run.replace("\\$", "$").replace('\\"', '"').replace("\\'", "'")
+        )
+        assert "exit 1" in ssh_run
 
 
 class TestIssueAndPRTemplates:

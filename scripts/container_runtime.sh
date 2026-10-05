@@ -24,7 +24,7 @@
 # 따옴표를 빼면 이번에는 값에 공백이 들어간 다른 상황에서 예기치 않게 쪼개진다. 배열로 두면 두 경우가 모두 없다.
 
 # podman-compose로 스택을 올리거나 서비스를 재배포할 때 붙이는 인자다.
-# `--force-recreate`가 왜 필요한지는 이렇다.
+# 전체 스택 기동(_COMPOSE_UP_FLAGS_PODMAN)에서 `--force-recreate`가 왜 필요한지는 이렇다.
 # podman-compose는 이미지를 새로 구워도, compose 파일 자체가 그대로면 이미 있는 컨테이너를 지우지 않고 그냥 다시 시작한다.
 # 그래서 코드를 고치고 다시 올려도 옛 이미지가 계속 돈다.
 # 배포한 사람은 성공했다고 보는데 바뀐 코드는 실행되지 않는, 알아차리기 쉬운 실패다.
@@ -32,8 +32,14 @@
 # 상위 저장소의 수정 커밋이 아직 어느 배포판에도 실리지 않아 최신 버전에서도 같다.
 # Docker Compose v2에는 없는 문제이므로 그쪽에는 전체 기동 시 붙이지 않는다.
 # 붙이면 멀쩡한 컨테이너를 매번 지웠다 만들어 불필요한 중단이 생긴다.
+#
+# 반면 단독 증분 배포(_COMPOSE_DEPLOY_FLAGS_PODMAN)에서는 `--force-recreate`를 지정할 경우,
+# podman-compose가 `--no-deps`를 무시하고 연관 의존 컨테이너(database, embedding)까지 불필요하게 재생성합니다.
+# 이에 따라 장시간 소요되는 TEI 임베딩 웜업이 재발하므로, deploy 플래그에서는 `--force-recreate`를 배제하고
+# (-d --no-deps)로 일원화합니다. 대신 deploy.sh에서 대상 app 컨테이너를 사전에 명시적으로 stop & rm 처리하여
+# 의존 컨테이너 재생성 없이 신규 이미지가 온전히 반영되도록 보장합니다 (#399).
 _COMPOSE_UP_FLAGS_PODMAN=(-d --build --force-recreate)
-_COMPOSE_DEPLOY_FLAGS_PODMAN=(-d --force-recreate --no-deps)
+_COMPOSE_DEPLOY_FLAGS_PODMAN=(-d --no-deps)
 
 # compose 실행 방식과 컨테이너 조작 명령을 정한다.
 # 찾았으면 0, 아무것도 못 찾았으면 1을 돌려준다.

@@ -153,7 +153,7 @@ class TestDetectContainerRuntime:
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"  # Podman 전용 증분 배포 플래그 선택
+        assert deploy_flags == "-d --no-deps"  # Podman 전용 증분 배포 플래그 선택 (-d --no-deps)
 
     def test_falls_back_when_docker_wrapper_cannot_run_compose(self, tmp_path):
         """
@@ -171,7 +171,7 @@ class TestDetectContainerRuntime:
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_prefers_podman_cli_but_accepts_docker_wrapper(self, tmp_path):
         """podman-compose는 있는데 podman 실행 파일이 없으면 래퍼(docker)로 컨테이너를 다룬다."""
@@ -185,7 +185,7 @@ class TestDetectContainerRuntime:
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "docker"  # docker를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_delegating_docker_compose_is_treated_as_podman(self, tmp_path):
         """
@@ -205,7 +205,7 @@ class TestDetectContainerRuntime:
         assert compose == "docker compose"  # docker compose를 선택
         assert container == "podman"  # podman이 설치되어 있으면 podman CLI를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_delegating_docker_compose_falls_back_to_docker_when_podman_cli_absent(
         self, tmp_path
@@ -221,7 +221,7 @@ class TestDetectContainerRuntime:
         assert compose == "docker compose"  # docker compose를 선택
         assert container == "docker"  # podman이 없으므로 docker를 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_podman_wrapper_exiting_zero_on_version_falls_back_to_podman_compose(
         self, tmp_path
@@ -244,7 +244,7 @@ class TestDetectContainerRuntime:
         assert compose == "podman-compose"  # podman-compose를 선택
         assert container == "podman"  # podman을 선택
         assert "--force-recreate" in up_flags  # --force-recreate 플래그를 선택
-        assert deploy_flags == "-d --force-recreate --no-deps"
+        assert deploy_flags == "-d --no-deps"
 
     def test_podman_wrapper_exiting_zero_without_podman_compose_fails(
         self, tmp_path
