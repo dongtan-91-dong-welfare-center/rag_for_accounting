@@ -32,6 +32,25 @@ _DEPLOY_SH = _ROOT / "deploy.sh"
 _DOCKERIGNORE = _ROOT / ".dockerignore"
 _DOCKERFILE = _ROOT / "Dockerfile"
 
+# 테스트용 공통 Mock 바이너리 스텁 상수
+DOCKER_STUB_DEFAULT = """#!/bin/sh
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  echo "Docker Compose version v2.39.0"; exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  echo "running"; exit 0
+fi
+exit 0
+"""
+
+CURL_STUB_SUCCESS = """#!/bin/sh
+exit 0
+"""
+
+CURL_STUB_FAIL = """#!/bin/sh
+exit 1
+"""
+
 
 @pytest.mark.unit
 def test_deploy_bash_syntax():
@@ -358,14 +377,14 @@ def test_deploy_podman_compose_flow(tmp_path: Path):
     shutil.copy(_DEPLOY_SH, work / "deploy.sh")
     (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
 
-    compose_log = tmp_path / "podman_compose_calls.log"
-    podman_log = tmp_path / "podman_calls.log"
+    compose_calls_log = tmp_path / "podman_compose_calls.log"
+    container_calls_log = tmp_path / "podman_calls.log"
     podman_compose_stub = f"""#!/bin/sh
-echo "$@" >> "{compose_log}"
+echo "$@" >> "{compose_calls_log}"
 exit 0
 """
     podman_stub = f"""#!/bin/sh
-echo "$@" >> "{podman_log}"
+echo "$@" >> "{container_calls_log}"
 if [ "$1" = "inspect" ]; then
   echo "running"; exit 0
 fi
@@ -376,7 +395,7 @@ exit 0
         {
             "podman-compose": podman_compose_stub,
             "podman": podman_stub,
-            "curl": "#!/bin/sh\nexit 0\n",
+            "curl": CURL_STUB_SUCCESS,
         },
     )
     env = _make_mock_env(bin_dir, isolate=True)
@@ -384,8 +403,8 @@ exit 0
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
     assert proc.returncode == 0
 
-    compose_calls = compose_log.read_text().splitlines()
-    podman_calls = podman_log.read_text().splitlines()
+    compose_calls = compose_calls_log.read_text().splitlines()
+    podman_calls = container_calls_log.read_text().splitlines()
 
     assert any("build app" in c for c in compose_calls)
     assert any("up -d --no-deps app" in c for c in compose_calls)
@@ -424,7 +443,7 @@ exit 0
         {
             "podman-compose": podman_compose_stub,
             "podman": podman_stub,
-            "curl": "#!/bin/sh\nexit 0\n",
+            "curl": CURL_STUB_SUCCESS,
         },
     )
     env = _make_mock_env(bin_dir, isolate=True)
@@ -465,7 +484,7 @@ exit 0
         {
             "podman-compose": podman_compose_stub,
             "podman": podman_stub,
-            "curl": "#!/bin/sh\nexit 0\n",
+            "curl": CURL_STUB_SUCCESS,
         },
     )
     env = _make_mock_env(bin_dir, isolate=True)
@@ -494,7 +513,7 @@ if [ "$1" = "inspect" ]; then
 fi
 exit 0
 """
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": "#!/bin/sh\nexit 0\n"})
+    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": CURL_STUB_SUCCESS})
     env = _make_mock_env(bin_dir, isolate=True)
 
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
@@ -525,7 +544,7 @@ if [ "$1" = "inspect" ]; then
 fi
 exit 0
 """
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": "#!/bin/sh\nexit 0\n"})
+    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": CURL_STUB_SUCCESS})
     env = _make_mock_env(bin_dir, isolate=True)
 
     proc = _run_shell("./deploy.sh", cwd=work, env=env)
@@ -557,7 +576,7 @@ if [ "$1" = "inspect" ]; then
 fi
 exit 0
 """
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": "#!/bin/sh\nexit 0\n"})
+    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": CURL_STUB_SUCCESS})
     env = _make_mock_env(bin_dir, isolate=True)
 
     proc = _run_shell("./deploy.sh --no-cache", cwd=work, env=env)
@@ -697,10 +716,7 @@ if [ "$1" = "exec" ]; then
 fi
 exit 0
 """
-    curl_stub = """#!/bin/sh
-exit 0
-"""
-    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": curl_stub})
+    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": CURL_STUB_SUCCESS})
     env = _make_mock_env(bin_dir, isolate=True)
 
     proc = _run_shell("./check.sh", cwd=work, env=env)
