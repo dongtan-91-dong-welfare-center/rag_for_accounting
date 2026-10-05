@@ -134,31 +134,47 @@ done
 echo "[1/3] Building app container"
 "${COMPOSE[@]}" build ${build_args[@]+"${build_args[@]}"} app
 
+# Podman 환경 의존 컨테이너 재생성 방지:
+# podman-compose 1.0.6에서 --force-recreate 지정 시 --no-deps 옵션이 무시되어 database 및 embedding 컨테이너까지
+# 불필요하게 재생성되는 결함이 있습니다. 이를 방지하기 위해 대상 app 컨테이너만 명시적으로 stop 및 rm 처리한 후 기동합니다.
+APP_CONTAINER="${APP_CONTAINER:-accounting_app}"
+if [ "${IS_PODMAN:-0}" = "1" ] || [ "${CONTAINER[0]:-}" = "podman" ] || [[ "${COMPOSE[*]}" =~ podman ]]; then
+  "${CONTAINER[@]}" stop "$APP_CONTAINER" >/dev/null 2>&1 || true
+  "${CONTAINER[@]}" rm "$APP_CONTAINER" >/dev/null 2>&1 || true
+fi
+
 # 2단계: 기존 app 컨테이너를 새로운 이미지로 교체 기동합니다.
-# COMPOSE_DEPLOY_FLAGS는 런타임에 따라 Docker는 (-d --no-deps), Podman은 (-d --force-recreate --no-deps)가 전달됩니다.
+# COMPOSE_DEPLOY_FLAGS는 (-d --no-deps)가 전달됩니다.
 # --no-deps 옵션을 통해 연관 서비스(database, embedding)의 불필요한 재기동을 차단합니다.
 echo "[2/3] Recreating app container"
 "${COMPOSE[@]}" up "${COMPOSE_DEPLOY_FLAGS[@]}" app
 
 # ==============================================================================
-# [6] 앱 서버 가동 준비 상태 대기 (Health Check Polling)
+# [6] 앱 서버 가동 준비 상태 대기 (Readiness Check Polling)
 # ==============================================================================
 echo "[3/3] Waiting for app server to be ready"
+READY_WAIT_SECONDS="${DEPLOY_READY_WAIT_SECONDS:-120}"
+app_waited=0
 APP_READY=0
 
-# 최대 120초(60회 x 2초) 동안 앱 서버의 /health 엔드포인트를 주기적으로 호출하여 응답을 확인합니다.
+# 최대 DEPLOY_READY_WAIT_SECONDS(기본값: 120초) 동안 앱 서버의 /ready 엔드포인트를 2초 간격으로 폴링합니다.
+# 단순 프로세스 생존(/health) 대신 DB 및 임베딩 연계 가동 상태(/ready)를 엄격히 검증하여 배포 완료를 판정합니다.
 # curl 호출 시 교착 상태를 예방하기 위해 연결 타임아웃 2초, 최대 응답 시간 5초를 명시합니다.
-for _ in $(seq 1 60); do
-  if curl -fsS --connect-timeout 2 --max-time 5 "$APP_URL/health" >/dev/null 2>&1; then
+while true; do
+  if curl -fsS --connect-timeout 2 --max-time 5 "$APP_URL/ready" >/dev/null 2>&1; then
     APP_READY=1
     break
   fi
+  if [ "$app_waited" -ge "$READY_WAIT_SECONDS" ]; then
+    break
+  fi
   sleep 2
+  app_waited=$((app_waited + 2))
 done
 
-# 지정된 제한 시간 내에 앱 서버가 정상 응답하지 않으면 최근 로그를 출력하고 비정상 종료합니다.
+# 지정된 제한 시간 내에 앱 서버가 정상 준비되지 않으면 최근 로그를 출력하고 비정상 종료합니다.
 if [ "$APP_READY" -ne 1 ]; then
-  echo "오류: 앱 서버가 준비되지 않았습니다." >&2
+  echo "오류: 앱 서버가 준비되지 않았습니다 (${READY_WAIT_SECONDS}초 대기 후 중단)." >&2
   echo "--- 최근 app 컨테이너 로그 (최대 50줄) ---" >&2
   # 최근 50줄의 로그를 표준 에러로 출력하여 실패 원인을 즉시 파악할 수 있도록 돕습니다.
   "${COMPOSE[@]}" logs --tail=50 app >&2 || true

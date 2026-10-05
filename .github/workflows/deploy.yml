@@ -15,6 +15,15 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate Deployment Configuration
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          if [ -z "${DEPLOY_PATH:-}" ] || [ -z "${DEPLOY_PATH//[[:space:]]/}" ]; then
+            echo "오류: DEPLOY_PATH 시크릿이 설정되지 않았거나 비어 있습니다." >&2
+            exit 1
+          fi
+
       - name: Tailscale Connect
         uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd
         with:
@@ -29,4 +38,21 @@ jobs:
         run: |
           tailscale ssh \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "set -euo pipefail && cd \"$DEPLOY_PATH\" && git fetch origin main && if [ -n \"\$(git status --porcelain --untracked-files=no)\" ]; then echo \"서버 체크아웃에 커밋되지 않은 변경이 있어 배포를 중단합니다.\" >&2; git status --short --untracked-files=no >&2; exit 1; fi && git reset --hard origin/main && ./deploy.sh && ./check.sh"
+            "set -euo pipefail && \
+            if [ -z \"$DEPLOY_PATH\" ] || [ ! -d \"$DEPLOY_PATH\" ]; then \
+              echo '오류: 원격 서버에 배포 디렉터리가 존재하지 않습니다.' >&2; \
+              exit 1; \
+            fi && \
+            cd \"$DEPLOY_PATH\" && \
+            if [ -n \"\$(git status --porcelain --untracked-files=no)\" ]; then \
+              echo '서버 체크아웃에 커밋되지 않은 변경이 있어 배포를 중단합니다.' >&2; \
+              git status --short --untracked-files=no >&2; \
+              exit 1; \
+            fi && \
+            PREV_COMMIT=\$(git rev-parse HEAD) && \
+            git fetch origin main && \
+            if ! (git reset --hard origin/main && ./deploy.sh && ./check.sh); then \
+              echo '배포 또는 점검 실패: 직전 커밋으로 자동 롤백을 수행합니다.' >&2; \
+              git reset --hard \"\$PREV_COMMIT\" && ./deploy.sh || echo '경고: 직전 커밋으로의 자동 롤백 스크립트 실행 중 오류가 발생했습니다.' >&2; \
+              exit 1; \
+            fi"
