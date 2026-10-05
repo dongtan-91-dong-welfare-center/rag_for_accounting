@@ -37,14 +37,14 @@ class FinalResponse(BaseModel):
     confidence_score: float
 
 class ParsedDocument(BaseModel):
-    """파싱된 문서 — Docling 처리 결과 (parse 노드 출력)"""
+    """파싱된 문서 — Docling 처리 결과 (parse 단계 출력)"""
     title: str
     text: str
     tables: list[dict] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
 
 class SkippedChunk(BaseModel):
-    """index_documents에서 적재되지 못한 청크와 사유 (index 노드 부분실패 추적)
+    """index_documents에서 적재되지 못한 청크와 사유 (index 단계 부분실패 추적)
 
     재시도 가능 여부는 error_type에서 파생한다(IX-201 토큰초과=재적재 불가, SE-102 DB·CM-002 임베딩 일시장애=재적재 가능)
     """
@@ -61,7 +61,7 @@ class SkippedChunk(BaseModel):
         return self.error_type in {"SE-102", "CM-002"}
 
 class IndexingResult(BaseModel):
-    """인덱싱 결과 — pgvector 저장 완료 여부 (index 노드 출력)"""
+    """인덱싱 결과 — pgvector 저장 완료 여부 (index 단계 출력)"""
     document_id: str
     chunk_count: int                                                 # 성공 적재 건수
     status: Literal["success", "partial", "failed"]
