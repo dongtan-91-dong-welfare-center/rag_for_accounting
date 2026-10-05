@@ -77,7 +77,7 @@ class TestIngestionPipeline:
     ):
         """실제 온톨로지 JSON을 입력으로 Parse → Chunk → Index 파이프라인이 데이터 손실 없이(고아 청크 0건) 동작하는지 검증."""
 
-        # Parse 단계 — DoclingParser.parse를 모킹해 parse 노드 출력 스펙(source_path)을 재현
+        # Parse 단계 — DoclingParser.parse를 모킹해 parse 단계 출력 스펙(source_path)을 재현
         source_path = f"data/raw/{chapter}.pdf"
         with patch_parser(source_path):
             parsed = DoclingParser().parse(source_path)
