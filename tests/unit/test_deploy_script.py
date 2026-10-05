@@ -440,6 +440,42 @@ exit 0
 
 
 @pytest.mark.unit
+def test_deploy_podman_tolerates_missing_app_container_on_stop_rm(tmp_path: Path):
+    """Podman 환경에서 app 컨테이너가 아직 없거나 중지된 상태여서 stop/rm이 오류를 내도 || true에 의해 정상 기동되어야 합니다 (#399)."""
+    work = tmp_path / "repo"
+    shutil.copytree(_ROOT / "scripts", work / "scripts")
+    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
+    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
+
+    podman_compose_stub = """#!/bin/sh
+exit 0
+"""
+    podman_stub = """#!/bin/sh
+if [ "$1" = "inspect" ]; then
+  echo "running"; exit 0
+fi
+if [ "$1" = "stop" ] || [ "$1" = "rm" ]; then
+  echo "Error: no such container: accounting_app" >&2
+  exit 1
+fi
+exit 0
+"""
+    bin_dir = _make_bin(
+        tmp_path,
+        {
+            "podman-compose": podman_compose_stub,
+            "podman": podman_stub,
+            "curl": "#!/bin/sh\nexit 0\n",
+        },
+    )
+    env = _make_mock_env(bin_dir, isolate=True)
+
+    proc = _run_shell("./deploy.sh", cwd=work, env=env)
+    assert proc.returncode == 0
+    assert "배포 완료: app 컨테이너가 성공적으로 갱신되었습니다" in proc.stdout
+
+
+@pytest.mark.unit
 def test_deploy_docker_does_not_stop_rm_app(tmp_path: Path):
     """Docker 환경에서는 compose up이 직접 컨테이너 교체를 관장하므로 별도 stop/rm을 호출하지 않아야 합니다."""
     work = tmp_path / "repo"
