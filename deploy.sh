@@ -160,7 +160,7 @@ APP_READY=0
 # 최대 DEPLOY_READY_WAIT_SECONDS(기본값: 120초) 동안 앱 서버의 /ready 엔드포인트를 2초 간격으로 폴링합니다.
 # 단순 프로세스 생존(/health) 대신 DB 및 임베딩 연계 가동 상태(/ready)를 엄격히 검증하여 배포 완료를 판정합니다.
 # curl 호출 시 교착 상태를 예방하기 위해 연결 타임아웃 2초, 최대 응답 시간 5초를 명시합니다.
-while [ "$app_waited" -le "$READY_WAIT_SECONDS" ]; do
+while true; do
   if curl -fsS --connect-timeout 2 --max-time 5 "$APP_URL/ready" >/dev/null 2>&1; then
     APP_READY=1
     break

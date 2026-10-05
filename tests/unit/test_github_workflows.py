@@ -350,6 +350,76 @@ class TestGitHubWorkflows:
         assert cur_hash == v1_hash
         assert "배포 또는 점검 실패: 직전 커밋으로 자동 롤백을 수행합니다." in proc.stderr
 
+    def test_deploy_workflow_remote_ssh_rollback_failure_warns_and_exits_one(self, tmp_path: Path):
+        """원격 배포 스크립트 실행 중 배포 실패 후 자동 롤백 스크립트(deploy.sh) 실행마저 실패할 경우 경고를 출력하고 exit 1로 종료해야 합니다 (#397)."""
+        deploy_yml = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
+        content = yaml.safe_load(deploy_yml.read_text(encoding="utf-8"))
+        steps = content["jobs"]["deploy"]["steps"]
+        ssh_step = next(s for s in steps if "tailscale ssh" in s.get("run", ""))
+        ssh_run = ssh_step["run"]
+
+        mock_tailscale = tmp_path / "tailscale"
+        mock_tailscale.write_text(
+            '#!/bin/sh\nif [ "$1" = "ssh" ]; then\n  exec /usr/bin/env bash -c "$3"\nfi\nexit 0\n'
+        )
+        mock_tailscale.chmod(0o755)
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=repo, check=True)
+        (repo / "version.txt").write_text("v1")
+        deploy_sh = repo / "deploy.sh"
+        deploy_sh.write_text('#!/bin/sh\necho "FAILING ROLLBACK DEPLOY" >&2\nexit 1\n')
+        deploy_sh.chmod(0o755)
+        check_sh = repo / "check.sh"
+        check_sh.write_text("#!/bin/sh\nexit 0\n")
+        check_sh.chmod(0o755)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 1"], cwd=repo, check=True)
+        v1_hash = (
+            subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+            .stdout.strip()
+        )
+
+        origin = tmp_path / "origin"
+        subprocess.run(["git", "clone", "--bare", str(repo), str(origin)], check=True, capture_output=True)
+        subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=repo, check=True)
+
+        work2 = tmp_path / "work2"
+        subprocess.run(["git", "clone", str(origin), str(work2)], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=work2, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=work2, check=True)
+        (work2 / "version.txt").write_text("v2")
+        (work2 / "deploy.sh").write_text('#!/bin/sh\necho "FAILING NEW DEPLOY" >&2\nexit 1\n')
+        (work2 / "deploy.sh").chmod(0o755)
+        subprocess.run(["git", "add", "."], cwd=work2, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 2"], cwd=work2, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=work2, check=True)
+
+        env = os.environ.copy()
+        cur_path = env["PATH"]
+        env["PATH"] = f"{tmp_path}:{cur_path}"
+        env["DEPLOY_USER"] = "root"
+        env["DEPLOY_HOST"] = "testhost"
+        env["DEPLOY_PATH"] = str(repo)
+
+        proc = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        cur_hash = (
+            subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+            .stdout.strip()
+        )
+        assert proc.returncode == 1
+        assert cur_hash == v1_hash
+        assert "배포 또는 점검 실패: 직전 커밋으로 자동 롤백을 수행합니다." in proc.stderr
+        assert "경고: 직전 커밋으로의 자동 롤백 스크립트 실행 중 오류가 발생했습니다." in proc.stderr
+
     def test_deploy_workflow_remote_ssh_success(self, tmp_path: Path):
         """원격 배포 스크립트 실행 중 deploy.sh와 check.sh 모두 성공 시 신규 커밋으로 정상 갱신되고 exit 0으로 종료해야 합니다 (#397)."""
         deploy_yml = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
