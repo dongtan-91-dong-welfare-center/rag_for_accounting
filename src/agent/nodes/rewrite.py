@@ -1,4 +1,4 @@
-# FUNC-004: 질의 재작성 노드
+# rewrite: 질의 재작성 노드
 #
 # 처리 순서:
 #   1. Classify & Select — 회계 여부 + 전략을 단일 LLM 호출로 판단

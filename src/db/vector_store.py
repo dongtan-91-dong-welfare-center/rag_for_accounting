@@ -1,4 +1,4 @@
-# FUNC-003: pgvector를 이용한 문서 임베딩 저장 및 조회 (이슈 #93 설계 확정)
+# index: pgvector를 이용한 문서 임베딩 저장 및 조회 (이슈 #93 설계 확정)
 #
 # 설계 결정 요약:
 #   - 임베딩: KURE-v1 1024차원, 인덱싱·검색이 src/clients/embedding.embed_texts()를 공유

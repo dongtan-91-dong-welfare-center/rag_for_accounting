@@ -1,4 +1,4 @@
-# FUNC-008: 답변 생성 노드
+# generate: 답변 생성 노드
 
 import re
 from datetime import datetime

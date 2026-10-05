@@ -1,4 +1,4 @@
-"""[FUNC-009] PydanticAI 통일 및 LangSmith / OpenTelemetry 트레이싱 배선 검증 테스트 (#171).
+"""[workflow] PydanticAI 통일 및 LangSmith / OpenTelemetry 트레이싱 배선 검증 테스트 (#171).
 
 검증 항목:
 1. init_tracing()의 기본 비활성 및 안전한 no-op 동작 (키 부재 시).

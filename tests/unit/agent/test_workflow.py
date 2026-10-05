@@ -27,7 +27,7 @@ def mock_checkpointer(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def mock_searcher():
-    """FUNC-005 반영으로 인해 외부 API 및 DB를 호출하는 searcher 모킹"""
+    """search 노드 연동으로 인해 외부 API 및 DB를 호출하는 searcher 모킹"""
     with patch("src.agent.workflow._search_impl") as mock_search:
         from src.models.schemas import RetrievedChunk
         mock_search.return_value = [

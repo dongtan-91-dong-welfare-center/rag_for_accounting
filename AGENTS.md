@@ -24,7 +24,7 @@
 ## 3. 단일 진실 공급원(SSoT) 규칙
 
 - **모델·임계값·상수**: `src/utils/config.py` 파일이 단일 정본입니다. 문서에 수치나 모델명을 직접 복제하지 않고 이 파일을 가리키도록 작성합니다.
-  - `근거:` 인덱싱(FUNC-003)과 검색(FUNC-005)이 `src/clients/embedding.py`를 공유하므로 모델과 차원을 단일 지점에서 고정해야 불일치 발생을 구조적으로 방지할 수 있습니다.
+  - `근거:` 인덱싱(index)과 검색(search)이 `src/clients/embedding.py`를 공유하므로 모델과 차원을 단일 지점에서 고정해야 불일치 발생을 구조적으로 방지할 수 있습니다.
   - 주요 상수 예시: `OPENAI_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIM`, `RRF_K`, `TOP_K_RETRIEVAL`, `MAX_REWRITE_COUNT`, `MAX_HIL_COUNT`, `USE_RERANKER`.
 - **스키마 정의**: `src/models/schemas.py` 파일이 파이프라인 전반의 공통 데이터 스키마 정본입니다. API 응답 스키마는 `src/api/schemas.py`를 정본으로 합니다.
 

@@ -1,5 +1,5 @@
 """
-[FUNC-008] 답변 생성 단위 테스트
+[generate] 답변 생성 단위 테스트
 
 대상 모듈: src/agent/nodes/generate.py
 검증 범위:

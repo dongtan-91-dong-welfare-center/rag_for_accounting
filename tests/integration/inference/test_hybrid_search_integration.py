@@ -1,5 +1,5 @@
 """
-[FUNC-005] 하이브리드 검색 통합 테스트 (Docker DB 환경)
+[search] 하이브리드 검색 통합 테스트 (Docker DB 환경)
 
 본 테스트는 실제 PostgreSQL + pgvector 컨테이너 환경에서 데이터를 삽입하고 검색 쿼리를 수행하여 시스템 레벨의 연동을 검증합니다.
 `docker-compose up -d` 상태에서만 실행되어야 합니다.
