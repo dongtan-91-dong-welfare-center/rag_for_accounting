@@ -637,12 +637,12 @@ class TestProjectVersionAndLinterConfig:
     """pyproject.toml 버전 및 ruff 린터 설정 검증"""
 
     def test_pyproject_version_and_ruff_settings(self):
-        """pyproject.toml 버전이 1.1.1이며 ruff 의존성 및 설정이 올바르게 정의되어 있는지 검증합니다."""
+        """pyproject.toml 버전이 1.1.2이며 ruff 의존성 및 설정이 올바르게 정의되어 있는지 검증합니다."""
         pyproject_file = REPO_ROOT / "pyproject.toml"
         assert pyproject_file.exists()
 
         data = tomllib.loads(pyproject_file.read_text(encoding="utf-8"))
-        assert data.get("project", {}).get("version") == "1.1.1", "패키지 버전은 1.1.1이어야 합니다."
+        assert data.get("project", {}).get("version") == "1.1.2", "패키지 버전은 1.1.2이어야 합니다."
 
         dev_deps = data.get("dependency-groups", {}).get("dev", [])
         assert any("ruff" in dep for dep in dev_deps), "dev 의존성 그룹에 ruff가 포함되어야 합니다."
