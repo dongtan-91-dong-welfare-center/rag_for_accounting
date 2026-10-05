@@ -74,6 +74,7 @@ detect_container_runtime() {
             CONTAINER=(docker)
             COMPOSE_UP_FLAGS=(-d --build)
             COMPOSE_DEPLOY_FLAGS=(-d --no-deps)
+            IS_PODMAN=0
             return 0
             ;;
         esac
@@ -97,6 +98,7 @@ detect_container_runtime() {
     else
       CONTAINER=(docker)
     fi
+    IS_PODMAN=1
     return 0
   fi
 
@@ -120,6 +122,7 @@ detect_container_runtime() {
       fi
       COMPOSE_UP_FLAGS=("${_COMPOSE_UP_FLAGS_PODMAN[@]}")
       COMPOSE_DEPLOY_FLAGS=("${_COMPOSE_DEPLOY_FLAGS_PODMAN[@]}")
+      IS_PODMAN=1
       return 0
       ;;
   esac
@@ -132,6 +135,7 @@ detect_container_runtime() {
   CONTAINER=(docker)
   COMPOSE_UP_FLAGS=(-d --build)
   COMPOSE_DEPLOY_FLAGS=(-d --no-deps)
+  IS_PODMAN=0
   return 1
 }
 

@@ -469,6 +469,40 @@ exit 0
 
 
 @pytest.mark.unit
+def test_deploy_delegating_podman_without_podman_cli_stops_rms_app(tmp_path: Path):
+    """Podman 4.7+ 위임 환경에서 podman CLI가 없더라도 docker 래퍼를 통해 accounting_app 단독 stop/rm을 수행해야 합니다 (#399)."""
+    work = tmp_path / "repo"
+    shutil.copytree(_ROOT / "scripts", work / "scripts")
+    shutil.copy(_DEPLOY_SH, work / "deploy.sh")
+    (work / ".env").write_text("APP_HOST_PORT=8000\nEMBEDDING_HOST_PORT=8080\n")
+
+    docker_log = tmp_path / "docker_calls.log"
+    docker_stub = f"""#!/bin/sh
+echo "$@" >> "{docker_log}"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  echo '>>>> 외부 compose 제공자 "/usr/bin/podman-compose" 실행 중' >&2
+  echo "podman-compose version 1.0.6"
+  exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  echo "running"; exit 0
+fi
+exit 0
+"""
+    bin_dir = _make_bin(tmp_path, {"docker": docker_stub, "curl": "#!/bin/sh\nexit 0\n"})
+    env = _make_mock_env(bin_dir, isolate=True)
+
+    proc = _run_shell("./deploy.sh", cwd=work, env=env)
+    assert proc.returncode == 0
+
+    docker_calls = docker_log.read_text().splitlines()
+    assert any("stop accounting_app" in c for c in docker_calls)
+    assert any("rm accounting_app" in c for c in docker_calls)
+    assert not any("stop accounting_db" in c or "stop accounting_embedding" in c for c in docker_calls)
+    assert not any("rm accounting_db" in c or "rm accounting_embedding" in c for c in docker_calls)
+
+
+@pytest.mark.unit
 def test_deploy_no_cache_flag(tmp_path: Path):
     """--no-cache 플래그 전달 시 compose build에 --no-cache 옵션이 전달되어야 합니다."""
     work = tmp_path / "repo"

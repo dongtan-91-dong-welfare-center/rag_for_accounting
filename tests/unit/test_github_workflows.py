@@ -1,7 +1,9 @@
 """
 GitHub Actions 워크플로, 이슈·PR 템플릿, 코드 리뷰 룰 및 패키지 버전 정합성 검증 테스트
 """
+import os
 import re
+import subprocess
 from pathlib import Path
 import tomllib
 import pytest
@@ -155,6 +157,198 @@ class TestGitHubWorkflows:
             ssh_run.replace("\\$", "$").replace('\\"', '"').replace("\\'", "'")
         )
         assert "exit 1" in ssh_run
+
+    @pytest.mark.parametrize(
+        ("val", "should_pass"),
+        [
+            ("", False),
+            ("   ", False),
+            (" \t\n ", False),
+            ("/var/app/rag_accounting", True),
+        ],
+    )
+    def test_deploy_path_runner_validation_execution(self, val: str, should_pass: bool):
+        """러너 단계의 DEPLOY_PATH 유효성 검사 스크립트가 빈 값 및 공백을 거부하고 유효 경로만 허용하는지 실제 셸로 검증합니다 (#397)."""
+        deploy_yml = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
+        content = yaml.safe_load(deploy_yml.read_text(encoding="utf-8"))
+        steps = content["jobs"]["deploy"]["steps"]
+        validate_step = next(
+            s for s in steps if "DEPLOY_PATH" in s.get("env", {}) and "tailscale ssh" not in s.get("run", "")
+        )
+        validate_run = validate_step["run"]
+
+        env = os.environ.copy()
+        env["DEPLOY_PATH"] = val
+        proc = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", validate_run],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert (proc.returncode == 0) is should_pass
+        if not should_pass:
+            assert "오류: DEPLOY_PATH" in proc.stderr
+
+    def test_deploy_path_runner_validation_unset_fails(self):
+        """러너 단계에서 DEPLOY_PATH 환경변수가 아예 설정되지 않은 경우 실패해야 합니다 (#397)."""
+        deploy_yml = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
+        content = yaml.safe_load(deploy_yml.read_text(encoding="utf-8"))
+        steps = content["jobs"]["deploy"]["steps"]
+        validate_step = next(
+            s for s in steps if "DEPLOY_PATH" in s.get("env", {}) and "tailscale ssh" not in s.get("run", "")
+        )
+        validate_run = validate_step["run"]
+
+        env = os.environ.copy()
+        env.pop("DEPLOY_PATH", None)
+        proc = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", validate_run],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode != 0
+        assert "오류: DEPLOY_PATH" in proc.stderr
+
+    def test_deploy_workflow_remote_ssh_rollback_on_deploy_failure(self, tmp_path: Path):
+        """원격 배포 스크립트 실행 중 deploy.sh 실패 시 직전 커밋으로 롤백하고 exit 1로 종료해야 합니다 (#397)."""
+        deploy_yml = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
+        content = yaml.safe_load(deploy_yml.read_text(encoding="utf-8"))
+        steps = content["jobs"]["deploy"]["steps"]
+        ssh_step = next(s for s in steps if "tailscale ssh" in s.get("run", ""))
+        ssh_run = ssh_step["run"]
+
+        mock_tailscale = tmp_path / "tailscale"
+        mock_tailscale.write_text(
+            '#!/bin/sh\nif [ "$1" = "ssh" ]; then\n  exec /usr/bin/env bash -c "$3"\nfi\nexit 0\n'
+        )
+        mock_tailscale.chmod(0o755)
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=repo, check=True)
+        (repo / "version.txt").write_text("v1")
+        deploy_sh = repo / "deploy.sh"
+        deploy_sh.write_text('#!/bin/sh\necho "DEPLOYING $(cat version.txt)"\nexit 0\n')
+        deploy_sh.chmod(0o755)
+        check_sh = repo / "check.sh"
+        check_sh.write_text("#!/bin/sh\nexit 0\n")
+        check_sh.chmod(0o755)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 1"], cwd=repo, check=True)
+        v1_hash = (
+            subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+            .stdout.strip()
+        )
+
+        origin = tmp_path / "origin"
+        subprocess.run(["git", "clone", "--bare", str(repo), str(origin)], check=True, capture_output=True)
+        subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=repo, check=True)
+
+        work2 = tmp_path / "work2"
+        subprocess.run(["git", "clone", str(origin), str(work2)], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=work2, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=work2, check=True)
+        (work2 / "version.txt").write_text("v2")
+        (work2 / "deploy.sh").write_text('#!/bin/sh\necho "FAILING DEPLOY"\nexit 1\n')
+        (work2 / "deploy.sh").chmod(0o755)
+        subprocess.run(["git", "add", "."], cwd=work2, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 2"], cwd=work2, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=work2, check=True)
+
+        env = os.environ.copy()
+        cur_path = env["PATH"]
+        env["PATH"] = f"{tmp_path}:{cur_path}"
+        env["DEPLOY_USER"] = "root"
+        env["DEPLOY_HOST"] = "testhost"
+        env["DEPLOY_PATH"] = str(repo)
+
+        proc = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        cur_hash = (
+            subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+            .stdout.strip()
+        )
+        assert proc.returncode == 1
+        assert cur_hash == v1_hash
+        assert "배포 또는 점검 실패: 직전 커밋으로 자동 롤백을 수행합니다." in proc.stderr
+
+    def test_deploy_workflow_remote_ssh_rollback_on_check_failure(self, tmp_path: Path):
+        """원격 배포 스크립트 실행 중 check.sh 실패 시 직전 커밋으로 롤백하고 exit 1로 종료해야 합니다 (#397)."""
+        deploy_yml = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
+        content = yaml.safe_load(deploy_yml.read_text(encoding="utf-8"))
+        steps = content["jobs"]["deploy"]["steps"]
+        ssh_step = next(s for s in steps if "tailscale ssh" in s.get("run", ""))
+        ssh_run = ssh_step["run"]
+
+        mock_tailscale = tmp_path / "tailscale"
+        mock_tailscale.write_text(
+            '#!/bin/sh\nif [ "$1" = "ssh" ]; then\n  exec /usr/bin/env bash -c "$3"\nfi\nexit 0\n'
+        )
+        mock_tailscale.chmod(0o755)
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=repo, check=True)
+        (repo / "version.txt").write_text("v1")
+        deploy_sh = repo / "deploy.sh"
+        deploy_sh.write_text('#!/bin/sh\necho "DEPLOYING $(cat version.txt)"\nexit 0\n')
+        deploy_sh.chmod(0o755)
+        check_sh = repo / "check.sh"
+        check_sh.write_text("#!/bin/sh\nexit 0\n")
+        check_sh.chmod(0o755)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 1"], cwd=repo, check=True)
+        v1_hash = (
+            subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+            .stdout.strip()
+        )
+
+        origin = tmp_path / "origin"
+        subprocess.run(["git", "clone", "--bare", str(repo), str(origin)], check=True, capture_output=True)
+        subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=repo, check=True)
+
+        work2 = tmp_path / "work2"
+        subprocess.run(["git", "clone", str(origin), str(work2)], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=work2, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=work2, check=True)
+        (work2 / "version.txt").write_text("v2")
+        (work2 / "deploy.sh").write_text('#!/bin/sh\nexit 0\n')
+        (work2 / "deploy.sh").chmod(0o755)
+        (work2 / "check.sh").write_text('#!/bin/sh\necho "FAILING CHECK"\nexit 1\n')
+        (work2 / "check.sh").chmod(0o755)
+        subprocess.run(["git", "add", "."], cwd=work2, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 2"], cwd=work2, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=work2, check=True)
+
+        env = os.environ.copy()
+        cur_path = env["PATH"]
+        env["PATH"] = f"{tmp_path}:{cur_path}"
+        env["DEPLOY_USER"] = "root"
+        env["DEPLOY_HOST"] = "testhost"
+        env["DEPLOY_PATH"] = str(repo)
+
+        proc = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        cur_hash = (
+            subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+            .stdout.strip()
+        )
+        assert proc.returncode == 1
+        assert cur_hash == v1_hash
+        assert "배포 또는 점검 실패: 직전 커밋으로 자동 롤백을 수행합니다." in proc.stderr
 
 
 class TestIssueAndPRTemplates:

@@ -138,7 +138,7 @@ echo "[1/3] Building app container"
 # podman-compose 1.0.6에서 --force-recreate 지정 시 --no-deps 옵션이 무시되어 database 및 embedding 컨테이너까지
 # 불필요하게 재생성되는 결함이 있습니다. 이를 방지하기 위해 대상 app 컨테이너만 명시적으로 stop 및 rm 처리한 후 기동합니다.
 APP_CONTAINER="${APP_CONTAINER:-accounting_app}"
-if [ "${CONTAINER[0]:-}" = "podman" ] || [[ "${COMPOSE[*]}" =~ podman ]]; then
+if [ "${IS_PODMAN:-0}" = "1" ] || [ "${CONTAINER[0]:-}" = "podman" ] || [[ "${COMPOSE[*]}" =~ podman ]]; then
   "${CONTAINER[@]}" stop "$APP_CONTAINER" >/dev/null 2>&1 || true
   "${CONTAINER[@]}" rm "$APP_CONTAINER" >/dev/null 2>&1 || true
 fi

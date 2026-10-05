@@ -281,6 +281,35 @@ class TestDetectContainerRuntime:
         assert container == "docker"  # 안전한 기본값을 남긴다
         assert deploy_flags == "-d --no-deps"
 
+    def test_is_podman_indicator_set_correctly(self, tmp_path):
+        """Docker 환경에서는 IS_PODMAN이 0, Podman 환경에서는 IS_PODMAN이 1로 설정되어야 합니다 (#399)."""
+        bin_dir_docker = _make_bin(tmp_path / "docker_env", {"docker": _DOCKER_WITH_COMPOSE})
+        proc_docker = subprocess.run(
+            [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],
+            env={"PATH": str(bin_dir_docker)},
+            capture_output=True,
+            text=True,
+        )
+        assert "is_podman=0" in proc_docker.stdout
+
+        bin_dir_podman = _make_bin(tmp_path / "podman_env", {"podman-compose": _STUB, "podman": _STUB})
+        proc_podman = subprocess.run(
+            [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],
+            env={"PATH": str(bin_dir_podman)},
+            capture_output=True,
+            text=True,
+        )
+        assert "is_podman=1" in proc_podman.stdout
+
+        bin_dir_delegating = _make_bin(tmp_path / "delegating_env", {"docker": _DOCKER_DELEGATING_TO_PODMAN})
+        proc_delegating = subprocess.run(
+            [_BASH, "-c", f'source "{_LIB}"\ndetect_container_runtime\necho "is_podman=$IS_PODMAN"'],
+            env={"PATH": str(bin_dir_delegating)},
+            capture_output=True,
+            text=True,
+        )
+        assert "is_podman=1" in proc_delegating.stdout
+
 
 @pytest.mark.unit
 class TestInstallHint:
