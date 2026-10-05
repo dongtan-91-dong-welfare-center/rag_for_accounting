@@ -170,4 +170,32 @@ class TestDockerComposeConfig:
         assert empty_cmd[empty_cmd.index("--max-batch-tokens") + 1] == "8192"
         assert empty_cmd[empty_cmd.index("--max-client-batch-size") + 1] == "8"
 
+    def test_services_use_env_file_for_database_credentials(self, compose_data):
+        """database 및 app 서비스는 DB 접속 자격증명을 environment 대신 env_file로 주입받아야 합니다 (#398)."""
+        services = compose_data["services"]
+        for svc_name in ("database", "app"):
+            svc = services[svc_name]
+            env_file = svc.get("env_file", [])
+            if isinstance(env_file, str):
+                env_file = [env_file]
+            assert ".env" in env_file, f"{svc_name} 서비스는 env_file에 .env가 지정되어야 합니다."
+
+            env = svc.get("environment", {})
+            if isinstance(env, dict):
+                assert "POSTGRES_PASSWORD" not in env, (
+                    f"{svc_name} 서비스 environment에 POSTGRES_PASSWORD가 직접 노출되어서는 안 됩니다."
+                )
+                assert "POSTGRES_USER" not in env, (
+                    f"{svc_name} 서비스 environment에 POSTGRES_USER가 직접 노출되어서는 안 됩니다."
+                )
+                assert "POSTGRES_DB" not in env, (
+                    f"{svc_name} 서비스 environment에 POSTGRES_DB가 직접 노출되어서는 안 됩니다."
+                )
+            elif isinstance(env, list):
+                for credential_var in ("POSTGRES_PASSWORD", "POSTGRES_USER", "POSTGRES_DB"):
+                    assert not any(str(item).startswith(f"{credential_var}=") for item in env), (
+                        f"{svc_name} 서비스 environment에 {credential_var}가 직접 노출되어서는 안 됩니다."
+                    )
+
+
 
