@@ -3,7 +3,7 @@
 두 가지 실행 경로를 단일 CLI로 제공한다.
 
   1. ingest — 적재 경로
-     온톨로지 그래프 → 청킹(ontology/chunk) → pgvector 적재(index)
+     온톨로지 그래프 → 청킹(ontology) → pgvector 적재(index)
      · 기본 소스: 미리 빌드된 온톨로지 JSON(data/ontology/*.json)
      · --pdf/--md 지정 시: 파싱(parse) → 온톨로지 빌드(ontology) → 청킹 → 적재까지 전체 경로
      · 적재 대상 테이블은 기본값으로 검색기가 조회하는 CHUNKS_TABLE("chunks")를 써서 적재와 검색이
