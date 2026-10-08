@@ -13,6 +13,9 @@
      ```bash
      git worktree add -b feat/<issue-number>-<name> ../rag_for_accounting_worktrees/issue-<issue-number> origin/dev
      ```
+   - Windows 환경에서는 `.gitattributes`가 `*.sh`, `Dockerfile`, `*.yml`, `*.yaml`의 줄바꿈을 `core.autocrlf` 설정과 무관하게 LF로 고정합니다.
+     - `근거:` CRLF로 변환된 셸 스크립트는 bash, WSL, 컨테이너에서 `$'\r': command not found` 오류로 실패합니다.
+     - 이미 체크아웃된 파일이 CRLF라면 `.gitattributes`가 반영된 뒤 해당 파일을 다시 체크아웃하여 LF로 갱신합니다.
 2. **원자적 커밋과 TDD**:
    - 하나의 커밋은 하나의 논리적 변경(테스트 추가, 기능 구현, 문서 정리 등)만 포함해야 합니다.
    - 커밋 메시지 헤더는 영문으로 작성하며 끝에 이슈 번호를 포함합니다.  
