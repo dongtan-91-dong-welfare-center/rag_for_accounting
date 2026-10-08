@@ -1,0 +1,7 @@
+# 줄바꿈 정책: 컨테이너와 CI(Linux)에서 실행되는 파일은 core.autocrlf 설정과 무관하게 LF로 고정한다.
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
