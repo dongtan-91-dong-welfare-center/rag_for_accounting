@@ -641,6 +641,14 @@ exit 0
 
 
 @pytest.mark.unit
+def test_deploy_ready_wait_default_is_300_seconds():
+    """DEPLOY_READY_WAIT_SECONDS 기본값은 CPU TEI 재웜업(약 120~180초)을 수용하도록 300초여야 합니다 (#423)."""
+    text = _DEPLOY_SH.read_text(encoding="utf-8")
+    assert 'READY_WAIT_SECONDS="${DEPLOY_READY_WAIT_SECONDS:-300}"' in text
+    assert "DEPLOY_READY_WAIT_SECONDS:-120" not in text
+
+
+@pytest.mark.unit
 def test_deploy_ready_check_polling_success(tmp_path: Path):
     """앱 서버 /ready 엔드포인트를 정상 폴링하여 200 OK를 수신하면 배포 성공을 보고해야 합니다 (#399)."""
     work = tmp_path / "repo"
