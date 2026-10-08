@@ -53,7 +53,7 @@ services:
     # 기본값은 180초 + 60회 x 10초로 최대 약 13분까지 대기한다.
     # 이 체크가 없으면 app이 먼저 떠서 웜업 동안 들어온 질의가 임베딩 실패(Connection refused)로 "근거 부족" 응답을 만든다.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health"]
       interval: 10s
       timeout: 5s
       retries: "${TEI_HEALTH_RETRIES:-60}"
@@ -89,8 +89,9 @@ services:
         condition: service_healthy
     # 준비성 프로브: DB와 임베딩 서버에 실제로 닿을 때만 healthy가 된다(/health는 라이브니스라 의존성을 보지 않는다).
     # slim 이미지에는 curl이 없으므로 파이썬 표준 라이브러리로 호출한다. 응답이 503이면 urlopen이 예외를 던져 비정상 종료한다.
+    # podman-compose 1.0.6은 CMD 배열을 작은따옴표로 감싼 CMD-SHELL 문자열로 변환하므로 인용이 깨지지 않도록 CMD-SHELL을 쓰고 작은따옴표를 쓰지 않는다. (#426)
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/ready', timeout=5)"]
+      test: ['CMD-SHELL', 'python -c "import urllib.request as u; u.urlopen(\"http://localhost:8000/ready\", timeout=5)"']
       interval: 15s
       timeout: 10s
       retries: 5

@@ -124,6 +124,8 @@ sudo setsebool -P httpd_can_network_connect 1
 `docker-compose.yml`에는 `app` 서비스가 `embedding`의 헬스체크 통과(`service_healthy`)를 대기하도록 정의되어 있으나, EPEL 8 저장소에 고정된 `podman-compose` 1.0.6은 `condition: service_healthy` 속성을 지원하지 않고 조용히 무시합니다.
 따라서 컨테이너 기동 후 TEI 서버의 웜업 완료(`http://localhost:8080/health` 200 OK)를 명시적으로 기다리는 절차가 필수적입니다.
 
+또한 `podman-compose` 1.0.6은 `CMD` 배열 형식의 헬스체크를 작은따옴표로 감싼 `CMD-SHELL` 문자열로 변환하므로, 인자에 작은따옴표가 있으면 셸 문법 오류로 상시 `unhealthy`가 됩니다. 따라서 `docker-compose.yml`의 헬스체크는 `CMD-SHELL` 형식으로 작성하고 작은따옴표를 사용하지 않습니다(#426).
+
 ---
 
 ## 6. 설치 및 자동 배포 실행
