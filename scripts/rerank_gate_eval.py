@@ -135,18 +135,18 @@ def _chunk_record(chunk) -> dict:
     }
 
 
-def run_dump() -> Path:
+def run_dump(dense_only: bool = False) -> Path:
     from src.db.connection import close_pool, init_pool
     from src.retrieval.searcher import search_chunks
 
     init_pool()
     try:
-        return _dump_cases(search_chunks)
+        return _dump_cases(search_chunks, dense_only)
     finally:
         close_pool()
 
 
-def _dump_cases(search_chunks) -> Path:
+def _dump_cases(search_chunks, dense_only: bool) -> Path:
     cases = [json.loads(line) for line in BENCHMARK_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
     records = []
     for case in cases:
@@ -156,7 +156,7 @@ def _dump_cases(search_chunks) -> Path:
         if not gold:
             print(f"[skip] {case['id']}: 정답 장 추출 불가")
             continue
-        pool = [_chunk_record(c) for c in search_chunks(case["query"], top_k=NEG_POOL_K)]
+        pool = [_chunk_record(c) for c in search_chunks(case["query"], top_k=NEG_POOL_K, include_sparse=not dense_only)]
         positive = pool[:TOP_N]
         negative = exclude_chapters(pool, gold)
         records.append({
@@ -169,7 +169,7 @@ def _dump_cases(search_chunks) -> Path:
         })
         print(f"[dump] {case['id']}: gold={sorted(gold)} neg={len(negative)}")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = OUT_DIR / f"gate_dump_{datetime.now(KST):%Y%m%d_%H%M}.json"
+    out = OUT_DIR / f"gate_dump{'_dense' if dense_only else ''}_{datetime.now(KST):%Y%m%d_%H%M}.json"
     out.write_text(json.dumps(records, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"덤프 저장: {out}")
     return out
@@ -235,7 +235,9 @@ def run_score(dump_file: Path, models: list[str], require_gold_in_top: bool, max
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("dump")
+    dump = sub.add_parser("dump")
+    dump.add_argument("--dense-only", action="store_true",
+                      help="Sparse를 생략한 Dense 단독 후보 풀로 덤프한다(sparse 영향 분리용)")
     score = sub.add_parser("score")
     score.add_argument("--dump-file", type=Path, required=True)
     score.add_argument("--models", nargs="+", default=list(CANDIDATE_MODELS))
@@ -245,7 +247,7 @@ def main() -> None:
                        help="질의+청크 토큰 상한(0이면 모델 기본값)")
     args = parser.parse_args()
     if args.cmd == "dump":
-        run_dump()
+        run_dump(args.dense_only)
     else:
         run_score(args.dump_file, args.models, args.require_gold_in_top, args.max_length or None)
 
