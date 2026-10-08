@@ -249,7 +249,7 @@ git pull origin main
 ```
 
 - **가동 준비성(`/ready`) 폴링 검증 (#399)**:
-  `deploy.sh`는 단순 프로세스 생존(`/health`)이 아닌 데이터베이스 및 TEI 임베딩 연계 가동 상태를 포괄하는 `/ready` 엔드포인트를 대상으로 200 OK 응답이 반환될 때까지 주기적으로 폴링합니다. 기본 대기 시간은 120초(2초 간격)이며, `DEPLOY_READY_WAIT_SECONDS` 환경변수를 통해 조정할 수 있습니다. 제한 시간 내 준비되지 않을 경우 최근 50줄의 컨테이너 로그를 출력하고 즉시 실패(종료 코드 1)로 중단됩니다.
+  `deploy.sh`는 단순 프로세스 생존(`/health`)이 아닌 데이터베이스 및 TEI 임베딩 연계 가동 상태를 포괄하는 `/ready` 엔드포인트를 대상으로 200 OK 응답이 반환될 때까지 주기적으로 폴링합니다. 기본 대기 시간은 300초(2초 간격)이며, `DEPLOY_READY_WAIT_SECONDS` 환경변수를 통해 조정할 수 있습니다. 제한 시간 내 준비되지 않을 경우 최근 50줄의 컨테이너 로그를 출력하고 즉시 실패(종료 코드 1)로 중단됩니다.
 - **Podman 환경 컨테이너 격리 보장 (#399)**:
   `podman-compose` 1.0.6 환경에서 `--force-recreate` 사용 시 `--no-deps`가 무시되어 DB 및 임베딩 컨테이너까지 재생성되는 문제를 원천 차단하기 위해, `deploy.sh`는 기동 직전 기존 `accounting_app` 컨테이너만 명시적으로 중지(`stop`) 및 제거(`rm`)한 후 `up -d --no-deps app`을 실행합니다. 이를 통해 수 분이 소요되는 TEI 재웜업 없이 `app` 컨테이너만 단독 교체됩니다. 대상 컨테이너명은 `APP_CONTAINER` 환경변수를 통해 커스텀 지정할 수 있습니다.
 - **`check.sh` 준비 상태 엄격 검증 (#399)**:
@@ -300,7 +300,7 @@ git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
 [주요 설계 결정 및 기술적 배경]
 - **시크릿 사전 검증**: 러너 단계에서 `DEPLOY_PATH` 공백/누락을 선제 차단하여, 불필요한 SSH 연결 시도 및 잘못된 원격 경로 조작을 방지합니다.
 - **체크아웃 무결성 보호**: 원격 서버 내 미커밋 변경 사항(`git status --porcelain`)을 사전 검사하여 운영 중 수동 작업 파일의 덮어쓰기 손실을 예방합니다.
-- **앱 단독 격리 교체 (`deploy.sh`)**: `podman-compose`의 의존 컨테이너 동시 재생성 결함을 차단하기 위해 `accounting_app`만 단독 중지/삭제함으로써 TEI 임베딩 모델의 14분 웜업 지연을 방지하고, `/ready` 200 OK를 최대 120초간 폴링 대기합니다.
+- **앱 단독 격리 교체 (`deploy.sh`)**: `podman-compose`의 의존 컨테이너 동시 재생성 결함을 차단하기 위해 `accounting_app`만 단독 중지/삭제함으로써 TEI 임베딩 모델의 14분 웜업 지연을 방지하고, `/ready` 200 OK를 최대 300초간 폴링 대기합니다.
 - **엄격한 준비성 판정 (`check.sh`)**: 기존 경고(`warn`) 처리로 인해 서비스 미가동 상태에서 배포가 성공하던 문제를 방지하고자, `/ready` 실패 시 치명적 오류(`fail`)와 함께 비정상 종료(`exit 1`)합니다.
 - **원자적 자동 롤백**: 소스 반영(`git reset`), 배포(`deploy.sh`), 점검(`check.sh`) 중 어느 단계라도 실패하면 소스 갱신 직전 보관한 정상 커밋(`$PREV_COMMIT`)으로 즉시 복귀(`git reset --hard "$PREV_COMMIT" && ./deploy.sh`)하여 가용성을 보장하며, 워크플로는 최종 실패(`exit 1`)로 종료됩니다.
 
@@ -335,7 +335,7 @@ flowchart TD
 1. **러너 단계 시크릿 선제 검증**: 원격 접속 시도 전 GitHub Actions 러너 단계에서 `DEPLOY_PATH`가 비어 있거나 공백 문자만으로 구성되었는지 검사하여, 누락 시 원격 SSH 연결을 시도하지 않고 즉시 비정상 종료(`exit 1`)합니다.
 2. **원격 테일넷 연결 및 디렉터리 검증**: Tailscale ACL 규칙(`tag:ci` → `tag:server`, `root` accept)에 따라 원격 서버에 무인 SSH로 접속하며, 지정된 배포 경로 디렉터리의 실제 존재 여부를 검사합니다.
 3. **추적 파일 변경 검사 및 직전 커밋 보관**: `git status --porcelain --untracked-files=no`로 로컬 수정을 검사하여 작업 손실을 예방하며, 최신 소스 갱신 직전 현재 정상 커밋 해시(`PREV_COMMIT=$(git rev-parse HEAD)`)를 안전하게 기록합니다.
-4. **최신 소스 동기화 및 증분 배포**: `git fetch origin main && git reset --hard origin/main`으로 최신 소스를 반영한 후 `./deploy.sh`를 실행합니다. Podman 환경에서는 `accounting_app`만 단독 중지 및 제거되어 의존 컨테이너 재생성을 방지하며, `/ready` 200 OK를 최대 120초간 대기합니다.
+4. **최신 소스 동기화 및 증분 배포**: `git fetch origin main && git reset --hard origin/main`으로 최신 소스를 반영한 후 `./deploy.sh`를 실행합니다. Podman 환경에서는 `accounting_app`만 단독 중지 및 제거되어 의존 컨테이너 재생성을 방지하며, `/ready` 200 OK를 최대 300초간 대기합니다.
 5. **엄격한 헬스체크 및 무결성 검증**: `./check.sh`를 실행하여 모든 엔드포인트와 컨테이너가 정상 준비(`ready`) 상태인지 검증합니다.
 6. **장애 발생 시 자동 롤백 분기 (#397)**: 소스 반영(`git reset`), 배포(`deploy.sh`), 또는 점검(`check.sh`) 중 어느 한 단계라도 실패할 경우, 직전 커밋으로의 자동 롤백(`git reset --hard "$PREV_COMMIT" && ./deploy.sh`)을 즉각 수행합니다. 롤백 완료 여부와 관계없이 워크플로는 배포 실패 상태(`exit 1`)를 명확히 보고합니다.
 
