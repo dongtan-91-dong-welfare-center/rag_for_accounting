@@ -11,6 +11,7 @@ TEI 1.8에서 지원되지 않는 --max-input-length 플래그가 배제되었�
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,26 @@ class TestDockerComposeConfig:
         healthcheck = compose_data["services"]["app"]["healthcheck"]
         assert "/ready" in " ".join(healthcheck["test"])
         assert healthcheck["start_period"]
+
+    def test_healthchecks_use_cmd_shell_without_single_quotes(self, compose_data):
+        """헬스체크는 CMD-SHELL 형식이며 작은따옴표를 포함하지 않아야 합니다. (#426)
+
+        근거: podman-compose 1.0.6은 CMD 배열을 작은따옴표로 감싼 CMD-SHELL 문자열로 변환하므로,
+        인자에 작은따옴표가 있으면 인용이 깨져 상시 unhealthy가 됩니다.
+        """
+        for name, svc in compose_data["services"].items():
+            test = svc["healthcheck"]["test"]
+            assert test[0] == "CMD-SHELL", f"{name} 헬스체크는 CMD-SHELL 형식이어야 합니다."
+            assert len(test) == 2, f"{name} 헬스체크 CMD-SHELL은 단일 문자열이어야 합니다."
+            assert "'" not in test[1], f"{name} 헬스체크에 작은따옴표를 사용할 수 없습니다."
+
+    def test_app_healthcheck_shell_string_splits_into_python_command(self, compose_data):
+        """app 헬스체크 문자열은 셸 분해 시 python -c <코드> 3개 토큰이어야 합니다. (#426)"""
+        command = compose_data["services"]["app"]["healthcheck"]["test"][1]
+        tokens = shlex.split(command)
+        assert tokens[:2] == ["python", "-c"]
+        assert len(tokens) == 3
+        assert "http://localhost:8000/ready" in tokens[2]
 
     def test_dockerfile_pins_uv_version(self):
         """Dockerfile의 uv 이미지는 latest가 아닌 고정 버전이어야 합니다. (#193)"""
