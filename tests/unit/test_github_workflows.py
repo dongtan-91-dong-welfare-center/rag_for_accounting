@@ -8,6 +8,7 @@ from pathlib import Path
 import tomllib
 import pytest
 import yaml
+from tests.utils.shell_test_helpers import BASH_PATH
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -180,10 +181,12 @@ class TestGitHubWorkflows:
         env = os.environ.copy()
         env["DEPLOY_PATH"] = val
         proc = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", validate_run],
+            [BASH_PATH, "-e", "-o", "pipefail", "-c", validate_run],
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert (proc.returncode == 0) is should_pass
         if not should_pass:
@@ -202,10 +205,12 @@ class TestGitHubWorkflows:
         env = os.environ.copy()
         env.pop("DEPLOY_PATH", None)
         proc = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", validate_run],
+            [BASH_PATH, "-e", "-o", "pipefail", "-c", validate_run],
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert proc.returncode != 0
         assert "오류: DEPLOY_PATH" in proc.stderr
@@ -273,10 +278,12 @@ class TestGitHubWorkflows:
         env["DEPLOY_PATH"] = str(repo)
 
         proc = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            [BASH_PATH, "-e", "-o", "pipefail", "-c", ssh_run],
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         cur_hash = (
             subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
@@ -349,10 +356,12 @@ class TestGitHubWorkflows:
         env["DEPLOY_PATH"] = str(repo)
 
         proc = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            [BASH_PATH, "-e", "-o", "pipefail", "-c", ssh_run],
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         cur_hash = (
             subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
@@ -420,10 +429,12 @@ class TestGitHubWorkflows:
         env["DEPLOY_PATH"] = str(repo)
 
         proc = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            [BASH_PATH, "-e", "-o", "pipefail", "-c", ssh_run],
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         cur_hash = (
             subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
@@ -489,10 +500,12 @@ class TestGitHubWorkflows:
         env["DEPLOY_PATH"] = str(repo)
 
         proc = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            [BASH_PATH, "-e", "-o", "pipefail", "-c", ssh_run],
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         cur_hash = (
             subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
@@ -524,10 +537,12 @@ class TestGitHubWorkflows:
         env["DEPLOY_PATH"] = str(tmp_path / "nonexistent_dir")
 
         proc = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            [BASH_PATH, "-e", "-o", "pipefail", "-c", ssh_run],
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert proc.returncode == 1
         assert "오류: 원격 서버에 배포 디렉터리가 존재하지 않습니다." in proc.stderr
@@ -564,10 +579,12 @@ class TestGitHubWorkflows:
         env["DEPLOY_PATH"] = str(repo)
 
         proc = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", ssh_run],
+            [BASH_PATH, "-e", "-o", "pipefail", "-c", ssh_run],
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert proc.returncode == 1
         assert "서버 체크아웃에 커밋되지 않은 변경이 있어 배포를 중단합니다." in proc.stderr
