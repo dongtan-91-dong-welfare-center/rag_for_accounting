@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from langgraph.types import Interrupt
 
 from src.models.schemas import FinalResponse
+from src.utils.config import MAX_FEEDBACK_LENGTH, MAX_QUERY_LENGTH
 
 pytestmark = pytest.mark.unit
 
@@ -113,6 +114,12 @@ class TestQuery:
         assert client.post("/query", json={"query": ""}).status_code == 422
         assert client.post("/query", json={"query": "   "}).status_code == 422
 
+    def test_query_length_limit_is_422(self, client, monkeypatch):
+        """MAX_QUERY_LENGTH 초과 질의는 워크플로 진입 전에 422로 거절하고, 경계값은 통과한다(#445)."""
+        monkeypatch.setattr("src.api.server.run_workflow", lambda *a, **k: _done_result())
+        assert client.post("/query", json={"query": "가" * MAX_QUERY_LENGTH}).status_code == 200
+        assert client.post("/query", json={"query": "가" * (MAX_QUERY_LENGTH + 1)}).status_code == 422
+
     def test_timeout_fallback_returns_200_with_error_code(self, client, monkeypatch):
         """#131 타임아웃 폴백은 5xx가 아니라 200 done + error_code="TIMEOUT"이다."""
         fallback = _done_result(
@@ -201,6 +208,16 @@ class TestResume:
         assert r.status_code == 200
         assert r.json()["status"] == "interrupted"
         assert captured["args"] == ("t9", {"action": "rewrite", "feedback": "리스 회계처리를 강조해줘"})
+
+    def test_feedback_length_limit_is_422(self, client, monkeypatch):
+        """MAX_FEEDBACK_LENGTH 초과 피드백은 세션 조회 전에 422로 거절하고, 경계값은 통과한다(#445)."""
+        monkeypatch.setattr("src.api.server.thread_exists", lambda tid: True)
+        monkeypatch.setattr("src.api.server.resume_workflow", lambda tid, d: _done_result(thread_id=tid))
+        body = {"thread_id": "t9", "action": "rewrite"}
+        ok = client.post("/resume", json={**body, "feedback": "가" * MAX_FEEDBACK_LENGTH})
+        too_long = client.post("/resume", json={**body, "feedback": "가" * (MAX_FEEDBACK_LENGTH + 1)})
+        assert ok.status_code == 200
+        assert too_long.status_code == 422
 
     def test_unknown_thread_id_is_404(self, client, monkeypatch):
         """미존재 thread_id는 재개 전에 404 — resume_workflow는 호출되지 않는다."""
