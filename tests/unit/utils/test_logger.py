@@ -126,6 +126,32 @@ class TestLogKv:
         assert entry["error"] == "ValueError"
         assert entry["query_len"] == 12
 
+    def test_json_mode_serializes_non_json_values(self):
+        """Exception과 Path 같은 직렬화 불가 객체도 JSON 로그가 유실되지 않는지 검증"""
+        import json
+        from pathlib import Path
+        from src.utils.logger import log_kv
+
+        logger, records, fmt = self._capture()
+        log_kv(logger, logging.ERROR, "db", "실패", 상세=ValueError("boom"), 경로=Path("a/b"))
+        entry = json.loads(fmt.format(records[0]))
+
+        assert entry["detail"] == "boom"
+        assert "taskName" not in entry
+
+    def test_log_execution_time_preserves_original_exception(self):
+        """로깅 자체가 실패해도 데코레이터가 원래 예외를 전파하는지 검증"""
+        from unittest.mock import patch
+        from src.utils import logger as logger_module
+
+        @logger_module.log_execution_time
+        def failing():
+            raise RuntimeError("원래 오류")
+
+        with patch.object(logger_module, "log_kv", side_effect=ValueError("log fail")):
+            with pytest.raises(RuntimeError, match="원래 오류"):
+                failing()
+
     def test_unregistered_tag_rejected(self):
         """허용 목록에 없는 태그는 거부되는지 검증"""
         from src.utils.logger import log_kv

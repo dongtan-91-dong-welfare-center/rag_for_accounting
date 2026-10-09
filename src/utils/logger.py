@@ -30,13 +30,13 @@ class _JSONLinesFormatter(logging.Formatter):
             "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
             "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
             "created", "msecs", "relativeCreated", "thread", "threadName",
-            "processName", "process", "message"
+            "processName", "process", "message", "taskName"
         }
         for key, value in record.__dict__.items():
             if key not in standard_attrs and not key.startswith("_"):
                 log_entry[key] = value
 
-        return json.dumps(log_entry, ensure_ascii=False)
+        return json.dumps(log_entry, ensure_ascii=False, default=str)
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -96,6 +96,9 @@ def log_execution_time(func):
             return result
         except Exception as e:
             elapsed = time.perf_counter() - start
-            log_kv(logger, logging.ERROR, "workflow", "실행 오류", 함수=func.__name__, 소요=elapsed, 오류=f"{type(e).__name__}: {e}")
+            try:
+                log_kv(logger, logging.ERROR, "workflow", "실행 오류", 함수=func.__name__, 소요=elapsed, 오류=type(e).__name__, 상세=e)
+            except Exception:
+                pass  # 근거: 로깅 실패가 원래 예외를 가리지 않도록 삼킨다.
             raise
     return wrapper
