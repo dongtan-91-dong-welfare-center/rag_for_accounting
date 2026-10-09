@@ -4,6 +4,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
 from src.mcp_server import server
+from src.utils.config import MAX_FEEDBACK_LENGTH, MAX_QUERY_LENGTH
 
 pytestmark = pytest.mark.unit
 
@@ -57,3 +58,18 @@ def test_resume_query_builds_decision_with_feedback(monkeypatch, stub_pipeline):
 
     assert result == {"status": "done", "answer": "stub"}
     assert stub_pipeline["resume"] == ("t-1", {"action": "rewrite", "feedback": "조항 더"})
+
+
+def test_query_standards_rejects_over_length_query(stub_pipeline):
+    server.query_standards("가" * MAX_QUERY_LENGTH)  # 경계값은 통과
+
+    with pytest.raises(ToolError, match="이내로 입력"):
+        server.query_standards("가" * (MAX_QUERY_LENGTH + 1))
+
+
+def test_resume_query_rejects_over_length_feedback(monkeypatch, stub_pipeline):
+    monkeypatch.setattr(server, "thread_exists", lambda thread_id: True)
+    server.resume_query("t-1", action="rewrite", feedback="가" * MAX_FEEDBACK_LENGTH)  # 경계값은 통과
+
+    with pytest.raises(ToolError, match="이내로 입력"):
+        server.resume_query("t-1", action="rewrite", feedback="가" * (MAX_FEEDBACK_LENGTH + 1))

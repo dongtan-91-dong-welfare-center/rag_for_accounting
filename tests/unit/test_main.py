@@ -83,3 +83,32 @@ class TestRunMigrate:
             rc = main.run_migrate(argparse.Namespace())
 
         assert rc == 1
+
+
+@pytest.mark.unit
+class TestInputLengthLimit:
+    """CLI 입력 길이 상한(#445)"""
+
+    def test_over_length_query_is_rejected_before_pool_init(self, capsys):
+        """상한 초과 질의는 DB 풀 초기화 전에 오류 코드 1로 거절한다."""
+        from src import main
+        from src.utils.config import MAX_QUERY_LENGTH
+
+        with patch.object(main, "init_pool") as init_pool:
+            rc = main.run_query(_args(query="가" * (MAX_QUERY_LENGTH + 1)))
+
+        assert rc == 1
+        init_pool.assert_not_called()
+        assert "이내로 입력" in capsys.readouterr().err
+
+    def test_over_length_feedback_is_reprompted(self, capsys):
+        """상한 초과 재작성 피드백은 안내 후 다시 입력받는다."""
+        from src import main
+        from src.utils.config import MAX_FEEDBACK_LENGTH
+
+        answers = iter(["r", "가" * (MAX_FEEDBACK_LENGTH + 1), "리스 강조"])
+        with patch.object(main.sys.stdin, "isatty", return_value=True),              patch("builtins.input", side_effect=lambda _="": next(answers)):
+            decision = main._prompt_human_decision({})
+
+        assert decision == {"action": "rewrite", "feedback": "리스 강조"}
+        assert "이내로 입력" in capsys.readouterr().out
