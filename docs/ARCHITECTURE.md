@@ -49,6 +49,8 @@ flowchart TD
 | MCP | `src/mcp_server/server.py` | `query_standards`, `resume_query` 도구로 동일 워크플로를 노출한다. |
 | Codex Skill | `src/skills/k-accounting/SKILL.md` | 회계 기준 질의를 감지해 MCP 도구 호출을 유도한다. |
 
+입력 길이는 세 진입점(HTTP API, CLI, MCP)에서 모두 제한한다. 질의는 `MAX_QUERY_LENGTH`, 재작성 피드백은 `MAX_FEEDBACK_LENGTH`(모두 `src/utils/config.py`)를 초과하면 거절하며, API는 422를 반환하고 프런트엔드는 안내 문구를 표시한다. `근거:` 질의가 재작성 LLM, 임베딩, 리랭커로 그대로 전달되므로 진입점에서 토큰 비용을 제한해야 한다. 프런트엔드는 `frontend/src/api.ts`에 같은 값을 보유하며 `tests/unit/test_frontend_input_limits.py`가 일치를 검증한다.
+
 API 응답 스키마의 정본은 `src/api/schemas.py`다. 내부 `GraphState` 전체를 노출하지 않고, 완료 응답은 `answer`, `clauses`, `citations`, `error_code` 중심으로 축약한다.
 
 ## 4. 적재 파이프라인
@@ -188,3 +190,4 @@ HIL 체크포인터는 PostgreSQL 기반 `PostgresSaver`다(#209). 따라서 Fas
 |---|---|
 | 2026-03-21 | Apache AGE/EdgeQuake/GraphRAG 전제 초기 설계 작성 |
 | 2026-07-17 | 2026-07-11 회의록과 현행 코드 기준으로 pgvector + BM25-style sparse + LangGraph 아키텍처 문서로 재작성 |
+| 2026-10-10 | 질의·재작성 피드백 입력 길이 상한(`MAX_QUERY_LENGTH`, `MAX_FEEDBACK_LENGTH`)을 API·CLI·MCP에 도입(#445) |
