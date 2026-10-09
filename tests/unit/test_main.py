@@ -107,7 +107,10 @@ class TestInputLengthLimit:
         from src.utils.config import MAX_FEEDBACK_LENGTH
 
         answers = iter(["r", "가" * (MAX_FEEDBACK_LENGTH + 1), "리스 강조"])
-        with patch.object(main.sys.stdin, "isatty", return_value=True),              patch("builtins.input", side_effect=lambda _="": next(answers)):
+        with (
+            patch.object(main.sys.stdin, "isatty", return_value=True),
+            patch("builtins.input", side_effect=lambda _="": next(answers)),
+        ):
             decision = main._prompt_human_decision({})
 
         assert decision == {"action": "rewrite", "feedback": "리스 강조"}
