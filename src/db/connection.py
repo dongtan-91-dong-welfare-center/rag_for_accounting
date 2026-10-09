@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from psycopg.conninfo import make_conninfo
 from psycopg_pool import ConnectionPool
 
-from src.utils.config import DB_POOL_TIMEOUT_SECONDS
+from src.utils.config import DB_CONNECT_TIMEOUT_SECONDS, DB_POOL_TIMEOUT_SECONDS
 from src.utils.exception import ConfigNotFoundError
 from src.utils.logger import get_logger
 
@@ -41,6 +41,7 @@ def _build_conninfo() -> str:
         dbname=os.getenv("POSTGRES_DB", "accounting_db"),
         user=os.getenv("POSTGRES_USER", "accounting_user"),
         password=password,
+        connect_timeout=DB_CONNECT_TIMEOUT_SECONDS,
     )
 
 
