@@ -322,7 +322,7 @@ def run_query(args) -> int:
     init_pool()
     _preload_embedding()  # #168: 첫 질의 콜드 로드를 step_timeout(노드 30s) 밖으로 분리
     try:
-        log_kv(logger, logging.INFO, "main", "질의 실행", 질의길이=len(args.query), 모드="standard" if args.standard else "deep")
+        log_kv(logger, logging.INFO, "main", "질의 실행", 질의길이=len(args.query), 기준서=args.standard or "전체")
         log_kv(logger, logging.DEBUG, "main", "질의 실행 질의", 상세=args.query)
         result = run_workflow(args.query, standard_filter=args.standard)
 

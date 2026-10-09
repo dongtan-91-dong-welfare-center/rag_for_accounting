@@ -134,7 +134,7 @@ def embed_texts(
             return embedding_client.embed_texts(texts, timeout=effective_timeout)
         return _embed_texts_local(texts)
     except Exception as e:
-        log_kv(logger, logging.ERROR, "embedding", "임베딩 생성 실패", 함수="embed", 오류=type(e).__name__, 상세=e)
+        log_kv(logger, logging.ERROR, "embedding", "임베딩 생성 실패", 함수="embed_texts", 오류=type(e).__name__, 상세=e)
         raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)
 
 

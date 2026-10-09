@@ -57,6 +57,7 @@ LOG_FIELD_KEYS: dict[str, str] = {
     "경로": "path",
     "모델": "model",
     "모드": "mode",
+    "기준서": "standard_filter",
     "검색유형": "search_type",
     "버전": "version",
     "원인": "reason",
