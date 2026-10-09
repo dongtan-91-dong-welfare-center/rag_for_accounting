@@ -43,6 +43,11 @@ RERANK_MODEL: str = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")  # rera
 # rerank: 질의+청크 쌍 입력 토큰 상한. 미지정 시 bge-reranker-v2-m3는 8,192토큰까지 처리해 CPU 지연이 급증한다(#436).
 # 근거: #428 실측에서 512토큰 상한 적용 시 질의당 10쌍 채점 지연이 p50 15.8초였다(docs/benchmark/rerank_gate_20261009.md).
 RERANK_MAX_LENGTH: int = _env_int("RERANK_MAX_LENGTH", 512)
+# 입력 길이 상한(문자 수) — API·MCP·CLI 진입점이 공유한다. 프런트엔드는 frontend/src/api.ts에 같은 값을 보유하며 동기화 테스트가 일치를 검증한다(#445).
+# 근거: 질의는 재작성 LLM·임베딩·리랭커로 그대로 전달되므로 진입점에서 길이를 막아 토큰 비용을 예측 가능하게 유지한다.
+MAX_QUERY_LENGTH: int = _env_int("MAX_QUERY_LENGTH", 1000)        # query: 질의 본문 최대 문자 수
+MAX_FEEDBACK_LENGTH: int = _env_int("MAX_FEEDBACK_LENGTH", 500)   # resume: HIL 재작성 피드백 최대 문자 수. 프롬프트에 덧붙는 짧은 지시이므로 질의보다 작게 둔다.
+
 # Tracing & Observability — LangSmith / OpenTelemetry
 # LANGSMITH_TRACING=true 및 LANGSMITH_API_KEY 설정 시 PydanticAI / LangGraph 트레이싱이 활성화된다.
 LANGSMITH_TRACING_ENABLED: bool = _env_bool("LANGSMITH_TRACING", False) or _env_bool("LANGCHAIN_TRACING_V2", False)
