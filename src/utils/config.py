@@ -96,6 +96,11 @@ SEARCH_TIMEOUT_SECONDS: int = int(_env_float("SEARCH_TIMEOUT_SECONDS", 10.0))
 # DB 커넥션 풀 대기 타임아웃 (초)
 DB_POOL_TIMEOUT_SECONDS: float = _env_float("DB_POOL_TIMEOUT_SECONDS", 10.0)
 
+# DB 개별 연결 시도 타임아웃 (초). 풀 대기 타임아웃(DB_POOL_TIMEOUT_SECONDS)보다 짧아야 한다.
+# 근거: Windows에서 localhost가 IPv6(::1)로 먼저 해석되면 IPv4에만 바인딩된 컨테이너로의 연결이 멈춘다.
+# 이 값이 있으면 해당 주소를 포기하고 다음 주소(127.0.0.1)로 폴백하므로 풀이 PoolTimeout 없이 연결된다(#437).
+DB_CONNECT_TIMEOUT_SECONDS: int = int(_env_float("DB_CONNECT_TIMEOUT_SECONDS", 3.0))
+
 # OpenAI LLM API 요청 타임아웃 (초)
 LLM_TIMEOUT_SECONDS: float = _env_float("LLM_TIMEOUT_SECONDS", 45.0)
 

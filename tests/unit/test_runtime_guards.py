@@ -7,6 +7,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from src.clients.llm import client as openai_client
 from src.db import connection
 from src.utils.config import (
+    DB_CONNECT_TIMEOUT_SECONDS,
     DB_POOL_TIMEOUT_SECONDS,
     EMBEDDING_BATCH_TIMEOUT_SECONDS,
     EMBEDDING_QUERY_TIMEOUT_SECONDS,
@@ -142,3 +143,14 @@ def test_graph_state_error_logs_capacity_and_rotation(monkeypatch):
     assert len(state.error_logs) == 3
     # 가장 오래된 err 0, err 1은 잘리고 최신 err 2, err 3, err 4만 남아야 함
     assert [log["message"] for log in state.error_logs] == ["err 2", "err 3", "err 4"]
+
+
+def test_build_conninfo_includes_connect_timeout(monkeypatch):
+    """conninfo에 connect_timeout이 포함되어 IPv6 주소에서 멈춰도 다음 주소로 폴백하는지 검증한다(#437)."""
+    monkeypatch.setenv("POSTGRES_PASSWORD", "pw")
+    assert f"connect_timeout={DB_CONNECT_TIMEOUT_SECONDS}" in connection._build_conninfo()
+
+
+def test_db_connect_timeout_shorter_than_pool_timeout():
+    """개별 연결 타임아웃이 풀 대기 타임아웃보다 짧아야 풀이 만료되기 전에 다음 주소로 넘어간다(#437)."""
+    assert 0 < DB_CONNECT_TIMEOUT_SECONDS < DB_POOL_TIMEOUT_SECONDS
