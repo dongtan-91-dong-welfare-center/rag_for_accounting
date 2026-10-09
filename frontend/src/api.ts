@@ -68,6 +68,13 @@ export type WorkflowResponse = QueryDoneResponse | QueryInterruptedResponse;
 
 export type StandardFilter = "ALL" | "GAAP" | "KIFRS";
 
+/**
+ * 입력 길이 상한(문자 수) — src/utils/config.py의 MAX_QUERY_LENGTH·MAX_FEEDBACK_LENGTH와 같은 값이어야 한다.
+ * 불일치는 tests/unit/test_frontend_input_limits.py가 잡는다(#445).
+ */
+export const MAX_QUERY_LENGTH = 1000;
+export const MAX_FEEDBACK_LENGTH = 500;
+
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
 // 워크플로는 LLM 다중 호출로 수 분까지 걸릴 수 있다 — 서버 측 노드 타임아웃보다 넉넉하게.
@@ -92,6 +99,11 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     // 원문 detail은 내부 정보(thread_id·검증 필드 등)라 화면에 노출하지 않고 콘솔에만 남긴다.
     const detail = await res.text();
     console.error(`API ${path} 실패: HTTP ${res.status}`, detail);
+    if (res.status === 422) {
+      throw new Error(
+        `입력 형식이 올바르지 않습니다. 질의가 비어 있지 않은지, 질의는 ${MAX_QUERY_LENGTH}자, 재작성 피드백은 ${MAX_FEEDBACK_LENGTH}자 이내인지 확인해 주세요.`,
+      );
+    }
     throw new Error(`요청이 실패했습니다 (HTTP ${res.status} ${res.statusText})`);
   }
   return res.json() as Promise<T>;

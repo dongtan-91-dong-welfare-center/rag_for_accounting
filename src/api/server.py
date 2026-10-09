@@ -37,7 +37,14 @@ from src.db.answer_feedback import ensure_answer_feedback_table, save_feedback
 from src.db.connection import close_checkpointer_pool, close_pool, get_pool, init_pool
 from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.ingest.parse.page_map import resolve_pdf_path
-from src.utils.config import API_CORS_ORIGINS, EMBEDDING_SERVER_URL, PDF_DIR, READINESS_PROBE_TIMEOUT_SECONDS
+from src.utils.config import (
+    API_CORS_ORIGINS,
+    EMBEDDING_SERVER_URL,
+    MAX_FEEDBACK_LENGTH,
+    MAX_QUERY_LENGTH,
+    PDF_DIR,
+    READINESS_PROBE_TIMEOUT_SECONDS,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -134,9 +141,9 @@ if (FRONTEND_DIST_DIR / "assets").is_dir():
 
 
 class QueryRequest(BaseModel):
-    """질의 요청. 빈 질의(공백만 포함)는 워크플로 진입 전에 422로 거절한다."""
+    """질의 요청. 빈 질의(공백만 포함)와 MAX_QUERY_LENGTH 초과 질의는 워크플로 진입 전에 422로 거절한다."""
 
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=MAX_QUERY_LENGTH)
     standard_filter: Literal["GAAP", "KIFRS", "ALL"] = "ALL"
 
     @field_validator("query", mode="before")
@@ -150,7 +157,7 @@ class ResumeRequest(BaseModel):
 
     thread_id: str
     action: Literal["approve", "rewrite"]
-    feedback: str | None = None
+    feedback: str | None = Field(default=None, max_length=MAX_FEEDBACK_LENGTH)
 
 
 class FeedbackRequest(BaseModel):

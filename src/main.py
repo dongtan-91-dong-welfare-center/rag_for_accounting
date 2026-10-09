@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 
 from src.db.connection import close_checkpointer_pool, close_pool, init_pool
 from src.utils.config import CHUNK_MAX_TOKENS, CHUNKS_TABLE
+from src.utils.input_limits import check_feedback_length, check_query_length
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -262,7 +263,13 @@ def _prompt_human_decision(payload: dict) -> dict:
 
     choice = input("  진행할까요? [Enter=승인 / r=재작성 요청]: ").strip().lower()
     if choice == "r":
-        feedback = input("  재작성 피드백을 입력하세요: ").strip()
+        while True:
+            feedback = input("  재작성 피드백을 입력하세요: ").strip()
+            try:
+                check_feedback_length(feedback)
+                break
+            except ValueError as e:
+                print(f"  {e}")
         return {"action": "rewrite", "feedback": feedback}
     return {"action": "approve"}
 
@@ -317,6 +324,12 @@ def run_query(args) -> int:
     """질의 경로 실행. HIL interrupt가 발생하면 결정을 받아 재개한다."""
     from src.agent.interrupts import extract_interrupt_payload
     from src.agent.workflow import resume_workflow, run_workflow
+
+    try:
+        check_query_length(args.query.strip())
+    except ValueError as e:
+        print(f"오류: {e}", file=sys.stderr)
+        return 1
 
     init_pool()
     _preload_embedding()  # #168: 첫 질의 콜드 로드를 step_timeout(노드 30s) 밖으로 분리

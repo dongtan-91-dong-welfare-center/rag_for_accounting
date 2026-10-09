@@ -7,6 +7,7 @@ from fastmcp.exceptions import ToolError
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
 from src.api.schemas import to_api_response
+from src.utils.input_limits import check_feedback_length, check_query_length
 
 mcp = FastMCP("accounting-rag")
 
@@ -19,12 +20,21 @@ def query_standards(
     """회계 기준서 질의. status=done이면 답변+인용, interrupted면 resume_query로 재개."""
     if not query.strip():
         raise ToolError("query must not be blank")
+    try:
+        check_query_length(query.strip())
+    except ValueError as e:
+        raise ToolError(str(e)) from e
     return to_api_response(run_workflow(query, standard_filter=standard_filter)).model_dump()
 
 
 @mcp.tool
 def resume_query(thread_id: str, action: str, feedback: str | None = None) -> dict:
     """HIL 중단 재개 — interrupted 응답의 options에서 고른 action으로 호출."""
+    if feedback is not None:
+        try:
+            check_feedback_length(feedback)
+        except ValueError as e:
+            raise ToolError(str(e)) from e
     if not thread_exists(thread_id):
         raise ToolError(f"unknown thread_id: {thread_id}")
     decision: dict = {"action": action}
