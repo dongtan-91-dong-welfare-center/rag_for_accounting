@@ -21,11 +21,12 @@
 청킹 로직 자체의 수정은 이 하네스의 판정 결과가 나온 뒤 별도 이슈에서 다룬다.
 LLM 에이전트 기반 판정 위임은 후속 이슈에서 이 하네스를 기반으로 확장한다.
 """
+import logging
 import re
 from collections.abc import Sequence
 
 from src.models.schemas import ContextCheckResult, RetrievedChunk
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -71,10 +72,9 @@ def detect_broken_sentences(chunks: Sequence[RetrievedChunk]) -> list[ContextChe
                 detail=detail,
             )
         )
-    logger.debug(
-        "문장 경계 검사 완료: 총 %d건, 단절 의심 %d건",
-        len(results),
-        sum(1 for r in results if not r.passed),
+    log_kv(
+        logger, logging.DEBUG, "ingest", "문장 경계 검사 완료",
+        건수=len(results), 의심건수=sum(1 for r in results if not r.passed),
     )
     return results
 
@@ -202,10 +202,9 @@ def detect_clause_number_gaps(chunks: Sequence[RetrievedChunk]) -> list[ContextC
             )
         )
 
-    logger.debug(
-        "조항 번호 연속성 검사 완료: 총 %d건, 갭 의심 %d건",
-        len(results),
-        sum(1 for r in results if not r.passed),
+    log_kv(
+        logger, logging.DEBUG, "ingest", "조항 번호 연속성 검사 완료",
+        건수=len(results), 의심건수=sum(1 for r in results if not r.passed),
     )
     return results
 
@@ -227,11 +226,9 @@ def run_context_harness(chunks: Sequence[RetrievedChunk]) -> list[ContextCheckRe
     results.extend(detect_clause_number_gaps(chunks))
     total = len(results)
     broken = sum(1 for r in results if not r.passed)
-    logger.info(
-        "문맥 보존 하네스 완료: 총 검사 %d건, 단절 의심 %d건 (통과 %d건)",
-        total,
-        broken,
-        total - broken,
+    log_kv(
+        logger, logging.INFO, "ingest", "문맥 보존 하네스 완료",
+        건수=total, 의심건수=broken, 통과건수=total - broken,
     )
     return results
 
