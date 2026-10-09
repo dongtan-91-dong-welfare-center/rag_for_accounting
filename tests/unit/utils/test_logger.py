@@ -83,3 +83,61 @@ class TestStructuredLogging:
         assert "execution_times" in state.metadata
         assert "sample_node" in state.metadata["execution_times"]
         assert state.metadata["execution_times"]["sample_node"] >= 0.0
+
+
+@pytest.mark.unit
+class TestLogKv:
+    """log_kv() 표준 로그 헬퍼 단위 테스트 (#408)"""
+
+    def _capture(self, level=logging.INFO):
+        from src.utils.logger import _JSONLinesFormatter
+
+        records: list[logging.LogRecord] = []
+
+        class _H(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        logger = logging.getLogger("test_log_kv_capture")
+        logger.handlers = [_H()]
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        return logger, records, _JSONLinesFormatter()
+
+    def test_text_message_format(self):
+        """본문이 `[태그] 설명 | 키=값` 형식이고 소요는 소수점 4자리와 s 단위인지 검증"""
+        from src.utils.logger import log_kv
+
+        logger, records, _ = self._capture()
+        log_kv(logger, logging.INFO, "search", "검색 완료", 건수=3, 소요=0.12345)
+
+        assert records[0].getMessage() == "[search] 검색 완료 | 건수=3 | 소요=0.1235s"
+
+    def test_json_mode_has_english_fields(self):
+        """JSON 모드에서 extra 영어 키가 최상위 필드로 직렬화되는지 검증"""
+        import json
+        from src.utils.logger import log_kv
+
+        logger, records, fmt = self._capture()
+        log_kv(logger, logging.WARNING, "db", "실패", 오류="ValueError", 질의길이=12)
+        entry = json.loads(fmt.format(records[0]))
+
+        assert entry["tag"] == "db"
+        assert entry["error"] == "ValueError"
+        assert entry["query_len"] == 12
+
+    def test_unregistered_tag_rejected(self):
+        """허용 목록에 없는 태그는 거부되는지 검증"""
+        from src.utils.logger import log_kv
+
+        logger, _, _ = self._capture()
+        with pytest.raises(ValueError):
+            log_kv(logger, logging.INFO, "Unknown", "메시지")
+
+    def test_unregistered_key_rejected(self):
+        """대응표에 없는 키는 거부되는지 검증"""
+        from src.utils.logger import log_kv
+
+        logger, _, _ = self._capture()
+        with pytest.raises(ValueError):
+            log_kv(logger, logging.INFO, "search", "메시지", 임의키=1)
