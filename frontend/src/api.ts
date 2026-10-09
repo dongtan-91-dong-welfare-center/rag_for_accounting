@@ -101,7 +101,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     console.error(`API ${path} 실패: HTTP ${res.status}`, detail);
     if (res.status === 422) {
       throw new Error(
-        `입력 형식이 올바르지 않습니다. 질의는 ${MAX_QUERY_LENGTH}자, 재작성 피드백은 ${MAX_FEEDBACK_LENGTH}자 이내로 입력해 주세요.`,
+        `입력 형식이 올바르지 않습니다. 질의가 비어 있지 않은지, 질의는 ${MAX_QUERY_LENGTH}자, 재작성 피드백은 ${MAX_FEEDBACK_LENGTH}자 이내인지 확인해 주세요.`,
       );
     }
     throw new Error(`요청이 실패했습니다 (HTTP ${res.status} ${res.statusText})`);
