@@ -2,7 +2,7 @@
 import math
 
 from src.models.schemas import RetrievedChunk, RerankingResult
-from src.utils.config import RERANK_MODEL
+from src.utils.config import RERANK_MAX_LENGTH, RERANK_MODEL
 from src.utils.exception import RerankFailureError
 from src.utils.logger import get_logger
 
@@ -31,7 +31,7 @@ def _ensure_model_loaded() -> None:
     _load_attempted = True
     try:
         from sentence_transformers import CrossEncoder
-        _cross_encoder = CrossEncoder(RERANK_MODEL)
+        _cross_encoder = CrossEncoder(RERANK_MODEL, max_length=RERANK_MAX_LENGTH)
         logger.info(f"Cross-Encoder 모델 로드 완료: {RERANK_MODEL}")
     except Exception as e:
         _load_error = e

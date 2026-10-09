@@ -355,6 +355,22 @@ class TestLazyModelLoadFailure:
 
             fake_st.CrossEncoder.assert_called_once()  # 모델 생성 시도는 1회뿐
 
+    def test_cross_encoder_receives_max_length(self):
+        """CrossEncoder 생성 시 config의 RERANK_MAX_LENGTH가 max_length로 전달되는지 검증한다(#436).
+
+        근거: 상한이 없으면 bge-reranker-v2-m3가 8,192토큰까지 처리해 CPU 지연이 급증한다.
+        """
+        fake_st = types.ModuleType("sentence_transformers")
+        fake_st.CrossEncoder = MagicMock()
+
+        with patch.object(reranker_module, "_cross_encoder", None),              patch.object(reranker_module, "_load_error", None),              patch.object(reranker_module, "_load_attempted", False),              patch.dict(sys.modules, {"sentence_transformers": fake_st}):
+            reranker_module._ensure_model_loaded()
+
+        fake_st.CrossEncoder.assert_called_once_with(
+            reranker_module.RERANK_MODEL, max_length=reranker_module.RERANK_MAX_LENGTH
+        )
+        assert reranker_module.RERANK_MAX_LENGTH > 0
+
     def test_rerank_chunks_propagates_rerank_failure_on_load_failure(self, sample_chunks):
         """로드 실패 상태에서 rerank_chunks(청크 2개 이상)가 RerankFailureError를 전파하는지 검증.
 
