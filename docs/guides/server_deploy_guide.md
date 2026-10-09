@@ -253,6 +253,7 @@ HTTPS(443)를 사용하는 경우 Certbot(`sudo certbot --nginx -d example.com`)
 
 `근거:` 앞단 프록시 없이 nginx가 클라이언트 요청을 직접 수신하므로 `$binary_remote_addr`가 실제 클라이언트 IP입니다. 앞단에 별도 프록시나 로드밸런서를 두는 경우에는 `real_ip_header`와 `set_real_ip_from`을 먼저 설정해야 합니다.
 `근거:` `/resume`(HIL 재개)도 LLM을 호출하므로 `/query`와 같은 zone을 공유하여 합산 제한합니다. 한도를 초과한 요청은 `limit_req_status 429`에 따라 HTTP 429로 거절되며, 프론트엔드는 이 응답에 재시도 안내 문구를 표시합니다.
+`근거:` nginx는 `limit_req`를 `auth_basic`보다 먼저 평가하므로 인증 정보가 없는 요청도 한도에 계산됩니다. 따라서 인증 없이 `/query`와 `/resume`을 반복 호출하는 스캐너는 401이 아니라 429를 받으며, 한도 검증 시 `-u` 옵션 없이도 429 응답을 확인할 수 있습니다.
 
 설정 검증 및 서비스를 시작합니다:
 
