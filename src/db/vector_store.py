@@ -13,6 +13,7 @@
 #     (전체 롤백 대신 부분 커밋을 택한 이유: 수천 청크 인덱싱 중 일시 장애로
 #      전부 버리는 것보다 partial 상태를 드러내고 재시도하는 쪽이 운영상 단순하다)
 
+import logging
 import ctypes
 import gc
 import json
@@ -31,7 +32,7 @@ from src.utils.exception import (
     EmbeddingTokenLimitError,
     SearchTimeoutError,
 )
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -85,7 +86,7 @@ def _ensure_collection(collection: str) -> None:
                     ).format(index=morph_index, table=table)
                 )
     except Exception as e:
-        logger.error(f"컬렉션 생성 실패: collection={collection}, {e}")
+        log_kv(logger, logging.ERROR, "db", "컬렉션 생성 실패", 컬렉션=collection, 오류=type(e).__name__, 상세=e)
         raise DatabaseQueryError(f"컬렉션 생성 실패: {e}", node="index")
 
 
@@ -143,7 +144,7 @@ def _upsert_batch(collection: str, batch: list[RetrievedChunk], vectors: list[li
             with conn.cursor() as cur:
                 cur.executemany(query, params)
     except Exception as e:
-        logger.error(f"배치 upsert 실패: collection={collection}, batch_size={len(batch)}, {e}")
+        log_kv(logger, logging.ERROR, "db", "배치 upsert 실패", 컬렉션=collection, 배치크기=len(batch), 오류=type(e).__name__, 상세=e)
         raise DatabaseQueryError(f"배치 upsert 실패: {e}", node="index")
 
 
@@ -160,7 +161,7 @@ def _filter_token_limit_chunks(
                 f"청크 토큰 한도 초과로 스킵: chunk_id={chunk.chunk_id}, "
                 f"tokens={token_count} > {EMBEDDING_MAX_TOKENS}"
             )
-            logger.warning(f"[{error.error_type}] {error.message}")
+            log_kv(logger, logging.WARNING, "db", "인덱싱 경고", 오류=error.error_type, 상세=error.message)
             skipped.append(SkippedChunk(
                 chunk_id=chunk.chunk_id, error_type=error.error_type, reason=error.message
             ))
@@ -184,7 +185,7 @@ def _index_single_batch(
         _upsert_batch(collection, valid_chunks, vectors)
         return len(valid_chunks), []
     except AccountingRAGError as e:
-        logger.error(f"[{e.error_type}] 배치 인덱싱 실패 (chunks[{start}:{start + batch_len}]): {e.message}")
+        log_kv(logger, logging.ERROR, "db", "배치 인덱싱 실패", 대상=f"chunks[{start}:{start + batch_len}]", 오류=e.error_type, 상세=e.message)
         skipped = [
             SkippedChunk(chunk_id=c.chunk_id, error_type=e.error_type, reason=e.message)
             for c in valid_chunks
@@ -214,7 +215,7 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
         _ensure_collection(collection)
     except AccountingRAGError as e:
         # 테이블조차 보장할 수 없으면 어떤 배치도 성공할 수 없으므로 즉시 failed 반환
-        logger.error(f"인덱싱 중단 — 컬렉션 보장 실패: {e.message}")
+        log_kv(logger, logging.ERROR, "db", "인덱싱 중단: 컬렉션 보장 실패", 오류=e.error_type, 상세=e.message)
         # 입력받은 청크 전체를 누락으로 기록해 복구 신호를 남긴다
         skipped = [
             SkippedChunk(chunk_id=c.chunk_id, error_type=e.error_type, reason=e.message)
@@ -249,10 +250,10 @@ def index_documents(chunks: list[RetrievedChunk], collection: str) -> IndexingRe
         status = "failed"
 
     if skipped:
-        logger.info(f"누락 청크 {len(skipped)}건: ids={[s.chunk_id for s in skipped]}")
-    logger.info(
-        f"인덱싱 완료: document_id={document_id}, collection={collection}, "
-        f"{success_count}/{len(chunks)}건 저장, status={status}"
+        log_kv(logger, logging.INFO, "db", "누락 청크", 건수=len(skipped), 대상=[s.chunk_id for s in skipped])
+    log_kv(
+        logger, logging.INFO, "db", "인덱싱 완료",
+        문서=document_id, 컬렉션=collection, 저장건수=success_count, 건수=len(chunks), 상태=status,
     )
     return IndexingResult(
         document_id=document_id, chunk_count=success_count, status=status, skipped_chunks=skipped
@@ -286,10 +287,10 @@ def similarity_search(query_vector: list[float], top_k: int, collection: str) ->
                 cur.execute(query, [query_vector, query_vector, top_k])
                 rows = cur.fetchall()
     except errors.QueryCanceled as e:
-        logger.error(f"유사도 검색 타임아웃 초과: {e}")
+        log_kv(logger, logging.ERROR, "db", "유사도 검색 타임아웃 초과", 오류=type(e).__name__, 상세=e)
         raise SearchTimeoutError(f"DB 검색 응답 시간 초과 ({SEARCH_TIMEOUT_SECONDS}s)")
     except Exception as e:
-        logger.error(f"유사도 검색 중 DB 오류: {e}")
+        log_kv(logger, logging.ERROR, "db", "유사도 검색 중 DB 오류", 오류=type(e).__name__, 상세=e)
         raise DatabaseQueryError(f"데이터베이스 쿼리 실행 실패: {e}")
 
     results = []
@@ -323,8 +324,8 @@ def delete_collection(collection: str) -> bool:
         with get_pool().connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql.SQL("DELETE FROM {table}").format(table=sql.Identifier(collection)))
-        logger.info(f"컬렉션 삭제 완료: collection={collection}")
+        log_kv(logger, logging.INFO, "db", "컬렉션 삭제 완료", 컬렉션=collection)
         return True
     except Exception as e:
-        logger.error(f"컬렉션 삭제 실패: collection={collection}, {e}")
+        log_kv(logger, logging.ERROR, "db", "컬렉션 삭제 실패", 컬렉션=collection, 오류=type(e).__name__, 상세=e)
         return False

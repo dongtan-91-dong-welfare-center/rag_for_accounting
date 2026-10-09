@@ -4,6 +4,7 @@
 # KURE-v1은 BAAI/bge-m3를 한국어 검색에 파인튜닝한 모델로, 1024차원 벡터를 출력한다.
 # normalize_embeddings=True로 단위 벡터를 생성해 pgvector의 코사인 거리(<=>)와 정합을 맞춘다.
 
+import logging
 import os
 import threading
 
@@ -15,7 +16,7 @@ from src.utils.config import (
     EMBEDDING_NUM_THREADS,
 )
 from src.utils.exception import LLMAPIConnectionError, NodeType
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -74,12 +75,12 @@ def _get_model():
                     # 일부 연산이 MPS 미구현일 때 CPU로 폴백해 런타임 크래시를 막는다
                     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-                logger.info(
-                    f"임베딩 모델 로드 시작: {EMBEDDING_MODEL} "
-                    f"(device={device}, torch_threads={threads})"
+                log_kv(
+                    logger, logging.INFO, "embedding", "임베딩 모델 로드 시작",
+                    모델=EMBEDDING_MODEL, 장치=device, 스레드수=threads,
                 )
                 _model = SentenceTransformer(EMBEDDING_MODEL, device=device)
-                logger.info("임베딩 모델 로드 완료")
+                log_kv(logger, logging.INFO, "embedding", "임베딩 모델 로드 완료")
     return _model
 
 
@@ -133,7 +134,7 @@ def embed_texts(
             return embedding_client.embed_texts(texts, timeout=effective_timeout)
         return _embed_texts_local(texts)
     except Exception as e:
-        logger.error(f"임베딩 생성 실패: {e}")
+        log_kv(logger, logging.ERROR, "embedding", "임베딩 생성 실패", 함수="embed", 오류=type(e).__name__, 상세=e)
         raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)
 
 
@@ -167,7 +168,7 @@ def count_tokens(
             return embedding_client.count_tokens(text, timeout=effective_timeout)
         return _count_tokens_local(text)
     except Exception as e:
-        logger.error(f"토큰 수 계산 실패: {e}")
+        log_kv(logger, logging.ERROR, "embedding", "토큰 수 계산 실패", 함수="count_tokens", 오류=type(e).__name__, 상세=e)
         raise LLMAPIConnectionError(f"임베딩 모델 호출 실패: {e}", node=node)
 
 

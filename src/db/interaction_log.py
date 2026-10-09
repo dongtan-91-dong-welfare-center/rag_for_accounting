@@ -4,6 +4,7 @@
 #   - evaluation은 EvaluationResult 필드를 그대로 컬럼화한다 — CRAG 판정 축을 SQL로 바로 집계·필터링할 수 있게 하기 위함이다.
 #   - citations는 건수가 가변인 리스트라 컬럼화하지 않고 JSONB 배열로 저장한다.
 
+import logging
 from typing import Sequence
 
 from psycopg import sql
@@ -12,7 +13,7 @@ from pydantic import BaseModel
 
 from src.db.connection import get_pool
 from src.models.schemas import EvaluationResult
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -58,7 +59,7 @@ def ensure_interaction_log_table() -> None:
                     )
                 )
     except Exception as e:
-        logger.warning(f"interaction_log 테이블 준비 실패 — 운영 로깅 없이 계속 진행: {e}")
+        log_kv(logger, logging.WARNING, "db", "interaction_log 테이블 준비 실패", 대체동작="운영 로깅 없이 계속 진행", 오류=type(e).__name__, 상세=e)
 
 
 def log_interaction(
@@ -110,4 +111,4 @@ def log_interaction(
                     ),
                 )
     except Exception as e:
-        logger.warning(f"interaction_log 적재 실패(무시하고 계속): thread_id={thread_id}, {e}")
+        log_kv(logger, logging.WARNING, "db", "interaction_log 적재 실패", 스레드=thread_id, 대체동작="무시하고 계속", 오류=type(e).__name__, 상세=e)

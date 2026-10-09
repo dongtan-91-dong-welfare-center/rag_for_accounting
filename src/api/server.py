@@ -16,6 +16,7 @@ run_workflow는 동기·블로킹(매 호출 그래프 재컴파일 + LLM 수 �
 """
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
@@ -38,7 +39,7 @@ from src.db.connection import close_checkpointer_pool, close_pool, get_pool, ini
 from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.ingest.parse.page_map import resolve_pdf_path
 from src.utils.config import API_CORS_ORIGINS, EMBEDDING_SERVER_URL, PDF_DIR, READINESS_PROBE_TIMEOUT_SECONDS
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -58,12 +59,12 @@ def _warmup_embedding() -> None:
     try:
         warmup_model()
     except Exception as e:  # noqa: BLE001 — preload 실패는 비치명적(lazy 폴백 존재)
-        logger.warning(f"임베딩 preload 실패 — 첫 질의에서 lazy 로드로 폴백: {e}")
+        log_kv(logger, logging.WARNING, "api", "임베딩 preload 실패", 대체동작="첫 질의에서 lazy 로드", 오류=type(e).__name__, 상세=e)
 
     try:
         warmup_reranker()
     except Exception as e:  # noqa: BLE001 — preload 실패는 비치명적(lazy 폴백 존재)
-        logger.warning(f"리랭커 preload 실패 — 첫 질의에서 lazy 로드로 폴백: {e}")
+        log_kv(logger, logging.WARNING, "api", "리랭커 preload 실패", 대체동작="첫 질의에서 lazy 로드", 오류=type(e).__name__, 상세=e)
 
 
 @asynccontextmanager
@@ -235,7 +236,7 @@ def resume(req: ResumeRequest) -> WorkflowResponse:
     try:
         exists = thread_exists(req.thread_id)
     except psycopg.Error as e:
-        logger.error(f"HIL 세션 확인 중 DB 오류 발생: thread_id={req.thread_id}, {e}")
+        log_kv(logger, logging.ERROR, "api", "HIL 세션 확인 중 DB 오류 발생", 스레드=req.thread_id, 오류=type(e).__name__, 상세=e)
         raise HTTPException(
             status_code=503,
             detail="데이터베이스 연결 장애로 세션을 조회할 수 없습니다.",
@@ -251,7 +252,7 @@ def resume(req: ResumeRequest) -> WorkflowResponse:
     try:
         result = resume_workflow(req.thread_id, decision)
     except psycopg.Error as e:
-        logger.error(f"HIL 세션 재개 중 DB 오류 발생: thread_id={req.thread_id}, {e}")
+        log_kv(logger, logging.ERROR, "api", "HIL 세션 재개 중 DB 오류 발생", 스레드=req.thread_id, 오류=type(e).__name__, 상세=e)
         raise HTTPException(
             status_code=503,
             detail="데이터베이스 연결 장애로 세션을 재개할 수 없습니다.",
@@ -275,7 +276,7 @@ def feedback(req: FeedbackRequest) -> FeedbackResponse:
     try:
         save_feedback(thread_id=req.thread_id, rating=req.rating, reason=req.reason)
     except Exception as e:  # noqa: BLE001 — DB 오류 종류와 무관하게 503으로 변환
-        logger.error(f"answer_feedback 저장 실패: thread_id={req.thread_id}, {e}")
+        log_kv(logger, logging.ERROR, "api", "answer_feedback 저장 실패", 스레드=req.thread_id, 오류=type(e).__name__, 상세=e)
         raise HTTPException(status_code=503, detail="feedback not saved") from e
     return FeedbackResponse()
 
