@@ -20,7 +20,15 @@ import type {
   StandardFilter,
   WorkflowResponse,
 } from "./api";
-import { checkPdfAvailable, documentPdfUrl, postFeedback, postQuery, postResume } from "./api";
+import {
+  MAX_FEEDBACK_LENGTH,
+  MAX_QUERY_LENGTH,
+  checkPdfAvailable,
+  documentPdfUrl,
+  postFeedback,
+  postQuery,
+  postResume,
+} from "./api";
 import type { FeedbackRating } from "./api";
 import { answerSegments, citedMarker, hasUncited, humanNodeTitle, paraChips } from "./clauseDisplay";
 
@@ -76,6 +84,7 @@ export default function App() {
   const endRef = useRef<HTMLDivElement>(null);
 
   const busy = stage.kind === "loading" || stage.kind === "interrupted";
+  const queryTooLong = query.trim().length > MAX_QUERY_LENGTH;
   const sessionTitle = exchanges[0]?.query ?? pending?.query ?? "새 리서치";
 
   // 새 항목이 트랜스크립트에 붙으면 하단으로 스크롤한다.
@@ -98,7 +107,7 @@ export default function App() {
   const submitQuery = async (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    if (!q || busy) return;
+    if (!q || busy || q.length > MAX_QUERY_LENGTH) return;
     const current: Pending = { query: q, standard, time: timeNow(), hilNote: null };
     setPending(current);
     setQuery("");
@@ -267,10 +276,15 @@ export default function App() {
               aria-label="질의 입력"
               disabled={busy}
             />
-            <button type="submit" className="btn-primary" disabled={busy || !query.trim()}>
+            <button type="submit" className="btn-primary" disabled={busy || !query.trim() || queryTooLong}>
               질의
             </button>
           </form>
+          {queryTooLong && (
+            <p className="notice warning" role="alert">
+              질의는 {MAX_QUERY_LENGTH}자 이내로 입력해 주세요. (현재 {query.trim().length}자)
+            </p>
+          )}
           <p className="composer-note">
             답변은 검색된 기준서 조항을 근거로 생성되며, 최종 판단 전 원문 확인을 권장합니다.
           </p>
@@ -383,9 +397,18 @@ function HumanReview({
               placeholder="재작성 피드백…"
               aria-label="재작성 피드백"
             />
-            <button className="btn-secondary" onClick={() => onDecide("rewrite")}>
+            <button
+              className="btn-secondary"
+              onClick={() => onDecide("rewrite")}
+              disabled={feedback.length > MAX_FEEDBACK_LENGTH}
+            >
               {rewriteOption.label}
             </button>
+            {feedback.length > MAX_FEEDBACK_LENGTH && (
+              <p className="notice warning" role="alert">
+                재작성 피드백은 {MAX_FEEDBACK_LENGTH}자 이내로 입력해 주세요. (현재 {feedback.length}자)
+              </p>
+            )}
           </>
         )}
         {!approveOption && !rewriteOption && (
