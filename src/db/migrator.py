@@ -6,12 +6,13 @@ PostgreSQL DB에 연결하여 schema_migrations 이력 테이블을 기준으로
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 import re
 from typing import TYPE_CHECKING
 
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -44,7 +45,7 @@ def discover_migrations(directory: Path | None = None) -> list[Migration]:
             version = match.group(1)
             migrations.append(Migration(version=version, name=file.name, path=file))
         else:
-            logger.warning(f"마이그레이션 명명 규칙(숫자_이름.sql)에 맞지 않아 무시됩니다: {file.name}")
+            log_kv(logger, logging.WARNING, "db", "마이그레이션 명명 규칙(숫자_이름.sql)에 맞지 않아 무시됩니다", 대상=file.name)
 
     return sorted(migrations, key=lambda m: m.version)
 
@@ -83,12 +84,12 @@ class MigrationRunner:
 
         new_migrations = [m for m in all_migrations if m.version not in applied_versions]
         if not new_migrations:
-            logger.info("적용할 신규 마이그레이션이 없습니다.")
+            log_kv(logger, logging.INFO, "db", "적용할 신규 마이그레이션이 없습니다.")
             return []
 
         applied: list[Migration] = []
         for migration in new_migrations:
-            logger.info(f"마이그레이션 적용 시작: {migration.name} (version {migration.version})")
+            log_kv(logger, logging.INFO, "db", "마이그레이션 적용 시작", 대상=migration.name, 버전=migration.version)
             sql_content = migration.path.read_text(encoding="utf-8")
             with conn.cursor() as cur:
                 # SQL 파일 실행
@@ -99,7 +100,7 @@ class MigrationRunner:
                     (migration.version, migration.name),
                 )
             conn.commit()
-            logger.info(f"마이그레이션 적용 완료: {migration.name}")
+            log_kv(logger, logging.INFO, "db", "마이그레이션 적용 완료", 대상=migration.name)
             applied.append(migration)
 
         return applied

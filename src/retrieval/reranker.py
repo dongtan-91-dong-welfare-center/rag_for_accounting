@@ -1,10 +1,11 @@
 # rerank: Cross-Encoder 기반 재정렬 모듈
+import logging
 import math
 
 from src.models.schemas import RetrievedChunk, RerankingResult
 from src.utils.config import RERANK_MAX_LENGTH, RERANK_MODEL
 from src.utils.exception import RerankFailureError
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -32,10 +33,10 @@ def _ensure_model_loaded() -> None:
     try:
         from sentence_transformers import CrossEncoder
         _cross_encoder = CrossEncoder(RERANK_MODEL, max_length=RERANK_MAX_LENGTH)
-        logger.info(f"Cross-Encoder 모델 로드 완료: {RERANK_MODEL}")
+        log_kv(logger, logging.INFO, "rerank", "Cross-Encoder 모델 로드 완료", 모델=RERANK_MODEL)
     except Exception as e:
         _load_error = e
-        logger.warning(f"Cross-Encoder 모델 로드 실패 — compute_relevance_scores 호출 시 RerankFailureError 발생: {e}")
+        log_kv(logger, logging.WARNING, "rerank", "Cross-Encoder 모델 로드 실패", 대체동작="compute_relevance_scores 호출 시 RerankFailureError 발생", 오류=type(e).__name__, 상세=e)
 
 
 def warmup_reranker() -> None:
@@ -101,7 +102,7 @@ def rerank_chunks(original_query: str, chunks: list[RetrievedChunk]) -> list[Rer
         # 시스템 예외는 AccountingRAGError로 래핑하지 않고 원본 타입 그대로 전파한다.
         # 이 함수는 error 레벨로만 기록하고 그대로 재전파한다.
         # 상위 rerank() 노드가 이 예외를 다시 잡아 critical로 기록하고 파이프라인을 중단한다.
-        logger.error(f"[{type(e).__name__}] 리랭킹 모델 호출 중 시스템 에러: {e}", exc_info=True)
+        log_kv(logger, logging.ERROR, "rerank", "리랭킹 모델 호출 중 시스템 에러", 함수="compute_relevance_scores", 오류=type(e).__name__, 상세=e, exc_info=True)
         raise
 
 

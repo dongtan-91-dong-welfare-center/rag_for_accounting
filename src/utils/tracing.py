@@ -9,6 +9,7 @@ LLM 호출(프롬프트, 완성, 토큰 수, 소요시간)을 단일 run tree로
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -16,7 +17,7 @@ from src.utils.config import (
     LANGSMITH_ENDPOINT,
     LANGSMITH_TRACING_ENABLED,
 )
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -72,7 +73,7 @@ def init_tracing(
             )
             span_processors.append(BatchSpanProcessor(otlp_exporter))
         except Exception as e:
-            logger.warning("LangSmith OTLP SpanExporter 구성 실패 (로깅만 유지): %s", e)
+            log_kv(logger, logging.WARNING, "tracing", "LangSmith OTLP SpanExporter 구성 실패", 대체동작="로깅만 유지", 오류=type(e).__name__, 상세=e)
 
     logfire.configure(
         send_to_logfire=send_to_logfire,
@@ -82,7 +83,7 @@ def init_tracing(
     logfire.instrument_pydantic_ai()
 
     _tracing_initialized = True
-    logger.info("PydanticAI 트레이싱 계측 초기화 완료 (spans=%d)", len(span_processors))
+    log_kv(logger, logging.INFO, "tracing", "PydanticAI 트레이싱 계측 초기화 완료", 건수=len(span_processors))
     return True
 
 

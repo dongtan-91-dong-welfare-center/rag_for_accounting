@@ -4,6 +4,7 @@ pydantic-ai Agent 기반으로 회계기준서 검색 도구를 자율 호출하
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -23,7 +24,7 @@ from src.models.schemas import (
 from src.retrieval.searcher import search_chunks
 from src.utils.config import OPENAI_MODEL
 from src.utils.exception import NoContextFoundError
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -62,7 +63,7 @@ def _execute_search(query: str, deps: DeepAgentDeps, include_sparse: bool = True
     except NoContextFoundError:
         return []
     except Exception as e:
-        logger.error(f"[{type(e).__name__}] search_accounting_standards 도구 시스템 에러: {e}", exc_info=True)
+        log_kv(logger, logging.ERROR, "deep_agent", "search_accounting_standards 도구 시스템 에러", 함수="search_accounting_standards", 오류=type(e).__name__, 상세=e, exc_info=True)
         return []
 
 
@@ -98,7 +99,8 @@ def create_deep_agent(
         ctx.deps.call_count += 1
         ctx.deps.search_queries.append(query)
         mode_label = "ensemble" if include_sparse else "single"
-        logger.info(f"딥에이전트 도구 호출 #{ctx.deps.call_count} ({mode_label}): query='{query}'")
+        log_kv(logger, logging.INFO, "deep_agent", "딥에이전트 도구 호출", 건수=ctx.deps.call_count, 모드=mode_label, 질의길이=len(query))
+        log_kv(logger, logging.DEBUG, "deep_agent", "딥에이전트 도구 호출 질의", 상세=query)
 
         chunks = _execute_search(query, ctx.deps, include_sparse=include_sparse)
         return _format_and_append_chunks(ctx.deps, chunks)
@@ -224,7 +226,7 @@ def run_deep_agent(
         return final_response, deps.collected_chunks, meta
 
     except UsageLimitExceeded as e:
-        logger.warning(f"[DeepAgent] 턴 상한선({max_turns}턴) 초과 폴백: {e}")
+        log_kv(logger, logging.WARNING, "deep_agent", "턴 상한선 초과 폴백", 상한=max_turns, 대체동작="폴백 응답", 상세=e)
         meta["turns_executed"] = max_turns
         meta["search_calls"] = deps.call_count
         meta["search_queries"] = list(deps.search_queries)
@@ -253,7 +255,7 @@ def run_deep_agent(
         return fallback_resp, deps.collected_chunks, meta
 
     except Exception as e:
-        logger.error(f"[DeepAgent] 실행 중 예외 발생: {e}", exc_info=True)
+        log_kv(logger, logging.ERROR, "deep_agent", "실행 중 예외 발생", 오류=type(e).__name__, 상세=e, exc_info=True)
         meta["search_calls"] = deps.call_count
         meta["search_queries"] = list(deps.search_queries)
         meta["fallback_triggered"] = True

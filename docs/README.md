@@ -28,6 +28,7 @@
 | 하이브리드 검색 가이드 | Dense 및 Sparse 검색 원리, RRF 병합 가중치 설정, 장애 시 폴백 처리 | [guides/retrieval_guide.md](guides/retrieval_guide.md) |
 | 문서 온톨로지 가이드 | 기준서 계층 구조화, 온톨로지 노드 청킹, 결정적 `chunk_id` 및 메타데이터 전파 | [guides/ontology_guide.md](guides/ontology_guide.md) |
 | 문서 파싱 가이드 | PDF 파싱 정본 규칙, 물리 페이지 마커 시맨틱, 취소선 폐지 조문 제외 기준 | [guides/document_parsing_guide.md](guides/document_parsing_guide.md) |
+| 로깅 가이드 | `log_kv` 헬퍼, 허용 태그와 키 대응표, 로그 레벨 기준, 질의 원문 노출 제한 | [guides/logging_guide.md](guides/logging_guide.md) |
 | Codex 플러그인 가이드 | Codex 환경 플러그인 등록, 매니페스트 확인, 벤치마크 기반 스킬 트리거 검증 | [guides/codex_plugin_guide.md](guides/codex_plugin_guide.md) |
 
 ---

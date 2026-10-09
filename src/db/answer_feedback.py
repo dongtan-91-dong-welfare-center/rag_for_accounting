@@ -4,12 +4,13 @@
 #   - 같은 thread_id에 대한 재평가는 행을 덮어쓰지 않고 추가한다. 근거: 평가 변경 이력을 보존하고 집계 시 최신 행을 사용한다.
 #   - INSERT 실패는 예외를 그대로 올린다. 근거: 평가는 사용자가 명시적으로 보낸 요청이므로 저장 실패를 호출자(API)가 알려야 한다.
 
+import logging
 from typing import Literal
 
 from psycopg import sql
 
 from src.db.connection import get_pool
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -45,7 +46,7 @@ def ensure_answer_feedback_table() -> None:
                     )
                 )
     except Exception as e:
-        logger.warning(f"answer_feedback 테이블 준비 실패 — 평가 저장 없이 계속 진행: {e}")
+        log_kv(logger, logging.WARNING, "db", "answer_feedback 테이블 준비 실패", 대체동작="평가 저장 없이 계속 진행", 오류=type(e).__name__, 상세=e)
 
 
 def save_feedback(*, thread_id: str, rating: Rating, reason: str | None = None) -> None:

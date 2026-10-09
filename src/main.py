@@ -22,6 +22,7 @@
   uv run python -m src.main query "금융자산의 최초 인식 시점은?"
   uv run python -m src.main query "리스 회계처리" --standard GAAP
 """
+import logging
 import argparse
 import json
 import subprocess
@@ -33,7 +34,7 @@ from dotenv import load_dotenv
 
 from src.db.connection import close_checkpointer_pool, close_pool, init_pool
 from src.utils.config import CHUNK_MAX_TOKENS, CHUNKS_TABLE
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -64,13 +65,13 @@ def _build_graph_from_source(args):
         from src.ingest.parse.parser import DoclingParser
 
         pdf_path = Path(args.pdf)
-        logger.info(f"PDF 파싱 시작: {pdf_path}")
+        log_kv(logger, logging.INFO, "main", "PDF 파싱 시작", 경로=pdf_path)
         parsed = DoclingParser().parse(pdf_path)
         md_path = pdf_path.with_suffix(".md")
         md_path.write_text(parsed.text, encoding="utf-8")
-        logger.info(f"파싱 결과 마크다운 저장: {md_path}")
+        log_kv(logger, logging.INFO, "main", "파싱 결과 마크다운 저장", 경로=md_path)
 
-    logger.info(f"온톨로지 빌드 시작(ontology): {md_path}")
+    log_kv(logger, logging.INFO, "main", "온톨로지 빌드 시작", 경로=md_path)
     graph = build_graph(md_path, args.standard_id, args.standard_type)
     return graph, str(md_path)
 
@@ -89,7 +90,7 @@ def _index_graph(
         graph, source_path=source_path, clause_level=clause_level, max_tokens=max_tokens
     )
     if not chunks:
-        logger.warning(f"청크가 비어 있어 적재를 건너뜁니다: source={source_path}")
+        log_kv(logger, logging.WARNING, "main", "청크가 비어 있어 적재를 건너뜁니다", 경로=source_path, 대체동작="적재 생략")
         return {"document_id": "", "chunk_count": 0, "status": "failed"}
 
     result = index_documents(chunks, collection=collection)
@@ -113,9 +114,9 @@ def _collect_targets(args) -> list[tuple[object, str | None]] | None:
         ontology_dir = Path(args.ontology_dir)
         json_files = sorted(ontology_dir.glob("*.json"))
         if not json_files:
-            logger.error(f"온톨로지 JSON을 찾지 못했습니다: {ontology_dir}")
+            log_kv(logger, logging.ERROR, "main", "온톨로지 JSON을 찾지 못했습니다", 경로=ontology_dir)
             return None
-        logger.info(f"온톨로지 JSON {len(json_files)}개 적재 시작: {ontology_dir}")
+        log_kv(logger, logging.INFO, "main", "온톨로지 JSON 적재 시작", 건수=len(json_files), 경로=ontology_dir)
     return [(_load_graph_from_json(jf), str(jf)) for jf in json_files]
 
 
@@ -138,7 +139,7 @@ def run_ingest(args) -> int:
             # --reset은 컬렉션을 비워 삭제된 노드의 잔여 청크까지 정리한다.
             from src.db.vector_store import delete_collection
 
-            logger.info(f"컬렉션 초기화: {collection}")
+            log_kv(logger, logging.INFO, "main", "컬렉션 초기화", 컬렉션=collection)
             delete_collection(collection)
 
         targets = _collect_targets(args)
@@ -198,14 +199,14 @@ def _run_ingest_with_restarts(args) -> int:
     일부 묶음이 실패해도 같은 명령을 다시 실행하면 누락분이 채워진다.
     """
     if args.pdf or args.md:
-        logger.error("--docs-per-restart는 온톨로지 JSON 디렉터리 적재에서만 사용할 수 있습니다.")
+        log_kv(logger, logging.ERROR, "main", "--docs-per-restart는 온톨로지 JSON 디렉터리 적재에서만 사용할 수 있습니다.")
         return 1
 
     files = sorted(Path(f) for f in args.ontology_files) if args.ontology_files else sorted(
         Path(args.ontology_dir).glob("*.json")
     )
     if not files:
-        logger.error(f"온톨로지 JSON을 찾지 못했습니다: {args.ontology_dir}")
+        log_kv(logger, logging.ERROR, "main", "온톨로지 JSON을 찾지 못했습니다", 경로=args.ontology_dir)
         return 1
 
     if args.reset:
@@ -214,7 +215,7 @@ def _run_ingest_with_restarts(args) -> int:
 
         init_pool()
         try:
-            logger.info(f"컬렉션 초기화: {args.collection}")
+            log_kv(logger, logging.INFO, "main", "컬렉션 초기화", 컬렉션=args.collection)
             delete_collection(args.collection)
         finally:
             close_pool()
@@ -305,12 +306,12 @@ def _preload_embedding() -> None:
     try:
         warmup_model()
     except Exception as e:  # noqa: BLE001 — preload 실패는 비치명적(lazy 폴백 존재)
-        logger.warning(f"임베딩 preload 실패 — 첫 질의에서 lazy 로드로 폴백: {e}")
+        log_kv(logger, logging.WARNING, "main", "임베딩 preload 실패", 대체동작="첫 질의에서 lazy 로드", 오류=type(e).__name__, 상세=e)
 
     try:
         warmup_reranker()
     except Exception as e:  # noqa: BLE001 — preload 실패는 비치명적(lazy 폴백 존재)
-        logger.warning(f"리랭커 preload 실패 — 첫 질의에서 lazy 로드로 폴백: {e}")
+        log_kv(logger, logging.WARNING, "main", "리랭커 preload 실패", 대체동작="첫 질의에서 lazy 로드", 오류=type(e).__name__, 상세=e)
 
 
 def run_query(args) -> int:
@@ -321,7 +322,8 @@ def run_query(args) -> int:
     init_pool()
     _preload_embedding()  # #168: 첫 질의 콜드 로드를 step_timeout(노드 30s) 밖으로 분리
     try:
-        logger.info(f"질의 실행: '{args.query}' (standard={args.standard})")
+        log_kv(logger, logging.INFO, "main", "질의 실행", 질의길이=len(args.query), 기준서=args.standard or "전체")
+        log_kv(logger, logging.DEBUG, "main", "질의 실행 질의", 상세=args.query)
         result = run_workflow(args.query, standard_filter=args.standard)
 
         # human_review interrupt 루프: __interrupt__가 사라질 때까지 결정을 주입해 재개
@@ -353,7 +355,7 @@ def run_migrate(args) -> int:
             print("적용할 신규 마이그레이션이 없습니다 (최신 상태).")
         return 0
     except Exception as e:
-        logger.error(f"마이그레이션 실행 실패: {e}")
+        log_kv(logger, logging.ERROR, "main", "마이그레이션 실행 실패", 오류=type(e).__name__, 상세=e)
         print(f"오류: 마이그레이션 실행 중 실패하였습니다: {e}", file=sys.stderr)
         return 1
     finally:

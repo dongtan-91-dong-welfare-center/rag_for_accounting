@@ -1,4 +1,5 @@
 # evaluate: 검색 맥락 평가 노드 (CRAG 패턴)
+import logging
 import re
 
 import httpx
@@ -17,7 +18,7 @@ from src.utils.exception import (
     InconsistentVerdictError,
     HallucinationDetectedError,
 )
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -104,7 +105,7 @@ def _execute_evaluator_llm(prompt: str, rewrite_count: int, error_logs: list[dic
         )
         return fallback, new_logs
     except Exception as e:
-        logger.error(f"[{type(e).__name__}] evaluate_context 노드 시스템 에러: {e}", exc_info=True)
+        log_kv(logger, logging.ERROR, "evaluate", "evaluate_context 노드 시스템 에러", 함수="evaluate_context", 오류=type(e).__name__, 상세=e, exc_info=True)
         raise
 
 

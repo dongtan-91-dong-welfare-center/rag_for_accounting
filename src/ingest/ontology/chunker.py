@@ -19,6 +19,7 @@
     4. metadata 전파 — standard_type·chapter는 Standard 노드 기준으로 모든 청크에 전파한다(Subsection·Section 노드 자체는 이 두 필드가 비어 있기 때문).
         source_path(파서 메타데이터)는 ChunkMetadata의 extra 필드로 싣는다.
 """
+import logging
 import re
 from bisect import bisect_right
 from collections.abc import Callable
@@ -29,7 +30,7 @@ from src.utils.clause_paras import clause_header_re
 from src.utils.config import CHUNK_MAX_TOKENS
 from src.clients.embedding import count_tokens
 from src.utils.exception import OntologyParsingError
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -225,7 +226,7 @@ def chunk_graph(
     content_nodes = [n for n in graph.nodes if _strip_page_markers(n.content or "")[0]]
     if not content_nodes:
         # 빈 문서·구조만 있는 그래프 → 적재할 청크 없음. 정상적으로 빈 리스트 반환.
-        logger.info("청킹 대상 노드 없음 — 빈 청크 리스트 반환")
+        log_kv(logger, logging.INFO, "ingest", "청킹 대상 노드 없음", 대체동작="빈 청크 리스트 반환")
         return []
 
     # standard_type·chapter는 Standard 노드 기준으로 전 청크에 전파한다.
@@ -281,7 +282,8 @@ def chunk_graph(
                 )
             )
 
-    logger.info(
-        f"청킹 완료: document_id={document_id}, 노드 {len(content_nodes)}개 → 청크 {len(chunks)}개"
+    log_kv(
+        logger, logging.INFO, "ingest", "청킹 완료",
+        문서=document_id, 노드수=len(content_nodes), 청크수=len(chunks),
     )
     return chunks

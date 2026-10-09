@@ -1,6 +1,7 @@
 # psycopg3의 ConnectionPool을 싱글톤으로 제공한다.
 # 환경변수에서 접속 정보를 읽어 Docker 및 로컬 환경 모두 대응한다.
 
+import logging
 import os
 import threading
 
@@ -10,7 +11,7 @@ from psycopg_pool import ConnectionPool
 
 from src.utils.config import DB_CONNECT_TIMEOUT_SECONDS, DB_POOL_TIMEOUT_SECONDS
 from src.utils.exception import ConfigNotFoundError
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 load_dotenv()
 logger = get_logger(__name__)
@@ -65,7 +66,7 @@ def init_pool() -> None:
             timeout=DB_POOL_TIMEOUT_SECONDS,
             open=True,
         )
-        logger.info("PostgreSQL 커넥션 풀 초기화 완료")
+        log_kv(logger, logging.INFO, "db", "PostgreSQL 커넥션 풀 초기화 완료")
 
 
 def get_checkpointer_pool() -> ConnectionPool:
@@ -88,7 +89,7 @@ def get_checkpointer_pool() -> ConnectionPool:
                     kwargs={"autocommit": True},
                     open=True,
                 )
-                logger.info("체크포인터 전용 PostgreSQL 커넥션 풀 초기화 완료")
+                log_kv(logger, logging.INFO, "db", "체크포인터 전용 PostgreSQL 커넥션 풀 초기화 완료")
     return _checkpointer_pool
 
 
@@ -99,7 +100,7 @@ def close_checkpointer_pool() -> None:
         if _checkpointer_pool is not None:
             _checkpointer_pool.close()
             _checkpointer_pool = None
-            logger.info("체크포인터 전용 PostgreSQL 커넥션 풀 종료 완료")
+            log_kv(logger, logging.INFO, "db", "체크포인터 전용 PostgreSQL 커넥션 풀 종료 완료")
 
 
 def get_pool() -> ConnectionPool:
@@ -123,4 +124,4 @@ def close_pool() -> None:
         if _pool is not None:
             _pool.close()
             _pool = None
-            logger.info("PostgreSQL 커넥션 풀 종료 완료")
+            log_kv(logger, logging.INFO, "db", "PostgreSQL 커넥션 풀 종료 완료")

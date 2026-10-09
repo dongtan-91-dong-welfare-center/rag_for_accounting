@@ -36,6 +36,47 @@ TOP_K_RETRIEVAL: int = 10           # search: 1차 검색 반환 청크 수
 MAX_ERROR_LOGS: int = int(os.getenv("MAX_ERROR_LOGS", "50"))  # GraphState error_logs 최대 보존 건수 (FIFO 회전 상한)
 LOG_FORMAT: str = os.getenv("LOG_FORMAT", "text").strip().lower()  # "text" | "json" (구조화 로깅 포맷)
 
+# 로깅 표준 (#408) — log_kv 헬퍼가 참조하는 허용 태그와 키 대응표의 단일 정본
+LOG_TAGS: frozenset[str] = frozenset({
+    "rewrite", "search", "rerank", "evaluate", "generate", "workflow",
+    "deep_agent", "api", "db", "embedding", "ingest", "main", "tracing",
+})
+# 본문 한국어 키 → extra 영어 snake_case 키 (JSON 모드에서 필드 단위 검색용)
+LOG_FIELD_KEYS: dict[str, str] = {
+    "소요": "elapsed_sec",
+    "턴": "turns",
+    "토큰": "tokens",
+    "오류": "error",
+    "함수": "function",
+    "질의길이": "query_len",
+    "건수": "count",
+    "상한": "limit",
+    "스레드": "thread_id",
+    "컬렉션": "collection",
+    "대상": "target",
+    "경로": "path",
+    "모델": "model",
+    "모드": "mode",
+    "기준서": "standard_filter",
+    "검색유형": "search_type",
+    "버전": "version",
+    "원인": "reason",
+    "대체동작": "fallback",
+    "상세": "detail",
+    "장치": "device",
+    "스레드수": "thread_count",
+    "배치크기": "batch_size",
+    "문서": "document_id",
+    "저장건수": "saved_count",
+    "상태": "status",
+    "노드수": "node_count",
+    "청크수": "chunk_count",
+    "의심건수": "suspect_count",
+    "통과건수": "passed_count",
+    "최고점": "max_score",
+    "임계값": "threshold",
+}
+
 # Reranking Configuration — .env로 토글 가능. 기본은 OFF.
 USE_RERANKER: bool = _env_bool("USE_RERANKER", False)           # 리랭킹 모델 활성화 여부
 RERANK_THRESHOLD: float = _env_float("RERANK_THRESHOLD", 0.5)   # rerank: 재정렬 후 필터링 임계값 (기본값: 중간 신뢰도)
