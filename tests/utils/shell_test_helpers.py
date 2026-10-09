@@ -22,9 +22,13 @@ def _find_bash() -> str:
         # Windows 환경에서 WSL bash(C:\Windows\System32\bash.exe)는 가상화된 리눅스 서브시스템 파일 경로를 바라보므로,
         # 파이썬 테스트 러너가 Windows 호스트에 생성한 pytest 임시 디렉터리(C:\...)를 인식하지 못해 테스트가 깨집니다.
         # 반면 Git for Windows의 bash는 호스트 파일 시스템 드라이브를 /c/... 형태로 직접 마운트하여 다룰 수 있으므로 최우선으로 탐색합니다.
+        # [usr\bin\bash.exe를 bin\bash.exe보다 먼저 탐색하는 이유 (#432)]
+        # bin\bash.exe는 런처 래퍼라서 자식 셸을 다시 띄울 때 PATH 앞에 /mingw64/bin:/usr/bin을 덧붙입니다.
+        # 이 경우 PATH 격리 테스트(예: curl 부재 검증)에서도 호스트의 curl이 노출됩니다.
+        # usr\bin\bash.exe는 MSYS2 런타임 본체이므로 PATH를 그대로 유지합니다.
         candidates = [
-            r"C:\Program Files\Git\bin\bash.exe",
             r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files\Git\bin\bash.exe",
             r"C:\Program Files (x86)\Git\bin\bash.exe",
         ]
         for candidate in candidates:
@@ -153,7 +157,11 @@ def run_shell(
     :return: subprocess.CompletedProcess[str]
     """
     path_export = ""
-    if env and "PATH" in env:
+    if os.name == "nt" and env and ";" in env.get("PATH", ""):
+        # Windows 원본 PATH(세미콜론 구분)는 MSYS2 런타임이 기동 시 POSIX 형식으로 자동 변환합니다.
+        # usr\bin\bash.exe는 래퍼와 달리 /usr/bin을 덧붙이지 않으므로 dirname, mkdir 등 기본 도구 경로를 보강합니다 (#432).
+        path_export = 'export PATH="$PATH:/usr/bin:/bin"; '
+    elif env and "PATH" in env:
         # Git Bash 등 서브프로세스 기동 시 시스템 PATH가 우선되는 현상을 방지하기 위해 셸 내부에서 PATH를 최우선으로 재정의합니다.
         path_export = f'export PATH="{env["PATH"]}"; '
 
