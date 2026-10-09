@@ -61,6 +61,19 @@ LOG_FIELD_KEYS: dict[str, str] = {
     "버전": "version",
     "원인": "reason",
     "대체동작": "fallback",
+    "상세": "detail",
+    "장치": "device",
+    "스레드수": "thread_count",
+    "배치크기": "batch_size",
+    "문서": "document_id",
+    "저장건수": "saved_count",
+    "상태": "status",
+    "노드수": "node_count",
+    "청크수": "chunk_count",
+    "의심건수": "suspect_count",
+    "통과건수": "passed_count",
+    "최고점": "max_score",
+    "임계값": "threshold",
 }
 
 # Reranking Configuration — .env로 토글 가능. 기본은 OFF.

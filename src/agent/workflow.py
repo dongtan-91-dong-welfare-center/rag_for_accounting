@@ -1,5 +1,6 @@
 # workflow: LangGraph StateGraph 파이프라인 정의
 
+import logging
 import threading
 import uuid
 from datetime import datetime
@@ -28,7 +29,7 @@ from src.utils.exception import (
     NoContextFoundError,
     LLMAPIConnectionError,
 )
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 from src.utils.tracing import init_tracing
 from src.models.state import GraphState, ErrorLog, cap_error_logs
 from src.models.schemas import (
@@ -269,7 +270,7 @@ def search(state: GraphState) -> dict:
         }
     except Exception as e:
         # 시스템 에러: 원본 예외 그대로 전파 → LangGraph 파이프라인 중단
-        logger.error(f"[{type(e).__name__}] search 노드 시스템 에러: {e}", exc_info=True)
+        log_kv(logger, logging.ERROR, "workflow", "search 노드 시스템 에러", 함수="search", 오류=type(e).__name__, 상세=e, exc_info=True)
         raise
 
 
@@ -285,7 +286,7 @@ def rerank(state: GraphState) -> dict:
     """
     # 활성화 여부 확인 (조기 반환 - 모델 호출 없음)
     if not config.USE_RERANKER:
-        logger.info("USE_RERANKER=false: 모델 호출 스킵, 1차 검색 결과 반환")
+        log_kv(logger, logging.INFO, "rerank", "USE_RERANKER=false로 모델 호출 스킵, 1차 검색 결과 반환")
         fallback = [RerankingResult(chunk=c, rerank_score=1.0)
                     for c in state.retrieved_chunks]
         return {
@@ -294,9 +295,9 @@ def rerank(state: GraphState) -> dict:
             "error_logs": state.error_logs,
         }
 
-    logger.info(
-        f"재정렬 수행: {len(state.retrieved_chunks)}개 청크, "
-        f"질의: {state.original_query[:50]}..."
+    log_kv(
+        logger, logging.INFO, "rerank", "재정렬 수행",
+        건수=len(state.retrieved_chunks), 질의길이=len(state.original_query),
     )
 
     # TODO: search 실패(빈 결과)와 rerank 자체 실패를 지금처럼 별개로 다룰지, 하나의 재검색 신호로 합칠지 재정의해야 한다
@@ -310,21 +311,21 @@ def rerank(state: GraphState) -> dict:
         results = _rerank_impl(state.original_query, state.retrieved_chunks)
 
         if not results:
-            logger.warning("재정렬 후 유효한 청크가 없습니다.")
+            log_kv(logger, logging.WARNING, "rerank", "재정렬 후 유효한 청크가 없습니다.", 대체동작="재검색 요청")
             raise ScoreThresholdError("재정렬 후 유효한 청크가 없습니다.")
 
         # rerank()가 내림차순 정렬을 보장하므로 0번째가 최고 점수
         max_score = results[0].rerank_score
         if max_score < config.RERANK_THRESHOLD:
-            logger.warning(
-                f"재정렬 점수 임계값 미달: 최고점={max_score}, "
-                f"임계값={config.RERANK_THRESHOLD}"
+            log_kv(
+                logger, logging.WARNING, "rerank", "재정렬 점수 임계값 미달",
+                최고점=max_score, 임계값=config.RERANK_THRESHOLD, 대체동작="재검색 요청",
             )
             raise ScoreThresholdError(
                 f"최고 관련도({max_score})가 임계값({config.RERANK_THRESHOLD})에 미달합니다."
             )
 
-        logger.info(f"재정렬 완료: {len(results)}개 청크 반환")
+        log_kv(logger, logging.INFO, "rerank", "재정렬 완료", 건수=len(results))
         return {"reranked_chunks": results, "needs_reretrieval": False}
 
     except AccountingRAGError as e:
@@ -348,7 +349,7 @@ def rerank(state: GraphState) -> dict:
         }
     except Exception as e:
         # 시스템 예외는 AccountingRAGError로 래핑하지 않고 원본 타입 그대로 전파한다.
-        logger.critical(f"[{type(e).__name__}] rerank 노드 치명적 오류: {e}", exc_info=True)
+        log_kv(logger, logging.CRITICAL, "rerank", "rerank 노드 치명적 오류", 함수="rerank", 오류=type(e).__name__, 상세=e, exc_info=True)
         raise
 
 

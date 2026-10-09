@@ -12,6 +12,7 @@
 #      - stepback : [원문, 추상화쿼리]
 #   3. LLM 실패 시 search_queries를 원문 한 개만 남긴다 (strategy 값 자체는 바뀌지 않으며, 1번의 'bypass' 전략과는 별개)
 
+import logging
 from pydantic_ai import Agent
 
 from src.agent.prompts import (
@@ -30,7 +31,7 @@ from src.models.schemas import (
 from src.models.state import ErrorLog, GraphState
 from src.utils.config import OPENAI_MODEL
 from src.utils.exception import LLMAPIConnectionError
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -68,8 +69,9 @@ def _record_llm_failure(fn_name: str, exc: Exception, error_logs: list[ErrorLog]
         error_type은 CM-002 단일 버킷으로 두되(소비자는 관측 1곳뿐·라우팅 미사용), 세부 원인은 메시지·로그로 구분한다.
         헬퍼는 폴백(원문·기본 전략)으로 정상 복귀하므로 예외를 재전파하지는 않는다.
     """
-    logger.warning(
-        "%s LLM 호출 실패[%s] — 폴백 적용: %s", fn_name, type(exc).__name__, exc, exc_info=True
+    log_kv(
+        logger, logging.WARNING, "rewrite", "LLM 호출 실패, 폴백 적용",
+        함수=fn_name, 오류=type(exc).__name__, 상세=exc, 대체동작="원문·기본 전략", exc_info=True,
     )
     if error_logs is not None:
         error_logs.append(

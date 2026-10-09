@@ -1,5 +1,6 @@
 # generate: 답변 생성 노드
 
+import logging
 import re
 from datetime import datetime
 
@@ -19,7 +20,7 @@ from src.utils.exception import (
     LLMAPIConnectionError,
     ContextLengthExceededError,
 )
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -114,7 +115,7 @@ def generate_response(state: GraphState) -> dict:
             "error_logs": new_logs,
         }
     except Exception as e:
-        logger.error(f"[{type(e).__name__}] generate_response 노드 시스템 에러: {e}", exc_info=True)
+        log_kv(logger, logging.ERROR, "generate", "generate_response 노드 시스템 에러", 함수="generate_response", 오류=type(e).__name__, 상세=e, exc_info=True)
         error_log = {
             "timestamp": datetime.now(KST).isoformat(),
             "node": "generate",
