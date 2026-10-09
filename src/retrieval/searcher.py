@@ -1,5 +1,6 @@
 # search: 하이브리드 검색 (Dense + Sparse) 매니저
 
+import logging
 import json
 from typing import LiteralString, cast
 from psycopg import errors, sql
@@ -16,7 +17,7 @@ from src.utils.exception import SearchTimeoutError, DatabaseQueryError, NoContex
 from src.clients.embedding import embed_texts
 from src.db.connection import get_pool
 from src.retrieval.tokenizer import tokenize_morph
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_kv
 
 logger = get_logger(__name__)
 
@@ -86,7 +87,7 @@ def sparse_search(query: str, top_k: int, metadata_filter: dict | None = None, c
     # (sparse 0건은 dense 단독으로 병합되는 정상 폴백 경로다).
     tokens = tokenize_morph(query)
     if not tokens:
-        logger.info("Sparse 검색 생략: 질의에 명사류 형태소 없음")
+        log_kv(logger, logging.INFO, "search", "Sparse 검색 생략", 원인="질의에 명사류 형태소 없음")
         return []
     # websearch_to_tsquery가 'or'를 OR 연산자로 해석한다(예: "퇴직급여 or 인식").
     # 사용자 입력이 특수문자를 품어도 문법 오류를 내지 않는 함수라 to_tsquery 조립보다 안전하다.
@@ -154,16 +155,16 @@ def _execute_search_query(sql_query: str | sql.SQL | sql.Composed, params: list,
                         metadata=metadata
                     ))
     except errors.QueryCanceled as e:
-        logger.error(f"{search_type} 검색 타임아웃 초과: {e}")
+        log_kv(logger, logging.ERROR, "search", "검색 타임아웃 초과", 검색유형=search_type, 오류=type(e).__name__, 상세=e)
         raise SearchTimeoutError(f"DB 검색 응답 시간 초과 ({SEARCH_TIMEOUT_SECONDS}s)")
     except (errors.ProgrammingError, errors.UndefinedTable) as e:
         # 잘못된 SQL 문법·존재하지 않는 컬럼/테이블 등은 재시도로 해결되지 않는다.
         # DatabaseQueryError로 포장하면 검색 노드가 무의미한 CRAG 재탐색을
         # MAX_REWRITE_COUNT까지 반복하므로, 원본 예외를 그대로 전파해 즉시 중단한다.
-        logger.error(f"{search_type} 검색 프로그래밍 오류 (재시도 불가): {e}", exc_info=True)
+        log_kv(logger, logging.ERROR, "search", "검색 프로그래밍 오류(재시도 불가)", 검색유형=search_type, 오류=type(e).__name__, 상세=e, exc_info=True)
         raise  # 원본 예외 전파 → 파이프라인 즉시 중단
     except Exception as e:
-        logger.error(f"{search_type} 검색 중 DB 오류: {e}")
+        log_kv(logger, logging.ERROR, "search", "검색 중 DB 오류", 검색유형=search_type, 오류=type(e).__name__, 상세=e)
         raise DatabaseQueryError(f"데이터베이스 쿼리 실행 실패: {e}")
 
     return results
@@ -226,7 +227,7 @@ def search_chunks(
     - include_sparse=False: Sparse 검색을 생략하고 Dense 단독으로 진행한다.
       HyDE 가상 답변처럼 비도메인 명사류가 섞여 ts_rank_cd 노이즈 점수로 이어지는 질의에 쓴다.
     """
-    logger.info(f"하이브리드 검색 시작: query='{query[:30]}...', top_k={top_k}")
+    log_kv(logger, logging.INFO, "search", "하이브리드 검색 시작", 질의길이=len(query), 상한=top_k)
 
     query_vector = embed_query(query)
 
@@ -236,15 +237,15 @@ def search_chunks(
 
     if not final_results:
         retry_top_k = top_k * 2
-        logger.info(f"검색 결과 0건, top_k={retry_top_k}로 재탐색")
+        log_kv(logger, logging.INFO, "search", "검색 결과 0건, 재탐색", 상한=retry_top_k)
         merged = _search_and_merge(query, query_vector, retry_top_k, metadata_filter, collection, include_sparse)
         final_results = merged[:top_k]
 
     if not final_results:
-        logger.warning("재탐색 후에도 검색 결과 0건")
+        log_kv(logger, logging.WARNING, "search", "재탐색 후에도 검색 결과 0건")
         raise NoContextFoundError("질의에 대한 검색 결과가 존재하지 않습니다.")
 
-    logger.info(f"하이브리드 검색 완료: {len(final_results)}건 반환")
+    log_kv(logger, logging.INFO, "search", "하이브리드 검색 완료", 건수=len(final_results))
     return final_results
 
 def _search_and_merge(
@@ -265,26 +266,26 @@ def _search_and_merge(
         dense_results = dense_search(query_vector, top_k, metadata_filter, collection)
     except (SearchTimeoutError, DatabaseQueryError) as e:
         dense_failed = True
-        logger.warning(f"Dense 검색 실패, Sparse 단독 진행: {e}")
+        log_kv(logger, logging.WARNING, "search", "Dense 검색 실패", 대체동작="Sparse 단독 진행", 오류=type(e).__name__, 상세=e)
 
     if include_sparse:
         try:
             sparse_results = sparse_search(query, top_k, metadata_filter, collection)
         except (SearchTimeoutError, DatabaseQueryError) as e:
             sparse_failed = True
-            logger.warning(f"Sparse 검색 실패, Dense 단독 진행: {e}")
+            log_kv(logger, logging.WARNING, "search", "Sparse 검색 실패", 대체동작="Dense 단독 진행", 오류=type(e).__name__, 상세=e)
 
     if dense_failed and (sparse_failed or not include_sparse):
         raise DatabaseQueryError("Dense 및 Sparse 검색 모두 실패")
 
     if dense_failed:
-        logger.info("검색 모드: Sparse 단독")
+        log_kv(logger, logging.INFO, "search", "검색 모드", 모드="Sparse 단독")
     elif not include_sparse:
-        logger.info("검색 모드: Dense 단독 (Sparse 의도적 생략)")
+        log_kv(logger, logging.INFO, "search", "검색 모드", 모드="Dense 단독 (Sparse 의도적 생략)")
     elif sparse_failed:
-        logger.info("검색 모드: Dense 단독")
+        log_kv(logger, logging.INFO, "search", "검색 모드", 모드="Dense 단독")
     else:
-        logger.info("검색 모드: Dense + Sparse 하이브리드")
+        log_kv(logger, logging.INFO, "search", "검색 모드", 모드="Dense + Sparse 하이브리드")
 
     # Dense/Sparse 결과는 각 쿼리의 ORDER BY로 점수 내림차순 정렬되어 있으므로
     # 리스트 내 위치가 곧 순위가 된다. RRF가 순위 기반으로 병합한다.
