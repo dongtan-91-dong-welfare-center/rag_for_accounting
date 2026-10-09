@@ -12,7 +12,18 @@ pytestmark = pytest.mark.unit
 
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 HELPER_FILE = SRC_DIR / "utils" / "logger.py"
-LOG_METHODS = {"debug", "info", "warning", "error", "critical", "exception", "log"}
+LOG_METHODS = {"debug", "info", "warning", "warn", "error", "critical", "exception", "log"}
+LOGGER_NAMES = {"logger", "_logger", "logging"}
+# 근거: src/ingest/parse의 `_log`는 #408 변환 범위 밖의 기존 로거이므로 검출 대상에 포함하지 않는다.
+
+
+def _receiver_name(node: ast.expr) -> str | None:
+    """호출 수신자의 마지막 식별자(`logger`, `self.logger` 등)를 반환한다."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
 
 
 def _direct_logger_calls(path: Path) -> list[int]:
@@ -23,8 +34,7 @@ def _direct_logger_calls(path: Path) -> list[int]:
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in LOG_METHODS
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "logger"
+        and _receiver_name(node.func.value) in LOGGER_NAMES
     ]
 
 
