@@ -201,21 +201,58 @@ sudo dnf install -y nginx
 `/etc/nginx/conf.d/rag_accounting.conf` 파일을 생성하고 다음 설정을 반영합니다:
 
 ```nginx
+# 질의 관련 엔드포인트의 요청 빈도 제한 영역 (conf.d 파일은 http 컨텍스트에 포함됩니다)
+limit_req_zone $binary_remote_addr zone=query_zone:10m rate=10r/m;
+limit_req_status 429;
+
 server {
     listen 80;
-    server_name _;
+    server_name example.com;
 
     client_max_body_size 50M;
 
+    # 일반 요청: 기본 인증을 적용합니다.
     location / {
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd;
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+
+    # 질의 및 HIL 재개: 하나의 zone을 공유하여 합산 제한합니다.
+    location = /query {
+        limit_req zone=query_zone burst=5 nodelay;
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;
+    }
+
+    location = /resume {
+        limit_req zone=query_zone burst=5 nodelay;
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;
+    }
 }
 ```
+
+HTTPS(443)를 사용하는 경우 Certbot(`sudo certbot --nginx -d example.com`)으로 인증서를 발급하면 위 `server` 블록에 `listen 443 ssl` 및 인증서 경로가 자동으로 추가되며, `limit_req` 설정은 그대로 유지됩니다. `example.com`과 `.htpasswd` 경로는 예시 값이므로 실제 환경에 맞게 치환합니다.
+
+`근거:` 앞단 프록시 없이 nginx가 클라이언트 요청을 직접 수신하므로 `$binary_remote_addr`가 실제 클라이언트 IP입니다. 앞단에 별도 프록시나 로드밸런서를 두는 경우에는 `real_ip_header`와 `set_real_ip_from`을 먼저 설정해야 합니다.
+`근거:` `/resume`(HIL 재개)도 LLM을 호출하므로 `/query`와 같은 zone을 공유하여 합산 제한합니다. 한도를 초과한 요청은 `limit_req_status 429`에 따라 HTTP 429로 거절되며, 프론트엔드는 이 응답에 재시도 안내 문구를 표시합니다.
 
 설정 검증 및 서비스를 시작합니다:
 
@@ -231,6 +268,13 @@ sudo systemctl reload nginx
 # 80번 방화벽 개방
 sudo firewall-cmd --permanent --add-port=80/tcp
 sudo firewall-cmd --reload
+```
+
+제한 동작을 확인하려면 한도를 넘겨 연속 호출하여 HTTP 429가 반환되는지 점검합니다:
+
+```bash
+for i in $(seq 1 10); do curl -s -o /dev/null -w "%{http_code}
+" -u <사용자>:<비밀번호> -X POST http://example.com/query -H 'Content-Type: application/json' -d '{}'; done
 ```
 
 ### 8-2. 배포본 최신화 및 롤백 절차
