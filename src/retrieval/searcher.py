@@ -1,6 +1,7 @@
 # search: 하이브리드 검색 (Dense + Sparse) 매니저
 
 import json
+import time
 from typing import LiteralString, cast
 from psycopg import errors, sql
 
@@ -121,6 +122,8 @@ def _execute_search_query(sql_query: str | sql.SQL | sql.Composed, params: list,
     results = []
     # 밀리초(ms) 단위 타임아웃 문자열 구성 (예: '5000ms')
     timeout_ms = SEARCH_TIMEOUT_SECONDS * 1000
+    # 근거: 쿼리별 소요 시간을 남겨야 타임아웃 쿼리의 분포(콜드 인덱스, 필터 경합 등)를 로그로 구분할 수 있다(#429).
+    started_at = time.perf_counter()
 
     try:
         with get_pool().connection() as conn:
@@ -153,8 +156,9 @@ def _execute_search_query(sql_query: str | sql.SQL | sql.Composed, params: list,
                         score=float(score),
                         metadata=metadata
                     ))
+        logger.info(f"{search_type} 검색 완료: {len(results)}건, {time.perf_counter() - started_at:.2f}s")
     except errors.QueryCanceled as e:
-        logger.error(f"{search_type} 검색 타임아웃 초과: {e}")
+        logger.error(f"{search_type} 검색 타임아웃 초과({time.perf_counter() - started_at:.2f}s 경과): {e}")
         raise SearchTimeoutError(f"DB 검색 응답 시간 초과 ({SEARCH_TIMEOUT_SECONDS}s)")
     except (errors.ProgrammingError, errors.UndefinedTable) as e:
         # 잘못된 SQL 문법·존재하지 않는 컬럼/테이블 등은 재시도로 해결되지 않는다.
