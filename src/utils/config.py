@@ -32,6 +32,7 @@ def _env_float(name: str, default: float) -> float:
 # 파이프라인 전역 설정값
 MAX_REWRITE_COUNT: int = 3          # rewrite: CRAG 루프(평가 임계치 미달 재검색) 최대 반복 횟수
 MAX_HIL_COUNT: int = 5              # 워크플로우: Human-in-the-Loop 재작성 요청 최대 반복 횟수 (CRAG 루프와 분리)
+MAX_FEEDBACK_LENGTH: int = _env_int("MAX_FEEDBACK_LENGTH", 300)     # HIL 재작성 피드백 글자 수 상한 (#447)
 TOP_K_RETRIEVAL: int = 10           # search: 1차 검색 반환 청크 수
 MAX_ERROR_LOGS: int = int(os.getenv("MAX_ERROR_LOGS", "50"))  # GraphState error_logs 최대 보존 건수 (FIFO 회전 상한)
 LOG_FORMAT: str = os.getenv("LOG_FORMAT", "text").strip().lower()  # "text" | "json" (구조화 로깅 포맷)
