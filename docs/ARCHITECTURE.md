@@ -99,6 +99,7 @@ rewrite
 | CRAG 재작성 한도 | `MAX_REWRITE_COUNT=3` |
 | 노드 타임아웃 | `GRAPH_STEP_TIMEOUT_SECONDS=120`초 |
 | 리랭커 | `USE_RERANKER=false` 기본값. 켜면 `BAAI/bge-reranker-v2-m3`를 사용한다. |
+| HIL 피드백 프롬프트 인젝션 방어 | `<user_feedback>` XML 태그 격리, `<`/`>` 특수문자 전각 치환, 지시문 무시 및 재작성 방향 참고 명시, `MAX_FEEDBACK_LENGTH`(기본 300자) 다층 제한 (#447) |
 
 `evaluate`가 근거 부족을 판단하거나 rerank 임계값 미달로 `needs_reretrieval=True`가 세워지면 rewrite로 되돌아간다. 한도를 넘으면 현재 근거로 답변 생성 단계에 진입하거나 폴백 응답을 반환한다. 노드별 예외 분류 체계와 계층적 타임아웃 상세 규약은 [예외 처리 및 런타임 타임아웃 정책](architecture/exception_policy.md)을 참조한다.
 
@@ -189,3 +190,4 @@ HIL 체크포인터는 PostgreSQL 기반 `PostgresSaver`다(#209). 따라서 Fas
 | 2026-03-21 | Apache AGE/EdgeQuake/GraphRAG 전제 초기 설계 작성 |
 | 2026-07-17 | 2026-07-11 회의록과 현행 코드 기준으로 pgvector + BM25-style sparse + LangGraph 아키텍처 문서로 재작성 |
 | 2026-10-10 | 기각된 딥에이전트 실험(#405)의 시나리오 2·3 벤치마크 스크립트를 삭제하고, 재현 정보를 `docs/benchmark/scenario2_turns_3_report.md`와 `docs/benchmark/scenario3_ensemble_report_turns_3.md`에 기재 |
+| 2026-10-10 | HIL 피드백의 프롬프트 인젝션 방어(XML 태그 격리, 구분자 전각 치환, 프롬프트 지시 강화, MAX_FEEDBACK_LENGTH 다층 제한) 적용 (#447) |
