@@ -20,7 +20,7 @@ import type {
   StandardFilter,
   WorkflowResponse,
 } from "./api";
-import { checkPdfAvailable, documentPdfUrl, postFeedback, postQuery, postResume } from "./api";
+import { MAX_FEEDBACK_LENGTH, checkPdfAvailable, documentPdfUrl, postFeedback, postQuery, postResume } from "./api";
 import type { FeedbackRating } from "./api";
 import { answerSegments, citedMarker, hasUncited, humanNodeTitle, paraChips } from "./clauseDisplay";
 
@@ -376,14 +376,32 @@ function HumanReview({
         )}
         {rewriteOption && (
           <>
-            <input
-              name="rewrite-feedback"
-              value={feedback}
-              onChange={(e) => onFeedbackChange(e.target.value)}
-              placeholder="재작성 피드백…"
-              aria-label="재작성 피드백"
-            />
-            <button className="btn-secondary" onClick={() => onDecide("rewrite")}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+              <input
+                name="rewrite-feedback"
+                value={feedback}
+                maxLength={MAX_FEEDBACK_LENGTH}
+                onChange={(e) => onFeedbackChange(e.target.value)}
+                placeholder={`재작성 피드백 (최대 ${MAX_FEEDBACK_LENGTH}자)…`}
+                aria-label="재작성 피드백"
+              />
+              {feedback.length > 0 && (
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    color: feedback.length >= MAX_FEEDBACK_LENGTH ? "#dc2626" : "#6b7280",
+                    alignSelf: "flex-end",
+                  }}
+                >
+                  {feedback.length}/{MAX_FEEDBACK_LENGTH}자
+                </span>
+              )}
+            </div>
+            <button
+              className="btn-secondary"
+              onClick={() => onDecide("rewrite")}
+              disabled={feedback.length > MAX_FEEDBACK_LENGTH}
+            >
               {rewriteOption.label}
             </button>
           </>
