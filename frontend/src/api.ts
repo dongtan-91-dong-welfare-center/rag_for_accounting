@@ -34,6 +34,9 @@ export interface CitationOut {
 
 export type ResumeAction = "approve" | "rewrite";
 
+/** HIL 재작성 피드백의 최대 문자 수 — src/utils/config.py의 MAX_FEEDBACK_LENGTH와 일치해야 한다 (#447). */
+export const MAX_FEEDBACK_LENGTH = 300;
+
 export interface InterruptOption {
   action: ResumeAction;
   label: string;
