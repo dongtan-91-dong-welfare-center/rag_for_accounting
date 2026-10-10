@@ -45,6 +45,8 @@ cp .env.example .env
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | 연결 대상 |
 
+> **Windows 주의사항:** `POSTGRES_HOST`는 `localhost` 대신 `127.0.0.1`을 사용합니다. `localhost`가 IPv6(`::1`)로 먼저 해석되면 IPv4(`127.0.0.1`)에만 바인딩된 `accounting_db` 컨테이너로의 연결이 멈춥니다. 증상은 `PoolTimeout`(`couldn't get a connection after 10.00 sec`)과 "Dense 및 Sparse 검색 모두 실패" 오류입니다. `src/db/connection.py`는 `DB_CONNECT_TIMEOUT_SECONDS`(`src/utils/config.py`)로 개별 연결 시도를 제한하여 `localhost`에서도 IPv4로 폴백하지만, 폴백 대기만큼 연결이 지연되므로 `127.0.0.1` 사용을 권장합니다.
+
 > 모델명 및 임계값 기본값의 정본(SSoT)은 `src/utils/config.py`입니다 (`EMBEDDING_MODEL`, `OPENAI_MODEL`, `RRF_K`, `TOP_K_RETRIEVAL` 등). 리랭커 설정과 임베딩 실행 자원은 `.env`로 덮어쓸 수 있으며, 상세 키 목록은 `.env.example`을 참조합니다.
 
 ## 4. Docker 스택 기동

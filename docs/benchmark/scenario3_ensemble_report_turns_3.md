@@ -46,3 +46,12 @@
 | 질의당 평균 비용 | $0.010769 | $0.000990 | $-0.009779 |
 | p50 지연 시간 | 7.00s | 3.87s | -3.13s |
 | p95 지연 시간 | 9.04s | 5.76s | -3.28s |
+
+## 재현 정보
+
+`scripts/benchmark_deep_agent_ensemble.py`는 기각된 실험이므로 `dev`에서 삭제되었습니다. 필요하면 아래 커밋을 체크아웃하여 재현합니다.
+
+- **측정에 사용한 스크립트의 마지막 커밋:** `512772f5d2ecca62fe0a5864f3a2c220b7048bb9`
+- **실행 명령:** `uv run python scripts/benchmark_deep_agent_ensemble.py --max-turns 3`
+- **공용 모듈:** `scripts/benchmark_deep_agent_common.py` (동일 커밋 기준)
+- **복원 방법:** `git checkout 512772f -- scripts/benchmark_deep_agent_ensemble.py scripts/benchmark_deep_agent_common.py`

@@ -17,6 +17,12 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"true", "1", "yes"}
 
 
+def _env_int(name: str, default: int) -> int:
+    """환경변수를 int로 파싱한다. 미설정이면 기본값, 정수가 아니면 ValueError"""
+    value = os.getenv(name)
+    return default if value is None else int(value)
+
+
 def _env_float(name: str, default: float) -> float:
     """환경변수를 float로 파싱한다. 미설정이면 기본값, 숫자가 아니면 ValueError"""
     value = os.getenv(name)
@@ -34,6 +40,9 @@ LOG_FORMAT: str = os.getenv("LOG_FORMAT", "text").strip().lower()  # "text" | "j
 USE_RERANKER: bool = _env_bool("USE_RERANKER", False)           # 리랭킹 모델 활성화 여부
 RERANK_THRESHOLD: float = _env_float("RERANK_THRESHOLD", 0.5)   # rerank: 재정렬 후 필터링 임계값 (기본값: 중간 신뢰도)
 RERANK_MODEL: str = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")  # rerank: Cross-Encoder 모델 식별자
+# rerank: 질의+청크 쌍 입력 토큰 상한. 미지정 시 bge-reranker-v2-m3는 8,192토큰까지 처리해 CPU 지연이 급증한다(#436).
+# 근거: #428 실측에서 512토큰 상한 적용 시 질의당 10쌍 채점 지연이 p50 15.8초였다(docs/benchmark/rerank_gate_20261009.md).
+RERANK_MAX_LENGTH: int = _env_int("RERANK_MAX_LENGTH", 512)
 # Tracing & Observability — LangSmith / OpenTelemetry
 # LANGSMITH_TRACING=true 및 LANGSMITH_API_KEY 설정 시 PydanticAI / LangGraph 트레이싱이 활성화된다.
 LANGSMITH_TRACING_ENABLED: bool = _env_bool("LANGSMITH_TRACING", False) or _env_bool("LANGCHAIN_TRACING_V2", False)
@@ -86,6 +95,11 @@ SEARCH_TIMEOUT_SECONDS: int = int(_env_float("SEARCH_TIMEOUT_SECONDS", 10.0))
 
 # DB 커넥션 풀 대기 타임아웃 (초)
 DB_POOL_TIMEOUT_SECONDS: float = _env_float("DB_POOL_TIMEOUT_SECONDS", 10.0)
+
+# DB 개별 연결 시도 타임아웃 (초). 풀 대기 타임아웃(DB_POOL_TIMEOUT_SECONDS)보다 짧아야 한다.
+# 근거: Windows에서 localhost가 IPv6(::1)로 먼저 해석되면 IPv4에만 바인딩된 컨테이너로의 연결이 멈춘다.
+# 이 값이 있으면 해당 주소를 포기하고 다음 주소(127.0.0.1)로 폴백하므로 풀이 PoolTimeout 없이 연결된다(#437).
+DB_CONNECT_TIMEOUT_SECONDS: int = int(_env_float("DB_CONNECT_TIMEOUT_SECONDS", 3.0))
 
 # OpenAI LLM API 요청 타임아웃 (초)
 LLM_TIMEOUT_SECONDS: float = _env_float("LLM_TIMEOUT_SECONDS", 45.0)

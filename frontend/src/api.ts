@@ -92,6 +92,9 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     // 원문 detail은 내부 정보(thread_id·검증 필드 등)라 화면에 노출하지 않고 콘솔에만 남긴다.
     const detail = await res.text();
     console.error(`API ${path} 실패: HTTP ${res.status}`, detail);
+    if (res.status === 429) {
+      throw new Error("요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+    }
     throw new Error(`요청이 실패했습니다 (HTTP ${res.status} ${res.statusText})`);
   }
   return res.json() as Promise<T>;

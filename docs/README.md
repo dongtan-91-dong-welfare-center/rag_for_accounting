@@ -39,6 +39,7 @@
 | 평가 통과 규칙 | 검색 통과(핵심 Top-5) 기준, 답변 적절성 평가 방향 및 성능 기록 원칙 | [benchmark/eval_pass_rules.md](benchmark/eval_pass_rules.md) |
 | BM25 리플레이 리포트 | 형태소 분석 전후 및 가중치 조정에 따른 검색 품질 실측 리포트 | [benchmark/bm25_replay_20260725_1911.md](benchmark/bm25_replay_20260725_1911.md) |
 | 형태소 토큰화 실측 리포트 | 한국어 형태소 사전토큰화 적용에 따른 검색 지표 비교 분석 리포트 | [benchmark/sparse_morph_replay_20260725_2205.md](benchmark/sparse_morph_replay_20260725_2205.md) |
+| 리랭커 품질 게이트 실측 리포트 | 한국어 Cross-Encoder 리랭커 점수를 CRAG 품질 게이트 신호로 쓸 수 있는지 검증한 리포트 (#428) | [benchmark/rerank_gate_20261009.md](benchmark/rerank_gate_20261009.md) |
 | 과거 측정 산출물 디렉터리 | 기준서 초기 적재 및 성능 측정 이력 보존 폴더 | [measurements/](measurements/) |
 
 

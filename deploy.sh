@@ -162,11 +162,11 @@ echo "[2/3] Recreating app container"
 # [6] 앱 서버 가동 준비 상태 대기 (Readiness Check Polling)
 # ==============================================================================
 echo "[3/3] Waiting for app server to be ready"
-READY_WAIT_SECONDS="${DEPLOY_READY_WAIT_SECONDS:-120}"
+READY_WAIT_SECONDS="${DEPLOY_READY_WAIT_SECONDS:-300}"
 app_waited=0
 APP_READY=0
 
-# 최대 DEPLOY_READY_WAIT_SECONDS(기본값: 120초) 동안 앱 서버의 /ready 엔드포인트를 2초 간격으로 폴링합니다.
+# 최대 DEPLOY_READY_WAIT_SECONDS(기본값: 300초) 동안 앱 서버의 /ready 엔드포인트를 2초 간격으로 폴링합니다.
 # 단순 프로세스 생존(/health) 대신 DB 및 임베딩 연계 가동 상태(/ready)를 엄격히 검증하여 배포 완료를 판정합니다.
 # curl 호출 시 교착 상태를 예방하기 위해 연결 타임아웃 2초, 최대 응답 시간 5초를 명시합니다.
 while true; do

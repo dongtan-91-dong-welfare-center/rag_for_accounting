@@ -124,6 +124,8 @@ sudo setsebool -P httpd_can_network_connect 1
 `docker-compose.yml`에는 `app` 서비스가 `embedding`의 헬스체크 통과(`service_healthy`)를 대기하도록 정의되어 있으나, EPEL 8 저장소에 고정된 `podman-compose` 1.0.6은 `condition: service_healthy` 속성을 지원하지 않고 조용히 무시합니다.
 따라서 컨테이너 기동 후 TEI 서버의 웜업 완료(`http://localhost:8080/health` 200 OK)를 명시적으로 기다리는 절차가 필수적입니다.
 
+또한 `podman-compose` 1.0.6은 `CMD` 배열 형식의 헬스체크를 작은따옴표로 감싼 `CMD-SHELL` 문자열로 변환하므로, 인자에 작은따옴표가 있으면 셸 문법 오류로 상시 `unhealthy`가 됩니다. 따라서 `docker-compose.yml`의 헬스체크는 `CMD-SHELL` 형식으로 작성하고 작은따옴표를 사용하지 않습니다(#426).
+
 ---
 
 ## 6. 설치 및 자동 배포 실행
@@ -199,21 +201,59 @@ sudo dnf install -y nginx
 `/etc/nginx/conf.d/rag_accounting.conf` 파일을 생성하고 다음 설정을 반영합니다:
 
 ```nginx
+# 질의 관련 엔드포인트의 요청 빈도 제한 영역 (conf.d 파일은 http 컨텍스트에 포함됩니다)
+limit_req_zone $binary_remote_addr zone=query_zone:10m rate=10r/m;
+limit_req_status 429;
+
 server {
     listen 80;
-    server_name _;
+    server_name example.com;
 
     client_max_body_size 50M;
 
+    # 일반 요청: 기본 인증을 적용합니다.
     location / {
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd;
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+
+    # 질의 및 HIL 재개: 하나의 zone을 공유하여 합산 제한합니다.
+    location = /query {
+        limit_req zone=query_zone burst=5 nodelay;
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;
+    }
+
+    location = /resume {
+        limit_req zone=query_zone burst=5 nodelay;
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;
+    }
 }
 ```
+
+HTTPS(443)를 사용하는 경우 Certbot(`sudo certbot --nginx -d example.com`)으로 인증서를 발급하면 위 `server` 블록에 `listen 443 ssl` 및 인증서 경로가 자동으로 추가되며, `limit_req` 설정은 그대로 유지됩니다. `example.com`과 `.htpasswd` 경로는 예시 값이므로 실제 환경에 맞게 치환합니다.
+
+`근거:` 앞단 프록시 없이 nginx가 클라이언트 요청을 직접 수신하므로 `$binary_remote_addr`가 실제 클라이언트 IP입니다. 앞단에 별도 프록시나 로드밸런서를 두는 경우에는 `real_ip_header`와 `set_real_ip_from`을 먼저 설정해야 합니다.
+`근거:` `/resume`(HIL 재개)도 LLM을 호출하므로 `/query`와 같은 zone을 공유하여 합산 제한합니다. 한도를 초과한 요청은 `limit_req_status 429`에 따라 HTTP 429로 거절되며, 프론트엔드는 이 응답에 재시도 안내 문구를 표시합니다.
+`근거:` nginx는 `limit_req`를 `auth_basic`보다 먼저 평가하므로 인증 정보가 없는 요청도 한도에 계산됩니다. 따라서 인증 없이 `/query`와 `/resume`을 반복 호출하는 스캐너는 401이 아니라 429를 받으며, 한도 검증 시 `-u` 옵션 없이도 429 응답을 확인할 수 있습니다.
 
 설정 검증 및 서비스를 시작합니다:
 
@@ -229,6 +269,13 @@ sudo systemctl reload nginx
 # 80번 방화벽 개방
 sudo firewall-cmd --permanent --add-port=80/tcp
 sudo firewall-cmd --reload
+```
+
+제한 동작을 확인하려면 한도를 넘겨 연속 호출하여 HTTP 429가 반환되는지 점검합니다:
+
+```bash
+for i in $(seq 1 10); do curl -s -o /dev/null -w "%{http_code}
+" -u <사용자>:<비밀번호> -X POST http://example.com/query -H 'Content-Type: application/json' -d '{}'; done
 ```
 
 ### 8-2. 배포본 최신화 및 롤백 절차
@@ -249,7 +296,7 @@ git pull origin main
 ```
 
 - **가동 준비성(`/ready`) 폴링 검증 (#399)**:
-  `deploy.sh`는 단순 프로세스 생존(`/health`)이 아닌 데이터베이스 및 TEI 임베딩 연계 가동 상태를 포괄하는 `/ready` 엔드포인트를 대상으로 200 OK 응답이 반환될 때까지 주기적으로 폴링합니다. 기본 대기 시간은 120초(2초 간격)이며, `DEPLOY_READY_WAIT_SECONDS` 환경변수를 통해 조정할 수 있습니다. 제한 시간 내 준비되지 않을 경우 최근 50줄의 컨테이너 로그를 출력하고 즉시 실패(종료 코드 1)로 중단됩니다.
+  `deploy.sh`는 단순 프로세스 생존(`/health`)이 아닌 데이터베이스 및 TEI 임베딩 연계 가동 상태를 포괄하는 `/ready` 엔드포인트를 대상으로 200 OK 응답이 반환될 때까지 주기적으로 폴링합니다. 기본 대기 시간은 300초(2초 간격)이며, `DEPLOY_READY_WAIT_SECONDS` 환경변수를 통해 조정할 수 있습니다. 제한 시간 내 준비되지 않을 경우 최근 50줄의 컨테이너 로그를 출력하고 즉시 실패(종료 코드 1)로 중단됩니다.
 - **Podman 환경 컨테이너 격리 보장 (#399)**:
   `podman-compose` 1.0.6 환경에서 `--force-recreate` 사용 시 `--no-deps`가 무시되어 DB 및 임베딩 컨테이너까지 재생성되는 문제를 원천 차단하기 위해, `deploy.sh`는 기동 직전 기존 `accounting_app` 컨테이너만 명시적으로 중지(`stop`) 및 제거(`rm`)한 후 `up -d --no-deps app`을 실행합니다. 이를 통해 수 분이 소요되는 TEI 재웜업 없이 `app` 컨테이너만 단독 교체됩니다. 대상 컨테이너명은 `APP_CONTAINER` 환경변수를 통해 커스텀 지정할 수 있습니다.
 - **`check.sh` 준비 상태 엄격 검증 (#399)**:
@@ -300,7 +347,7 @@ git checkout <PREVIOUS_STABLE_TAG_OR_COMMIT>
 [주요 설계 결정 및 기술적 배경]
 - **시크릿 사전 검증**: 러너 단계에서 `DEPLOY_PATH` 공백/누락을 선제 차단하여, 불필요한 SSH 연결 시도 및 잘못된 원격 경로 조작을 방지합니다.
 - **체크아웃 무결성 보호**: 원격 서버 내 미커밋 변경 사항(`git status --porcelain`)을 사전 검사하여 운영 중 수동 작업 파일의 덮어쓰기 손실을 예방합니다.
-- **앱 단독 격리 교체 (`deploy.sh`)**: `podman-compose`의 의존 컨테이너 동시 재생성 결함을 차단하기 위해 `accounting_app`만 단독 중지/삭제함으로써 TEI 임베딩 모델의 14분 웜업 지연을 방지하고, `/ready` 200 OK를 최대 120초간 폴링 대기합니다.
+- **앱 단독 격리 교체 (`deploy.sh`)**: `podman-compose`의 의존 컨테이너 동시 재생성 결함을 차단하기 위해 `accounting_app`만 단독 중지/삭제함으로써 TEI 임베딩 모델의 14분 웜업 지연을 방지하고, `/ready` 200 OK를 최대 300초간 폴링 대기합니다.
 - **엄격한 준비성 판정 (`check.sh`)**: 기존 경고(`warn`) 처리로 인해 서비스 미가동 상태에서 배포가 성공하던 문제를 방지하고자, `/ready` 실패 시 치명적 오류(`fail`)와 함께 비정상 종료(`exit 1`)합니다.
 - **원자적 자동 롤백**: 소스 반영(`git reset`), 배포(`deploy.sh`), 점검(`check.sh`) 중 어느 단계라도 실패하면 소스 갱신 직전 보관한 정상 커밋(`$PREV_COMMIT`)으로 즉시 복귀(`git reset --hard "$PREV_COMMIT" && ./deploy.sh`)하여 가용성을 보장하며, 워크플로는 최종 실패(`exit 1`)로 종료됩니다.
 
@@ -335,7 +382,7 @@ flowchart TD
 1. **러너 단계 시크릿 선제 검증**: 원격 접속 시도 전 GitHub Actions 러너 단계에서 `DEPLOY_PATH`가 비어 있거나 공백 문자만으로 구성되었는지 검사하여, 누락 시 원격 SSH 연결을 시도하지 않고 즉시 비정상 종료(`exit 1`)합니다.
 2. **원격 테일넷 연결 및 디렉터리 검증**: Tailscale ACL 규칙(`tag:ci` → `tag:server`, `root` accept)에 따라 원격 서버에 무인 SSH로 접속하며, 지정된 배포 경로 디렉터리의 실제 존재 여부를 검사합니다.
 3. **추적 파일 변경 검사 및 직전 커밋 보관**: `git status --porcelain --untracked-files=no`로 로컬 수정을 검사하여 작업 손실을 예방하며, 최신 소스 갱신 직전 현재 정상 커밋 해시(`PREV_COMMIT=$(git rev-parse HEAD)`)를 안전하게 기록합니다.
-4. **최신 소스 동기화 및 증분 배포**: `git fetch origin main && git reset --hard origin/main`으로 최신 소스를 반영한 후 `./deploy.sh`를 실행합니다. Podman 환경에서는 `accounting_app`만 단독 중지 및 제거되어 의존 컨테이너 재생성을 방지하며, `/ready` 200 OK를 최대 120초간 대기합니다.
+4. **최신 소스 동기화 및 증분 배포**: `git fetch origin main && git reset --hard origin/main`으로 최신 소스를 반영한 후 `./deploy.sh`를 실행합니다. Podman 환경에서는 `accounting_app`만 단독 중지 및 제거되어 의존 컨테이너 재생성을 방지하며, `/ready` 200 OK를 최대 300초간 대기합니다.
 5. **엄격한 헬스체크 및 무결성 검증**: `./check.sh`를 실행하여 모든 엔드포인트와 컨테이너가 정상 준비(`ready`) 상태인지 검증합니다.
 6. **장애 발생 시 자동 롤백 분기 (#397)**: 소스 반영(`git reset`), 배포(`deploy.sh`), 또는 점검(`check.sh`) 중 어느 한 단계라도 실패할 경우, 직전 커밋으로의 자동 롤백(`git reset --hard "$PREV_COMMIT" && ./deploy.sh`)을 즉각 수행합니다. 롤백 완료 여부와 관계없이 워크플로는 배포 실패 상태(`exit 1`)를 명확히 보고합니다.
 

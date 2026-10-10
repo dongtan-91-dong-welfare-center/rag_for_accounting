@@ -454,6 +454,26 @@ class TestSearcherExceptions:
 
         assert "응답 시간 초과" in str(exc_info.value)  # SE-101
 
+    def test_search_logs_elapsed_time_on_timeout(self, mock_db_pool):
+        """타임아웃 로그에 검색 유형과 경과 시간이 포함되는지 검증한다(#429)."""
+        mock_db_pool.execute.side_effect = errors.QueryCanceled("canceling statement due to statement timeout")
+
+        with patch("src.retrieval.searcher.logger") as mock_logger, pytest.raises(SearchTimeoutError):
+            dense_search([0.1] * EMBEDDING_DIM, top_k=5)
+
+        message = mock_logger.error.call_args.args[0]
+        assert "Dense" in message and "경과" in message
+
+    def test_search_logs_elapsed_time_on_success(self, mock_db_pool):
+        """성공한 쿼리도 건수와 소요 시간을 info로 기록하는지 검증한다(#429)."""
+        mock_db_pool.fetchall.return_value = []
+
+        with patch("src.retrieval.searcher.logger") as mock_logger:
+            dense_search([0.1] * EMBEDDING_DIM, top_k=5)
+
+        messages = [c.args[0] for c in mock_logger.info.call_args_list]
+        assert any("Dense 검색 완료" in m and "0건" in m for m in messages)
+
     def test_db_error_raises_SE102(self, mock_db_pool):
         """기타 쿼리 실패 시 DatabaseQueryError(SE-102) 발생 검증"""
         mock_db_pool.execute.side_effect = Exception("DB 에러")
