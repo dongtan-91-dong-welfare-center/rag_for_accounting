@@ -37,7 +37,13 @@ from src.db.answer_feedback import ensure_answer_feedback_table, save_feedback
 from src.db.connection import close_checkpointer_pool, close_pool, get_pool, init_pool
 from src.db.interaction_log import ensure_interaction_log_table, log_interaction
 from src.ingest.parse.page_map import resolve_pdf_path
-from src.utils.config import API_CORS_ORIGINS, EMBEDDING_SERVER_URL, PDF_DIR, READINESS_PROBE_TIMEOUT_SECONDS
+from src.utils.config import (
+    API_CORS_ORIGINS,
+    EMBEDDING_SERVER_URL,
+    MAX_FEEDBACK_LENGTH,
+    PDF_DIR,
+    READINESS_PROBE_TIMEOUT_SECONDS,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -150,7 +156,7 @@ class ResumeRequest(BaseModel):
 
     thread_id: str
     action: Literal["approve", "rewrite"]
-    feedback: str | None = None
+    feedback: str | None = Field(default=None, max_length=MAX_FEEDBACK_LENGTH)
 
 
 class FeedbackRequest(BaseModel):

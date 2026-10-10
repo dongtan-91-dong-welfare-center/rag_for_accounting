@@ -202,6 +202,20 @@ class TestResume:
         assert r.json()["status"] == "interrupted"
         assert captured["args"] == ("t9", {"action": "rewrite", "feedback": "리스 회계처리를 강조해줘"})
 
+    def test_resume_feedback_over_limit_is_422(self, client):
+        """MAX_FEEDBACK_LENGTH를 초과하는 피드백은 422 Unprocessable Entity로 거절한다 (#447)."""
+        from src.utils.config import MAX_FEEDBACK_LENGTH
+
+        r = client.post(
+            "/resume",
+            json={
+                "thread_id": "t-len",
+                "action": "rewrite",
+                "feedback": "가" * (MAX_FEEDBACK_LENGTH + 1),
+            },
+        )
+        assert r.status_code == 422
+
     def test_unknown_thread_id_is_404(self, client, monkeypatch):
         """미존재 thread_id는 재개 전에 404 — resume_workflow는 호출되지 않는다."""
         monkeypatch.setattr("src.api.server.thread_exists", lambda tid: False)
