@@ -32,6 +32,7 @@ import psycopg
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.workflow import resume_workflow, run_workflow, thread_exists
+from src.api.middleware import SecurityHeadersMiddleware
 from src.api.schemas import FeedbackResponse, QueryDoneResponse, WorkflowResponse, to_api_response
 from src.db.answer_feedback import ensure_answer_feedback_table, save_feedback
 from src.db.connection import close_checkpointer_pool, close_pool, get_pool, init_pool
@@ -119,6 +120,7 @@ def _record_interaction(
 
 
 app = FastAPI(title="회계 기준서 RAG API", lifespan=lifespan)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=API_CORS_ORIGINS,
