@@ -188,3 +188,4 @@ HIL 체크포인터는 PostgreSQL 기반 `PostgresSaver`다(#209). 따라서 Fas
 |---|---|
 | 2026-03-21 | Apache AGE/EdgeQuake/GraphRAG 전제 초기 설계 작성 |
 | 2026-07-17 | 2026-07-11 회의록과 현행 코드 기준으로 pgvector + BM25-style sparse + LangGraph 아키텍처 문서로 재작성 |
+| 2026-10-10 | 기각된 딥에이전트 실험(#405)의 시나리오 2·3 벤치마크 스크립트를 삭제하고, 재현 정보를 `docs/benchmark/scenario2_turns_3_report.md`와 `docs/benchmark/scenario3_ensemble_report_turns_3.md`에 기재 |
