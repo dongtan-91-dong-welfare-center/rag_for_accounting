@@ -408,3 +408,30 @@ class TestFeedback:
         monkeypatch.setattr("src.api.server.save_feedback", boom)
         r = client.post("/feedback", json={"thread_id": "t1", "rating": "up"})
         assert r.status_code == 503
+
+
+class TestSecurityHeaders:
+    """HTTP 보안 헤더 검증 (#449)."""
+
+    def test_security_headers_present_on_health(self, client):
+        r = client.get("/health")
+        assert r.status_code == 200
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["x-frame-options"] == "SAMEORIGIN"
+        assert r.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+        csp = r.headers["content-security-policy"]
+        assert "default-src 'self'" in csp
+        assert "frame-ancestors 'self'" in csp
+        assert "https://fonts.googleapis.com" in csp
+        assert "https://fonts.gstatic.com" in csp
+
+    def test_security_headers_present_on_pdf_serving(self, client, monkeypatch, tmp_path):
+        (tmp_path / "gaap-ch10.pdf").write_bytes(b"%PDF-1.4 test")
+        monkeypatch.setattr("src.api.server.PDF_DIR", str(tmp_path))
+        r = client.get("/documents/gaap-ch10/pdf")
+        assert r.status_code == 200
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["x-frame-options"] == "SAMEORIGIN"
+        assert "frame-ancestors 'self'" in r.headers["content-security-policy"]
+        assert r.headers["content-disposition"].startswith("inline")
+

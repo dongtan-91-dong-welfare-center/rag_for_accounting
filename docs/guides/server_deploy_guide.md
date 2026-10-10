@@ -211,6 +211,12 @@ server {
 
     client_max_body_size 50M;
 
+    # 기본 보안 헤더: 리버스 프록시 계층에서 일괄 적용합니다.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'self'; frame-src 'self'; object-src 'self';" always;
+
     # 일반 요청: 기본 인증을 적용합니다.
     location / {
         auth_basic "Restricted";
@@ -250,6 +256,12 @@ server {
 ```
 
 HTTPS(443)를 사용하는 경우 Certbot(`sudo certbot --nginx -d example.com`)으로 인증서를 발급하면 위 `server` 블록에 `listen 443 ssl` 및 인증서 경로가 자동으로 추가되며, `limit_req` 설정은 그대로 유지됩니다. `example.com`과 `.htpasswd` 경로는 예시 값이므로 실제 환경에 맞게 치환합니다.
+
+HTTPS 환경에서는 다운그레이드 공격 방지를 위해 SSL `server` 블록 내부에 다음 HSTS 헤더 설정을 추가합니다:
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+```
+`근거:` 로컬 개발 환경(`http://localhost:8000`)에서 HSTS를 수신하면 브라우저 내부 캐싱으로 인해 강제 HTTPS 리다이렉트가 발생하여 접속이 불가능해집니다. 따라서 애플리케이션 미들웨어가 아닌 실제 SSL 종단점인 Nginx의 HTTPS 설정에만 명시합니다.
 
 `근거:` 앞단 프록시 없이 nginx가 클라이언트 요청을 직접 수신하므로 `$binary_remote_addr`가 실제 클라이언트 IP입니다. 앞단에 별도 프록시나 로드밸런서를 두는 경우에는 `real_ip_header`와 `set_real_ip_from`을 먼저 설정해야 합니다.
 `근거:` `/resume`(HIL 재개)도 LLM을 호출하므로 `/query`와 같은 zone을 공유하여 합산 제한합니다. 한도를 초과한 요청은 `limit_req_status 429`에 따라 HTTP 429로 거절되며, 프론트엔드는 이 응답에 재시도 안내 문구를 표시합니다.
